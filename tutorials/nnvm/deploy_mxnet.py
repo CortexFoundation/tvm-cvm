@@ -120,10 +120,10 @@ with open(synset_name) as f:
 
 # We support MXNet static graph(symbol) and HybridBlock in mxnet.gluon
 net, params = nnvm.frontend.from_mxnet(block)
-print(net.attr())
+#print(net.to_json())
 # we want a probability so add a softmax operator
 net = nnvm.sym.softmax(net)
-print(net.attr())
+#net = nnvm.sym.round(net)
 
 ######################################################################
 # Here are some basic data workload configurations.
@@ -131,6 +131,7 @@ batch_size = 1
 num_classes = 1000
 image_shape = (3, 224, 224)
 data_shape = (batch_size,) + image_shape
+print(data_shape)
 out_shape = (batch_size, num_classes)
 
 ######################################################################

@@ -29,8 +29,10 @@ import numpy as np
 from mxnet.gluon.model_zoo.vision import get_model
 from mxnet.gluon.utils import download
 from PIL import Image
-from matplotlib import pyplot as plt
+#from matplotlib import pyplot as plt
 block = get_model('resnet18_v1', pretrained=True)
+print ('block', block)
+
 img_name = 'cat.jpg'
 synset_url = ''.join(['https://gist.githubusercontent.com/zhreshold/',
                       '4d0b62f3d01426887599d4f7ede23ee5/raw/',
@@ -42,8 +44,8 @@ download(synset_url, synset_name)
 with open(synset_name) as f:
     synset = eval(f.read())
 image = Image.open(img_name).resize((224, 224))
-plt.imshow(image)
-plt.show()
+#plt.imshow(image)
+#plt.show()
 
 def transform_image(image):
     image = np.array(image) - np.array([123., 117., 104.])

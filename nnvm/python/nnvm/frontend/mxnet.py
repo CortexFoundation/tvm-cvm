@@ -273,6 +273,14 @@ def _lrn(inputs, attrs):
     new_attrs['size'] = _required_attr(attrs, 'nsize')
     return _get_nnvm_op(op_name)(*inputs, **new_attrs)
 
+def _equal(inputs, attrs):
+    op_name, new_attrs = "broadcast_equal", {}
+    return _get_nnvm_op(op_name)(*inputs, **new_attrs)
+
+def _elemwise_pow(inputs, _):
+    new_attrs = {'num_args':len(inputs)}
+    return _get_nnvm_op('elemwise_pow')(*inputs, **new_attrs)
+
 _identity_list = ['__add_scalar__', '__add_symbol__', '__div_scalar__',
                   '__div_symbol__', '__mul_scalar__', '__mul_symbol__',
                   '__pow_scalar__', '__rdiv_scalar__', '__rpow_scalar__',
@@ -282,7 +290,8 @@ _identity_list = ['__add_scalar__', '__add_symbol__', '__div_scalar__',
                   'elemwise_div', 'elemwise_mul', 'elemwise_sub', 'exp',
                   'flatten', 'log', 'log_softmax', 'max', 'min', 'negative',
                   'relu', 'sigmoid', 'slice_like', 'softmax', 'sum', 'tanh',
-                  'transpose']
+                  'transpose',
+                  'abs', 'log2', 'ceil', 'where', 'round'] # added
 
 _convert_map = {
     '_copy'         : _rename('copy'),
@@ -324,7 +333,9 @@ _convert_map = {
     'UpSampling'    : _upsampling,
     'clip'          : _clip,
     'expand_dims'   : _expand_dims,
-    'LRN'           : _lrn
+    'LRN'           : _lrn,
+    '_equal'        : _equal,
+    '_power'        : _elemwise_pow,
 }
 
 def _convert_symbol(op_name, inputs, attrs,
@@ -356,6 +367,7 @@ def _convert_symbol(op_name, inputs, attrs,
     """
     identity_list = identity_list if identity_list else _identity_list
     convert_map = convert_map if convert_map else _convert_map
+    #print (_convert_map)
     if op_name in identity_list:
         op = _get_nnvm_op(op_name)
         sym = op(*inputs, **attrs)
