@@ -1,6 +1,6 @@
 # -*- coding:utf-8 -*-
 from layers import IntDense, IntConv
-from CVMSymbol import *
+from CVMSymbol2 import *
 # from mxboard import SummaryWriter
 import mxnet as mx
 import numpy as np
@@ -63,7 +63,25 @@ if __name__ == '__main__':
         x = mx.sym.FullyConnected(data=x, num_hidden=10, name='fc2')
         lenet= mx.sym.SoftmaxOutput(data=x, name='softmax')
     else:
-        sb = mx.sym.Variable('sb0', init=mx.init.Constant(8))
+        counter = 0
+        sb = mx.sym.Variable('sb'+str(counter), init=mx.init.Constant(8))
+        def CVMDense(data, sb, num_hidden=64):
+            global counter
+            weight_bits = mx.sym.Variable('sb'+str(counter+1), init=mx.init.Constant(8))
+            bias_bits = mx.sym.Variable('sb'+str(counter+2), init=mx.init.Constant(8))
+            counter += 2
+            out, sb = mx.sym.Custom(data=data, data_bits=sb, weight_bits=weight_bits, bias_bits=bias_bits, op_type='cvm.dense', num_hidden=num_hidden)
+            return out, sb
+
+        # x = mx.sym.Flatten(data=data, name='flatten')
+        # x, sb = CVMDense(x, sb, 64)
+        # x = mx.symbol.Activation(data=x, act_type="relu")
+        # x, sb = CVMDense(x, sb, 32)
+        # x = mx.symbol.Activation(data=x, act_type="relu")
+        # x, sb = CVMDense(x, sb, 10)
+        # x = mx.sym.broadcast_div(x, mx.sym.pow(2, sb))
+        # lenet = mx.sym.SoftmaxOutput(data=x, name='softmax')
+
         x = mx.sym.Flatten(data=data, name='flatten')
         x, sb = mx.symbol.Custom(data=x, sbits=sb, op_type='cvm.dense', num_hidden=64,)
         x = mx.symbol.Activation(data=x, act_type="relu")
