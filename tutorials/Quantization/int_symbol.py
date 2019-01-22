@@ -1,5 +1,6 @@
 # -*- coding:utf-8 -*-
 from layers import IntDense, IntConv
+from CVMSymbol import *
 # from mxboard import SummaryWriter
 import mxnet as mx
 import numpy as np
@@ -269,7 +270,7 @@ if __name__ == '__main__':
                 lenet = mx.sym.SoftmaxOutput(data=x, name='softmax')
 
         if args.is_train:
-            mod = mx.mod.Module(lenet, context=mx.gpu())
+            mod = mx.mod.Module(lenet, context=mx.gpu(1))
             # mod.bind(data_shapes=val_iter.provide_data, label_shapes=val_iter.provide_label)
             mod.fit(train_data=train_iter,
                     eval_data=val_iter,
@@ -281,7 +282,7 @@ if __name__ == '__main__':
             mod.save_checkpoint('int_dense_conv_mnist_7bit', 20)
         elif args.is_quant_train:
             # print (lenet.tojson())
-            mod = mx.mod.Module(lenet, data_names = ['data'], label_names = ['softmax_label'], context=mx.gpu())
+            mod = mx.mod.Module(lenet, data_names = ['data'], label_names = ['softmax_label'], context=mx.gpu(1))
             mod.fit(train_data=train_iter,
                     eval_data=val_iter,
                     optimizer='adam',
@@ -294,7 +295,7 @@ if __name__ == '__main__':
         else:
             # arg_params, aux_params = load_checkpoint('mnist', 20)
             arg_params, aux_params = load_checkpoint('int_dense_conv_mnist_7bit_test', 1)
-            mod = mx.mod.Module(lenet, context=mx.gpu())
+            mod = mx.mod.Module(lenet, context=mx.gpu(1))
             mod.bind(data_shapes=val_iter.provide_data, label_shapes=val_iter.provide_label)
             mod.set_params(arg_params, aux_params, allow_missing=True, force_init=True, allow_extra=True)
             print (lenet.tojson())
