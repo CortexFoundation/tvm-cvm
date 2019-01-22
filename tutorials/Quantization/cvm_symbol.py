@@ -91,7 +91,7 @@ if __name__ == '__main__':
                     eval_data=val_iter,
                     optimizer='adam',
                     optimizer_params={'learning_rate':1e-3 , },
-                    num_epoch=10,
+                    num_epoch=5,
                     eval_metric='acc',
                     initializer=mx.init.Mixed(['.*shift_bit', '.*'], [mx.init.Constant(7), mx.init.Uniform(0.1)]),
                     batch_end_callback=mx.callback.Speedometer(batch_size, 100))

@@ -44,6 +44,8 @@ class CVMDense(mx.operator.CustomOp):
 
         self.assign(out_data[0], req[0], y)
         self.assign(out_data[1], req[1], y_sb)
+        #if not is_train:
+        #    print (is_train)
 
     def backward(self, req, out_grad, in_data, out_data, in_grad, aux):
         dy = out_grad[0]
@@ -93,5 +95,23 @@ class CVMDenseProp(mx.operator.CustomOpProp):
     def create_operator(self, ctx, in_shapes, in_dtypes):
         #  create and return the CustomOp class.
         return CVMDense(self.num_hidden)
+def test_autograd():
+    a = nd.ones((1, 1)) * 0.05
+    b = nd.ones((1, 1))
+    q_a = (a * 256).floor()
+    q_b = (b * 256).floor()
+    a.attach_grad(), b.attach_grad()
+    c = a * b
+    c.attach_grad()
+    with autograd.record():
+        loss = (1 - c) ** 2 / 2
+    q_c = q_a * q_b / 256 / 256
+    q_loss = (1 - q_c) ** 2 / 2
+
+    da, db, dc = autograd.grad(loss, [a, b, c], 1 - q_loss, retain_graph=True)
+    # print (loss, a, b, c, '|', 'ag', a.grad, 'bg', b.grad, 'cg', c.grad, 'lossg', loss.grad)
+
+
 if __name__ == "__main__":
-    print (quantize_to(mx.nd.array([0.001, 0.001, -0.001, 0]), 16))
+    test_autograd()
+    # print (quantize_to(mx.nd.array([0.001, 0.001, -0.001, 0]), 16))
