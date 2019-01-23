@@ -64,7 +64,7 @@ if __name__ == '__main__':
         lenet= mx.sym.SoftmaxOutput(data=x, name='softmax')
     else:
         counter = 0
-        sb = mx.sym.Variable('sb'+str(counter), init=mx.init.Constant(8))
+        sb = mx.sym.Variable('sb'+str(counter), init=mx.init.Constant(0))
         def CVMDense(data, sb, num_hidden=64):
             global counter
             weight_bits = mx.sym.Variable('sb'+str(counter+1), init=mx.init.Constant(8))
@@ -111,7 +111,7 @@ if __name__ == '__main__':
                 optimizer_params={'learning_rate':1e-3 , },
                 num_epoch=5,
                 eval_metric='acc',
-                initializer=mx.init.Mixed(['.*shift_bit', '.*'], [mx.init.Constant(7), mx.init.Uniform(0.1)]),
+                initializer=mx.init.Mixed(['.*shift_bit', '.*'], [mx.init.Constant(7), mx.init.Uniform(0.01)]),
                 batch_end_callback=mx.callback.Speedometer(batch_size, 100))
         mod.save_checkpoint('int_dense_conv_mnist_7bit_test', 1)
     else:
