@@ -7,6 +7,7 @@ import numpy as np
 import logging
 from mxnet import nd
 from mxnet import autograd
+import tvm
 import shutil
 
 logging.getLogger().setLevel(logging.DEBUG)
@@ -82,14 +83,32 @@ if __name__ == '__main__':
         # x = mx.sym.broadcast_div(x, mx.sym.pow(2, sb))
         # lenet = mx.sym.SoftmaxOutput(data=x, name='softmax')
 
+        def CVMDense1(x, sb, num_hidden=64):
+            global counter
+            w_int = mx.sym.Variable('wint'+str(counter), init=mx.init.Uniform(0.01))
+            w_sb = mx.sym.Variable('wsb'+str(counter), init=mx.init.Uniform(0.01))
+            b_int = mx.sym.Variable('bint'+str(counter), init=mx.init.Uniform(0.01))
+            counter += 1
+            x, sb = mx.symbol.Custom(data=x, sbits=sb, weight_int=w_int, weight_sb=w_sb, bias_int=b_int, op_type='cvm.dense', num_hidden=num_hidden,)
+            return x, sb
+
         x = mx.sym.Flatten(data=data, name='flatten')
-        x, sb = mx.symbol.Custom(data=x, sbits=sb, op_type='cvm.dense', num_hidden=64,)
+        x, sb = CVMDense1(x, sb, 64)
         x = mx.symbol.Activation(data=x, act_type="relu")
-        x, sb = mx.symbol.Custom(data=x, sbits=sb, op_type='cvm.dense', num_hidden=32,)
-        x = mx.symbol.Activation(data=x, act_type="relu")
-        x, sb = mx.symbol.Custom(data=x, sbits=sb, op_type='cvm.dense', num_hidden=10,)
+        x, sb = CVMDense1(x, sb, 32)
+        #  x = mx.symbol.Activation(data=x, act_type="relu")
+        #  x, sb = CVMDense1(x, sb, 10)
         x = mx.sym.broadcast_div(x, mx.sym.pow(2, sb))
         lenet = mx.sym.SoftmaxOutput(data=x, name='softmax')
+
+        #  x = mx.sym.Flatten(data=data, name='flatten')
+        #  x, sb = mx.symbol.Custom(data=x, sbits=sb, op_type='cvm.dense', num_hidden=64,)
+        #  x = mx.symbol.Activation(data=x, act_type="relu")
+        #  x, sb = mx.symbol.Custom(data=x, sbits=sb, op_type='cvm.dense', num_hidden=32,)
+        #  x = mx.symbol.Activation(data=x, act_type="relu")
+        #  x, sb = mx.symbol.Custom(data=x, sbits=sb, op_type='cvm.dense', num_hidden=10,)
+        #  x = mx.sym.broadcast_div(x, mx.sym.pow(2, sb))
+        #  lenet = mx.sym.SoftmaxOutput(data=x, name='softmax')
 
     if args.is_train:
         mod = mx.mod.Module(lenet, context=mx.gpu(1))
@@ -111,7 +130,8 @@ if __name__ == '__main__':
                 optimizer_params={'learning_rate':1e-3 , },
                 num_epoch=5,
                 eval_metric='acc',
-                initializer=mx.init.Mixed(['.*shift_bit', '.*'], [mx.init.Constant(7), mx.init.Uniform(0.01)]),
+                initializer=mx.init.Uniform(0.01),
+                #  initializer=mx.init.Mixed(['.*shift_bit', '.*'], [mx.init.Constant(7), mx.init.Uniform(0.01)]),
                 batch_end_callback=mx.callback.Speedometer(batch_size, 100))
         mod.save_checkpoint('int_dense_conv_mnist_7bit_test', 1)
     else:
