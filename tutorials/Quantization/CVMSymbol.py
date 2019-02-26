@@ -48,9 +48,9 @@ class CVMDense(mx.operator.CustomOp):
         #    print (is_train)
 
     def backward(self, req, out_grad, in_data, out_data, in_grad, aux):
-        dy = out_grad[0]
+        dy = out_grad[0] * 2 ** out_data[1]
+        x = in_data[0] / 2 ** in_data[3]
 
-        x = in_data[0]
         w = in_data[1]
         b = in_data[2]
         y = out_data[0]

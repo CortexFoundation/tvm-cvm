@@ -1,6 +1,7 @@
 # -*- coding:utf-8 -*-
 from layers import IntDense, IntConv
-from CVMSymbol2 import *
+from CVMSymbol import *
+from CVMQuantization import *
 # from mxboard import SummaryWriter
 import mxnet as mx
 import numpy as np
@@ -64,43 +65,7 @@ if __name__ == '__main__':
         x = mx.sym.FullyConnected(data=x, num_hidden=10, name='fc2')
         lenet= mx.sym.SoftmaxOutput(data=x, name='softmax')
     else:
-        counter = 0
-        sb = mx.sym.Variable('sb'+str(counter), init=mx.init.Constant(0))
-        def CVMDense(data, sb, num_hidden=64):
-            global counter
-            weight_bits = mx.sym.Variable('sb'+str(counter+1), init=mx.init.Constant(8))
-            bias_bits = mx.sym.Variable('sb'+str(counter+2), init=mx.init.Constant(8))
-            counter += 2
-            out, sb = mx.sym.Custom(data=data, data_bits=sb, weight_bits=weight_bits, bias_bits=bias_bits, op_type='cvm.dense', num_hidden=num_hidden)
-            return out, sb
-
-        # x = mx.sym.Flatten(data=data, name='flatten')
-        # x, sb = CVMDense(x, sb, 64)
-        # x = mx.symbol.Activation(data=x, act_type="relu")
-        # x, sb = CVMDense(x, sb, 32)
-        # x = mx.symbol.Activation(data=x, act_type="relu")
-        # x, sb = CVMDense(x, sb, 10)
-        # x = mx.sym.broadcast_div(x, mx.sym.pow(2, sb))
-        # lenet = mx.sym.SoftmaxOutput(data=x, name='softmax')
-
-        def CVMDense1(x, sb, num_hidden=64):
-            global counter
-            w_int = mx.sym.Variable('wint'+str(counter), init=mx.init.Uniform(0.01))
-            w_sb = mx.sym.Variable('wsb'+str(counter), init=mx.init.Uniform(0.01))
-            b_int = mx.sym.Variable('bint'+str(counter), init=mx.init.Uniform(0.01))
-            counter += 1
-            x, sb = mx.symbol.Custom(data=x, sbits=sb, weight_int=w_int, weight_sb=w_sb, bias_int=b_int, op_type='cvm.dense', num_hidden=num_hidden,)
-            return x, sb
-
-        x = mx.sym.Flatten(data=data, name='flatten')
-        x, sb = CVMDense1(x, sb, 64)
-        x = mx.symbol.Activation(data=x, act_type="relu")
-        x, sb = CVMDense1(x, sb, 32)
-        #  x = mx.symbol.Activation(data=x, act_type="relu")
-        #  x, sb = CVMDense1(x, sb, 10)
-        x = mx.sym.broadcast_div(x, mx.sym.pow(2, sb))
-        lenet = mx.sym.SoftmaxOutput(data=x, name='softmax')
-
+        sb = mx.sym.Variable('sb0', init=mx.init.Constant(0))
         #  x = mx.sym.Flatten(data=data, name='flatten')
         #  x, sb = mx.symbol.Custom(data=x, sbits=sb, op_type='cvm.dense', num_hidden=64,)
         #  x = mx.symbol.Activation(data=x, act_type="relu")
@@ -109,6 +74,24 @@ if __name__ == '__main__':
         #  x, sb = mx.symbol.Custom(data=x, sbits=sb, op_type='cvm.dense', num_hidden=10,)
         #  x = mx.sym.broadcast_div(x, mx.sym.pow(2, sb))
         #  lenet = mx.sym.SoftmaxOutput(data=x, name='softmax')
+
+
+        x, sb = mx.symbol.Custom(data=data, sbits=sb, name='conv1', op_type='cvm.conv',
+                                    num_filter=32, kernel=(3, 3),
+                                    pad=(1, 1), stride=(1, 1), no_bias=True,)
+        x = mx.symbol.Activation(data=x, name='relu1', act_type="relu")
+        #  x = mx.sym.Pooling(data=x, pool_type="max", kernel=(2,2), stride=(2,2), name='pool1')
+        #  x, sb = mx.symbol.Custom(data=x, sbits=sb, name='conv2', op_type='cvm.conv',
+                                    #  num_filter=64, kernel=(5, 5),
+                                    #  stride=(1, 1), pad=(2, 2), no_bias=True,)
+        #  x = mx.sym.Activation(data=x, act_type="relu", name='relu2')
+        #  x = mx.sym.Pooling(data=x, pool_type="max", kernel=(2,2), stride=(2,2), name='pool2')
+        x = mx.sym.Flatten(data=x, name='flatten')
+        #  x, sb = mx.symbol.Custom(data=x, sbits=sb, op_type='cvm.dense', num_hidden=512)
+        #  x = mx.sym.Activation(data=x, act_type="relu", name='relu3')
+        x, sb = mx.symbol.Custom(data=x, sbits=sb, op_type='cvm.dense', num_hidden=10)
+        x = mx.sym.broadcast_div(x, mx.sym.pow(2, sb))
+        lenet = mx.sym.SoftmaxOutput(data=x, name='softmax')
 
     if args.is_train:
         mod = mx.mod.Module(lenet, context=mx.gpu(1))
