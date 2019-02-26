@@ -79,11 +79,13 @@ class Target(NodeBase):
     - :any:`tvm.target.mali` create Mali target
     - :any:`tvm.target.intel_graphics` create Intel Graphics target
     """
-    def __init__(self, handle):
-        super(Target, self).__init__(handle)
-        self._keys = None
-        self._options = None
-        self._libs = None
+    def __new__(cls):
+        # Always override new to enable class
+        obj = NodeBase.__new__(cls)
+        obj._keys = None
+        obj._options = None
+        obj._libs = None
+        return obj
 
     @property
     def keys(self):
@@ -102,6 +104,13 @@ class Target(NodeBase):
         if not self._libs:
             self._libs = [l.value for l in self.libs_array]
         return self._libs
+
+    @property
+    def model(self):
+        for opt in self.options_array:
+            if opt.value.startswith('-model='):
+                return opt.value[7:]
+        return 'unknown'
 
     def __enter__(self):
         _api_internal._EnterTargetScope(self)
@@ -263,6 +272,7 @@ def override_native_generic_func(func_name):
                     "Keyword arguments cannot be used when invoking generic_func %s" % func_name)
             return generic_func_node(*args)
         fresult = decorate(fdefault, dispatch_func)
+        fresult.fdefault = fdefault
         fresult.register = register
         return fresult
     return fdecorate
@@ -351,57 +361,65 @@ def generic_func(fdefault):
     return fdecorate
 
 
-def cuda(options=None):
+def cuda(model='unknown', options=None):
     """Returns a cuda target.
 
     Parameters
     ----------
+    model: str
+        The model of cuda device (e.g. 1080ti)
     options : str or list of str
         Additional options
     """
-    options = _merge_opts([], options)
-    return _api_internal._TargetCreate("cuda", *options)
+    opts = _merge_opts(['-model=%s' % model], options)
+    return _api_internal._TargetCreate("cuda", *opts)
 
 
-def rocm(options=None):
+def rocm(model='unknown', options=None):
     """Returns a ROCM target.
 
     Parameters
     ----------
+    model: str
+        The model of this device
     options : str or list of str
         Additional options
     """
-    options = _merge_opts([], options)
-    return _api_internal._TargetCreate("rocm", *options)
+    opts = _merge_opts(["-model=%s" % model], options)
+    return _api_internal._TargetCreate("rocm", *opts)
 
 
-def mali(options=None):
+def mali(model='unknown', options=None):
     """Returns a ARM Mali GPU target.
 
     Parameters
     ----------
+    model: str
+        The model of this device
     options : str or list of str
         Additional options
     """
-    opts = ["-device=mali"]
+    opts = ["-device=mali", '-model=%s' % model]
     opts = _merge_opts(opts, options)
     return _api_internal._TargetCreate("opencl", *opts)
 
 
-def intel_graphics(options=None):
+def intel_graphics(model='unknown', options=None):
     """Returns an Intel Graphics target.
 
     Parameters
     ----------
+    model: str
+        The model of this device
     options : str or list of str
         Additional options
     """
-    opts = ["-device=intel_graphics"]
+    opts = ["-device=intel_graphics", '-model=%s' % model]
     opts = _merge_opts(opts, options)
     return _api_internal._TargetCreate("opencl", *opts)
 
 
-def opengl(options=None):
+def opengl(model='unknown', options=None):
     """Returns a OpenGL target.
 
     Parameters
@@ -409,8 +427,8 @@ def opengl(options=None):
     options : str or list of str
         Additional options
     """
-    options = _merge_opts([], options)
-    return _api_internal._TargetCreate("opengl", *options)
+    opts = _merge_opts(["-model=%s" % model], options)
+    return _api_internal._TargetCreate("opengl", *opts)
 
 
 def arm_cpu(model='unknown', options=None):
@@ -424,22 +442,18 @@ def arm_cpu(model='unknown', options=None):
     options : str or list of str
         Additional options
     """
-    from . import autotvm
-
     trans_table = {
-        "pixel2":    ["-model=snapdragon835", "-target=arm64-linux-android"],
-        "mate10":    ["-model=kirin970", "-target=arm64-linux-android"],
-        "mate10pro": ["-model=kirin970", "-target=arm64-linux-android"],
-        "p20":       ["-model=kirin970", "-target=arm64-linux-android"],
-        "p20pro":    ["-model=kirin970", "-target=arm64-linux-android"],
-        "rasp3b":    ["-model=bcm2837", "-target=armv7l-linux-gnueabihf"],
-        "rk3399":    ["-model=rk3399", "-target=aarch64-linux-gnu"],
-        "pynq":      ["-model=pynq", "-target=armv7a-linux-eabi"],
+        "pixel2":    ["-model=snapdragon835", "-target=arm64-linux-android -mattr=+neon"],
+        "mate10":    ["-model=kirin970", "-target=arm64-linux-android -mattr=+neon"],
+        "mate10pro": ["-model=kirin970", "-target=arm64-linux-android -mattr=+neon"],
+        "p20":       ["-model=kirin970", "-target=arm64-linux-android -mattr=+neon"],
+        "p20pro":    ["-model=kirin970", "-target=arm64-linux-android -mattr=+neon"],
+        "rasp3b":    ["-model=bcm2837", "-target=armv7l-linux-gnueabihf -mattr=+neon"],
+        "rk3399":    ["-model=rk3399", "-target=aarch64-linux-gnu -mattr=+neon"],
+        "pynq":      ["-model=pynq", "-target=armv7a-linux-eabi -mattr=+neon"],
+        "ultra96":   ["-model=ultra96", "-target=aarch64-linux-gnu -mattr=+neon"],
     }
     pre_defined_opt = trans_table.get(model, ["-model=%s" % model])
-
-    # download pre-tuned parameters for arm_cpu if there is not any.
-    autotvm.tophub.check_package('arm_cpu')
 
     opts = ["-device=arm_cpu"] + pre_defined_opt
     opts = _merge_opts(opts, options)
@@ -496,5 +510,4 @@ def current_target(allow_none=True):
     ------
     ValueError if current target is not set.
     """
-    target_str = _api_internal._GetCurrentTarget(allow_none)
-    return create(target_str) if target_str is not None else None
+    return _api_internal._GetCurrentTarget(allow_none)

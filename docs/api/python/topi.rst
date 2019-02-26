@@ -30,6 +30,7 @@ List of operators
    topi.concatenate
    topi.split
    topi.take
+   topi.gather_nd
    topi.full
    topi.full_like
    topi.nn.relu
@@ -39,6 +40,7 @@ List of operators
    topi.nn.global_pool
    topi.nn.upsampling
    topi.nn.softmax
+   topi.nn.dense
    topi.nn.log_softmax
    topi.nn.conv2d_nchw
    topi.nn.conv2d_hwcn
@@ -49,6 +51,7 @@ List of operators
    topi.min
    topi.argmax
    topi.argmin
+   topi.prod
    topi.broadcast_to
    topi.add
    topi.subtract
@@ -102,11 +105,13 @@ topi
 .. autofunction:: topi.concatenate
 .. autofunction:: topi.split
 .. autofunction:: topi.take
+.. autofunction:: topi.gather_nd
 .. autofunction:: topi.full
 .. autofunction:: topi.full_like
 .. autofunction:: topi.max
 .. autofunction:: topi.sum
 .. autofunction:: topi.min
+.. autofunction:: topi.prod
 .. autofunction:: topi.broadcast_to
 .. autofunction:: topi.add
 .. autofunction:: topi.subtract
@@ -128,6 +133,7 @@ topi.nn
 .. autofunction:: topi.nn.global_pool
 .. autofunction:: topi.nn.upsampling
 .. autofunction:: topi.nn.softmax
+.. autofunction:: topi.nn.dense
 .. autofunction:: topi.nn.log_softmax
 .. autofunction:: topi.nn.conv2d_nchw
 .. autofunction:: topi.nn.conv2d_hwcn
@@ -138,6 +144,11 @@ topi.image
 ~~~~~~~~~~
 .. autofunction:: topi.image.resize
 
+topi.sparse
+~~~~~~~~~~~
+.. autofunction:: topi.sparse.csrmv
+.. autofunction:: topi.sparse.csrmm
+.. autofunction:: topi.sparse.dense
 
 topi.generic
 ~~~~~~~~~~~~

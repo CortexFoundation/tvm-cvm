@@ -3,7 +3,7 @@
  * \file intrin_rule_opencl.cc
  * \brief OpenCL intrinsic rules.
  */
-#include "./intrin_rule.h"
+#include "intrin_rule.h"
 
 namespace tvm {
 namespace codegen {
@@ -40,6 +40,9 @@ TVM_REGISTER_GLOBAL("tvm.intrin.rule.opencl.pow")
 .set_body(DispatchExtern<Direct>);
 
 TVM_REGISTER_GLOBAL("tvm.intrin.rule.opencl.popcount")
+.set_body(DispatchExtern<Direct>);
+
+TVM_REGISTER_GLOBAL("tvm.intrin.rule.opencl.fmod")
 .set_body(DispatchExtern<Direct>);
 
 // There is no warp shuffle instruction in standard OpenCL

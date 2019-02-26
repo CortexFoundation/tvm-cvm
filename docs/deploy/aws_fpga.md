@@ -55,7 +55,7 @@ b = tvm.nd.array(np.random.uniform(size=n).astype("float32"), ctx)
 c = tvm.nd.array(np.zeros(n, dtype="float32"), ctx)
 
 fadd(a, b, c)
-np.testing.assert_allclose(c.asnumpy(), a.asnumpy() + b.asnumpy())
+tvm.testing.assert_allclose(c.asnumpy(), a.asnumpy() + b.asnumpy())
 ```
 
 Setup
@@ -108,10 +108,10 @@ python run.py
 Synthesis
 ---------
 
-- Run synthesis with the following script. `XCL_EMULATION_MODE` must be set to 1 at this stage.
+- Run synthesis with the following script.
 
 ```bash
-export XCL_EMULATION_MODE=1
+unset XCL_EMULATION_MODE
 export XCL_TARGET=hw
 
 python build.py

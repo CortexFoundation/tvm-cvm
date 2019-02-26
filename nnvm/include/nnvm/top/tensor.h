@@ -16,7 +16,7 @@ namespace top {
 struct ConcatenateParam : public dmlc::Parameter<ConcatenateParam> {
   int axis;
   DMLC_DECLARE_PARAMETER(ConcatenateParam) {
-    DMLC_DECLARE_FIELD(axis).set_lower_bound(0).set_default(1)
+    DMLC_DECLARE_FIELD(axis).set_default(1)
     .describe("the axis to be concated.");
   }
 };
@@ -43,7 +43,7 @@ struct SplitParam : public dmlc::Parameter<SplitParam> {
   DMLC_DECLARE_PARAMETER(SplitParam) {
     DMLC_DECLARE_FIELD(indices_or_sections)
         .describe("Number of outputs to be splitted");
-    DMLC_DECLARE_FIELD(axis).set_lower_bound(0).set_default(1)
+    DMLC_DECLARE_FIELD(axis).set_default(1)
         .describe("the axis to be splitted.");
   }
 };
@@ -205,6 +205,7 @@ struct ReduceParam : public dmlc::Parameter<ReduceParam> {
   TShape axis;
   bool keepdims;
   bool exclude;
+  int dtype;
 
   DMLC_DECLARE_PARAMETER(ReduceParam) {
     DMLC_DECLARE_FIELD(axis).set_default(TShape())
@@ -226,6 +227,8 @@ struct ReduceParam : public dmlc::Parameter<ReduceParam> {
                 "in the result as dimension with size one.");
     DMLC_DECLARE_FIELD(exclude).set_default(false)
       .describe("Whether to perform reduction on axis that are NOT in axis instead.");
+    DMLC_DECLARE_DTYPE_FIELD(dtype).set_default(kInt32)
+      .describe("Target data type.");
   }
 };
 

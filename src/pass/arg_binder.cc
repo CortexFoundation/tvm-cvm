@@ -6,8 +6,8 @@
 #include <tvm/ir.h>
 #include <tvm/ir_pass.h>
 #include <tvm/runtime/device_api.h>
-#include "./ir_util.h"
-#include "./arg_binder.h"
+#include "ir_util.h"
+#include "arg_binder.h"
 #include "../arithmetic/compute_expr.h"
 
 namespace tvm {
@@ -91,7 +91,9 @@ void ArgBinder::BindBuffer(const Buffer& arg,
   // bind pointer and offset.
   if (is_zero(arg->elem_offset)) {
     CHECK(is_zero(value->elem_offset))
-        << "Trying to bind a Buffer with offset into one without offset";
+        << "Trying to bind a Buffer with offset into one without offset "
+        << " required elem_offset=" << arg->elem_offset
+        << ", provided elem_offset=" << value->elem_offset;
   }
 
   this->Bind(arg->data, value->data, arg_name + ".data");

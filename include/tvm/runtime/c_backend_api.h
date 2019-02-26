@@ -10,7 +10,7 @@
 #ifndef TVM_RUNTIME_C_BACKEND_API_H_
 #define TVM_RUNTIME_C_BACKEND_API_H_
 
-#include "./c_runtime_api.h"
+#include "c_runtime_api.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -118,7 +118,7 @@ TVM_DLL int TVMBackendParallelBarrier(int task_id, TVMParallelGroupEnv* penv);
 
 
 /*!
- * \brief Simple static initialization fucntion.
+ * \brief Simple static initialization function.
  *  Run f once and set handle to be not null.
  *  This function is mainly used for test purpose.
  *

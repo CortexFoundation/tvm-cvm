@@ -8,7 +8,7 @@
 #include <tvm/ir_visitor.h>
 #include <tvm/arithmetic.h>
 #include <limits>
-#include "./int_set_internal.h"
+#include "int_set_internal.h"
 
 namespace tvm {
 namespace arith {
@@ -159,7 +159,7 @@ IntSet EvalModular(const Expr& e,
     CHECK(m) << "Need to pass ModularSet for Modular Analysis";
     mmap[kv.first.get()] = m->e;
   }
-  std::shared_ptr<ModularSet> n = std::make_shared<ModularSet>();
+  NodePtr<ModularSet> n = make_node<ModularSet>();
   n->e = ModularEvaluator(mmap)(e);
   return IntSet(n);
 }

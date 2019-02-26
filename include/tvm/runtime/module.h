@@ -13,7 +13,7 @@
 #include <vector>
 #include <string>
 #include <unordered_map>
-#include "./c_runtime_api.h"
+#include "c_runtime_api.h"
 
 namespace tvm {
 namespace runtime {
@@ -103,8 +103,8 @@ class ModuleNode {
    * \param file_name The file to be saved to.
    * \param format The format of the file.
    */
-  virtual void SaveToFile(const std::string& file_name,
-                          const std::string& format);
+  TVM_DLL virtual void SaveToFile(const std::string& file_name,
+                                  const std::string& format);
   /*!
    * \brief Save the module to binary stream.
    * \param stream The binary stream to save to.
@@ -173,5 +173,5 @@ inline const ModuleNode* Module::operator->() const {
 }  // namespace runtime
 }  // namespace tvm
 
-#include "./packed_func.h"
+#include "packed_func.h"
 #endif  // TVM_RUNTIME_MODULE_H_

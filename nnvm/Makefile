@@ -13,12 +13,12 @@ TVMPATH = ..
 
 export LDFLAGS = -pthread -lm
 export CFLAGS = -std=c++11 -Wall -O2 -Iinclude -fPIC
-CFLAGS += -I$(TVMPATH)/include -I$(TVMPATH)/dlpack/include -I$(TVMPATH)/HalideIR/src -I$(TVMPATH)/topi/include
+CFLAGS += -I$(TVMPATH)/include -I$(TVMPATH)/3rdparty/dlpack/include -I$(TVMPATH)/3rdparty/HalideIR/src -I$(TVMPATH)/topi/include
 
 ifdef DMLC_CORE_PATH
   CFLAGS += -I$(DMLC_CORE_PATH)/include
 else
-  CFLAGS += -I$(ROOTDIR)/../dmlc-core/include
+  CFLAGS += -I$(TVMPATH)/3rdparty/dmlc-core/include
 endif
 
 ifneq ($(ADD_CFLAGS), NONE)

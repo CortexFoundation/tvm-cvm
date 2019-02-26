@@ -73,9 +73,10 @@ class GPUCodeVerifier : public IRVisitor {
 
   void Visit_(const AttrStmt *op) {
     if (op->attr_key == attr::storage_scope) {
-      if (op->value.as<StringImm>()->value == "local") {
+      std::string op_value = op->value.as<StringImm>()->value;
+      if (op_value == "local") {
         visited_local_buffers_.insert(op->node.as<tvm::Variable>());
-      } else if (op->value.as<StringImm>()->value == "shared") {
+      } else if (op_value == "shared") {
         visited_shared_buffers_.insert(op->node.as<tvm::Variable>());
       }
     } else if (op->attr_key == attr::thread_extent) {
@@ -86,17 +87,29 @@ class GPUCodeVerifier : public IRVisitor {
       // record the number of threads in a block
       std::string name = var.get()->name_hint;
       if (name == "threadIdx.x" || name == "threadIdx.y" || name == "threadIdx.z") {
+        size_t length = static_cast<size_t>(extent->value);
         if (!visited_threads_.count(name)) {
           visited_threads_.insert(name);
-          size_t length = static_cast<size_t>(extent->value);
           thread_per_block_ *= length;
 
           if (name == "threadIdx.x") {
             valid_ &= length <= max_thread_x_;
+            thread_x_extent_ = length;
           } else if (name == "threadIdx.y") {
             valid_ &= length <= max_thread_y_;
+            thread_y_extent_ = length;
           } else if (name == "threadIdx.z") {
             valid_ &= length <= max_thread_z_;
+            thread_z_extent_ = length;
+          }
+        } else {
+          // the thread should be bound to axes with the same length
+          if (name == "threadIdx.x") {
+            valid_ &= length == thread_x_extent_;
+          } else if (name == "threadIdx.y") {
+            valid_ &= length == thread_y_extent_;
+          } else if (name == "threadIdx.z") {
+            valid_ &= length == thread_z_extent_;
           }
         }
       }
@@ -110,6 +123,8 @@ class GPUCodeVerifier : public IRVisitor {
   std::unordered_set<const tvm::Variable *> visited_local_buffers_;
   std::unordered_set<const tvm::Variable *> visited_shared_buffers_;
   std::unordered_set<std::string> visited_threads_;
+
+  size_t thread_x_extent_, thread_y_extent_, thread_z_extent_;
 
   size_t local_memory_per_block_;
   size_t shared_memory_per_block_;
@@ -145,18 +160,19 @@ bool VerifyGPUCode(Stmt stmt,
   int64_t max_thread_z = INT64_MAX;
 
   for (auto iter : constraints) {
+    const IntImm* val = iter.second.as<IntImm>();
     if (iter.first == "max_local_memory_per_block")
-      max_local_memory_per_block = (iter.second).as<IntImm>()->value;
+      max_local_memory_per_block = val->value;
     else if (iter.first == "max_shared_memory_per_block")
-      max_shared_memory_per_block = (iter.second).as<IntImm>()->value;
+      max_shared_memory_per_block = val->value;
     else if (iter.first == "max_threads_per_block")
-      max_threads_per_block = (iter.second).as<IntImm>()->value;
+      max_threads_per_block = val->value;
     else if (iter.first == "max_thread_x")
-      max_thread_x = (iter.second).as<IntImm>()->value;
+      max_thread_x = val->value;
     else if (iter.first == "max_thread_y")
-      max_thread_y = (iter.second).as<IntImm>()->value;
+      max_thread_y = val->value;
     else if (iter.first == "max_thread_z")
-      max_thread_z = (iter.second).as<IntImm>()->value;
+      max_thread_z = val->value;
     else
       LOG(FATAL) << "Invalid check item: " << iter.first;
   }

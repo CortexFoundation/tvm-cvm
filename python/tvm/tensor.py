@@ -6,8 +6,10 @@ from . import _api_internal
 from . import make as _make
 from . import expr as _expr
 
+
 class TensorSlice(NodeGeneric, _expr.ExprOp):
     """Auxiliary data structure for enable slicing syntax from tensor."""
+
     def __init__(self, tensor, indices):
         if not isinstance(indices, tuple):
             indices = (indices,)
@@ -28,12 +30,19 @@ class TensorSlice(NodeGeneric, _expr.ExprOp):
         """Data content of the tensor."""
         return self.tensor.dtype
 
+@register_node
+class TensorIntrinCall(NodeBase):
+    """Intermediate structure for calling a tensor intrinsic."""
+    pass
+
 
 itervar_cls = None
+
 
 @register_node
 class Tensor(NodeBase, _expr.ExprOp):
     """Tensor object, to construct, see function.Tensor"""
+
     def __call__(self, *indices):
         ndim = self.ndim
         if len(indices) != ndim:
@@ -102,8 +111,10 @@ class Tensor(NodeBase, _expr.ExprOp):
         return "%s.v%d" % (op.name, self.value_index)
 
 
+
 class Operation(NodeBase):
     """Represent an operation that generate a tensor"""
+
     def output(self, index):
         """Get the index-th output of the operation
 
@@ -141,13 +152,19 @@ class ComputeOp(Operation):
     """Compute operation."""
     @property
     def axis(self):
-        """Represent axis of IterVar, only defined when it is a ComputeOp"""
+        """Represent axis of IterVar, defined when it is a ComputeOp"""
         return self.__getattr__("axis")
 
     @property
     def reduce_axis(self):
         """Represent axis of reductions, only defined when it is a ComputeOp"""
         return self.__getattr__("reduce_axis")
+
+
+@register_node
+class TensorComputeOp(Operation):
+    """Tensor operation."""
+    pass
 
 
 @register_node
@@ -163,3 +180,11 @@ class ScanOp(Operation):
 class ExternOp(Operation):
     """Extern operation."""
     pass
+
+@register_node
+class HybridOp(Operation):
+    """Hybrid operation."""
+    @property
+    def axis(self):
+        """Represent axis of IterVar, also defined when it is a HybridOp"""
+        return self.__getattr__("axis")

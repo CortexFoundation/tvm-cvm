@@ -28,7 +28,7 @@ def compile_cuda(code,
     arch : str
         The architecture
 
-    options : str
+    options : str or list of str
         The additional options
 
     path_target : str, optional
@@ -59,10 +59,16 @@ def compile_cuda(code,
     cmd = ["nvcc"]
     cmd += ["--%s" % target, "-O3"]
     cmd += ["-arch", arch]
-    cmd += ["-o", file_target]
 
     if options:
-        cmd += options
+        if isinstance(options, str):
+            cmd += [options]
+        elif isinstance(options, list):
+            cmd += options
+        else:
+            raise ValueError("options must be str or list of str")
+
+    cmd += ["-o", file_target]
     cmd += [temp_code]
 
     proc = subprocess.Popen(
@@ -97,7 +103,7 @@ def find_cuda_path():
     (out, _) = proc.communicate()
     out = py_str(out)
     if proc.returncode == 0:
-        return os.path.abspath(os.path.join(str(out).strip(), "../.."))
+        return os.path.realpath(os.path.join(str(out).strip(), "../.."))
     cuda_path = "/usr/local/cuda"
     if os.path.exists(os.path.join(cuda_path, "bin/nvcc")):
         return cuda_path

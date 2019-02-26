@@ -7,7 +7,7 @@
 #include <tvm/packed_func_ext.h>
 #include <vector>
 #include <string>
-#include "./codegen_cuda.h"
+#include "codegen_cuda.h"
 #include "../arithmetic/compute_expr.h"
 
 namespace tvm {
@@ -42,7 +42,7 @@ std::string CodeGenCUDA::Finish() {
 }
 
 void CodeGenCUDA::VisitStmt_(const ir::For* op) {
-  CHECK(is_zero(op->min));
+  CHECK(is_const_int(op->min, 0));
   if (op->for_type == ir::ForType::Unrolled) {
     PrintIndent();
     stream << "#pragma unroll\n";
@@ -77,6 +77,8 @@ void CodeGenCUDA::PrintType(Type t, std::ostream& os) {  // NOLINT(*)
     if (!fail && (lanes >= 2 && lanes <= 4)) {
       os << lanes; return;
     }
+  } else if (t == Bool()) {
+    os << "bool"; return;
   } else if (t.is_uint() || t.is_int()) {
     if (t.is_uint()) {
       if (t.lanes() != 1) {
@@ -271,6 +273,16 @@ void CodeGenCUDA::VisitExpr_(const Ramp* op, std::ostream& os) {
 }
 
 void CodeGenCUDA::VisitExpr_(const Broadcast* op, std::ostream& os) {   // NOLINT(*)
+  if (op->type.is_int() && op->type.bits() == 8 && op->lanes == 4) {
+    // make_int8x4
+    const int64_t *p = as_const_int(op->value);
+    CHECK(p);
+    int64_t v = *p & 0xFF;
+    v = (v << 24) | (v << 16) | (v << 8) | v;
+    os << "(int)" << v;
+    return;
+  }
+
   std::string v = PrintExpr(op->value);
   os << "make_";
   PrintType(op->type, os);

@@ -8,7 +8,7 @@
 #include <tvm/ir_visitor.h>
 #include <tvm/ir_functor_ext.h>
 #include <tvm/arithmetic.h>
-#include "./compute_expr.h"
+#include "compute_expr.h"
 
 namespace tvm {
 namespace arith {
@@ -111,8 +111,9 @@ class LinearEqDetector
     return ComputeExpr<Add>(a, b);
   }
   Expr SubCombine(Expr a, Expr b) {
-    if (!a.defined()) return -b;
+    // Check b first in case they are both undefined
     if (!b.defined()) return a;
+    if (!a.defined()) return -b;
     return ComputeExpr<Sub>(a, b);
   }
   Expr MulCombine(Expr a, Expr b) {
@@ -194,7 +195,7 @@ bool DetectClipBound(
   if (!LinearEqDetector(var).Detect(canonical, &ret)) return false;
   ret.coeff = Simplify(ret.coeff);
   IntervalEntry& p = (*bmap)[var.get()];
-  if (is_one(ret.coeff)) {
+  if (is_const_int(ret.coeff, 1)) {
     // var + shift >=0 -> var >= -shift
     if (p.min_value.defined()) {
       p.min_value = ir::Max::make(p.min_value, -ret.base);
@@ -203,7 +204,7 @@ bool DetectClipBound(
     }
     return true;
   }
-  if (is_const(ret.coeff, -1)) {
+  if (is_const_int(ret.coeff, -1)) {
     // -var + shift >=0 -> var <= shift
     if (p.max_value.defined()) {
       p.max_value = ir::Min::make(p.max_value, ret.base);

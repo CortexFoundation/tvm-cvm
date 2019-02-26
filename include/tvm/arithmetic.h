@@ -9,7 +9,7 @@
 #include <vector>
 #include <unordered_map>
 #include <memory>
-#include "./expr.h"
+#include "expr.h"
 
 namespace tvm {
 
@@ -38,7 +38,7 @@ class IntSet : public NodeRef {
   /*! \brief constructor */
   IntSet() {}
   // constructor from not container.
-  explicit IntSet(std::shared_ptr<Node> n) : NodeRef(n) {}
+  explicit IntSet(NodePtr<Node> n) : NodeRef(n) {}
   /*!
    * \brief access the internal node container
    * \return the pointer to the internal node container
@@ -69,6 +69,10 @@ class IntSet : public NodeRef {
   bool can_prove_positive() const;
   /*! \return Whether the set is proved to be smaller than 0 */
   bool can_prove_negative() const;
+  /*! \return Whether the set is proved to be smaller than or equal to 0 */
+  bool can_prove_non_positive() const;
+  /*! \return Whether the set is proved to be larger than or equal to 0 */
+  bool can_prove_non_negative() const;
   /*! \return The sign of the elements in the integer set */
   SignType sign_type() const;
   /*!

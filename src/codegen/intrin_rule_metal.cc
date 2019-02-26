@@ -3,7 +3,7 @@
  * \file intrin_rule_metal.cc
  * \brief Metal intrinsic rules.
  */
-#include "./intrin_rule.h"
+#include "intrin_rule.h"
 
 namespace tvm {
 namespace codegen {
@@ -40,6 +40,9 @@ TVM_REGISTER_GLOBAL("tvm.intrin.rule.metal.pow")
 .set_body(DispatchExtern<Direct>);
 
 TVM_REGISTER_GLOBAL("tvm.intrin.rule.metal.popcount")
+.set_body(DispatchExtern<Direct>);
+
+TVM_REGISTER_GLOBAL("tvm.intrin.rule.metal.fmod")
 .set_body(DispatchExtern<Direct>);
 
 }  // namespace intrin

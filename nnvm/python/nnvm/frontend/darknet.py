@@ -32,8 +32,12 @@ class LAYERTYPE(object):
     NETWORK = 20
     XNOR = 21
     REGION = 22
-    REORG = 23
-    BLANK = 24
+    YOLO = 23
+    REORG = 24
+    UPSAMPLE = 25
+    LOGXENT = 26
+    L2NORM = 27
+    BLANK = 28
 
 class ACTIVATION(object):
     """Darknet ACTIVATION Class constant."""
@@ -257,6 +261,19 @@ def _darknet_reshape(inputs, attrs):
     new_attrs['shape'] = _darknet_required_attr(attrs, 'shape')
     return _darknet_get_nnvm_op(op_name)(*inputs, **new_attrs), None
 
+def _darknet_upsampling(inputs, attrs):
+    """Process the upsampling operation."""
+    op_name, new_attrs = 'upsampling', {}
+    new_attrs['scale'] = attrs.get('scale', 1)
+    return _darknet_get_nnvm_op(op_name)(*inputs, **new_attrs), None
+
+def _darknet_l2normalize(inputs, attrs):
+    """Process the l2 normalization operation."""
+    op_name, new_attrs = 'l2_normalize', {}
+    new_attrs['eps'] = attrs.get('eps', 0)
+    new_attrs['axis'] = attrs.get('axis', 1)
+    return _darknet_get_nnvm_op(op_name)(*inputs, **new_attrs), None
+
 def _darknet_softmax_output(inputs, attrs):
     """Process the softmax operation."""
     temperature = attrs.get('temperature', 1)
@@ -297,6 +314,22 @@ def _darknet_region(inputs, attrs):
     if 'softmax' in attrs:
         new_attrs['softmax'] = attrs.get('softmax', 0)
     return _darknet_get_nnvm_op(op_name)(*inputs, **new_attrs), None
+
+def _darknet_yolo(inputs, attrs):
+    """Process the yolo operation."""
+    num = attrs.get('n', 1)
+    classes = attrs.get('classes', 1)
+    input_shape = attrs.get('shape')
+    split_size = classes + 5
+    intermediate_shape = (input_shape[0], num, split_size, input_shape[2], input_shape[3])
+    data_block = _sym.reshape(inputs[0], shape=intermediate_shape)
+    split_indices = (2, 4)
+    split_res = _sym.split(data_block, indices_or_sections=split_indices, axis=2)
+    split_res0 = _sym.sigmoid(split_res[0])
+    split_res2 = _sym.sigmoid(split_res[2])
+    concat_list = [split_res0, split_res[1], split_res2]
+    out = _sym.concatenate(*concat_list, axis=2)
+    return _sym.reshape(out, shape=input_shape), None
 
 def _darknet_activations(inputs, attrs):
     """Process the activation function."""
@@ -350,6 +383,9 @@ _DARKNET_CONVERT_MAP = {
     LAYERTYPE.REORG           : _darknet_reorg,
     LAYERTYPE.REGION          : _darknet_region,
     LAYERTYPE.SHORTCUT        : _darknet_shortcut,
+    LAYERTYPE.UPSAMPLE        : _darknet_upsampling,
+    LAYERTYPE.L2NORM          : _darknet_l2normalize,
+    LAYERTYPE.YOLO            : _darknet_yolo,
     LAYERTYPE.DETECTION       : _darknet_op_not_support,
     LAYERTYPE.CROP            : _darknet_op_not_support,
     LAYERTYPE.COST            : _darknet_op_not_support,
@@ -412,13 +448,20 @@ class GraphProto(object):
         self._sym_array = {}
         self._tvmparams = {}
         self._outs = []
-        self._rnn_state_ctr = 0
+        self._state_ctr = {}
+        self._state_ctr['rnn'] = 0
+        self._state_ctr['crnn'] = 0
+        self._state_ctr['lstm'] = 0
+        self._state_ctr['cell_state'] = 0
+        self._state_ctr['gru'] = 0
 
-    def _read_memory_buffer(self, shape, data):
+    def _read_memory_buffer(self, shape, data, dtype=None):
+        if dtype is None:
+            dtype = self.dtype
         length = 1
         for x in shape:
             length *= x
-        data_np = np.zeros(length, dtype=self.dtype)
+        data_np = np.zeros(length, dtype=dtype)
         for i in range(length):
             data_np[i] = data[i]
         return data_np.reshape(shape)
@@ -466,6 +509,31 @@ class GraphProto(object):
         else:
             k = self._get_tvm_params_name(opname[0], 'bias')
             self._tvmparams[k] = tvm.nd.array(biases)
+
+    def _get_region_weights(self, layer, opname):
+        """Parse the biases for region layer."""
+        biases = self._read_memory_buffer((layer.n*2, ), layer.biases)
+        attributes = np.array([layer.n, layer.out_c, layer.out_h, layer.out_w,
+                               layer.classes, layer.coords, layer.background],
+                              dtype=np.int32)
+        k = self._get_tvm_params_name(opname, 'bias')
+        self._tvmparams[k] = tvm.nd.array(biases)
+        k = self._get_tvm_params_name(opname, 'attr')
+        self._tvmparams[k] = tvm.nd.array(attributes)
+
+    def _get_yolo_weights(self, layer, opname):
+        """Parse the biases and mask for yolo layer."""
+        biases = self._read_memory_buffer((layer.total*2, ), layer.biases)
+        mask = self._read_memory_buffer((layer.n, ), layer.mask, dtype='int32')
+        attributes = np.array([layer.n, layer.out_c, layer.out_h, layer.out_w,
+                               layer.classes, layer.total],
+                              dtype=np.int32)
+        k = self._get_tvm_params_name(opname, 'bias')
+        self._tvmparams[k] = tvm.nd.array(biases)
+        k = self._get_tvm_params_name(opname, 'mask')
+        self._tvmparams[k] = tvm.nd.array(mask)
+        k = self._get_tvm_params_name(opname, 'attr')
+        self._tvmparams[k] = tvm.nd.array(attributes)
 
     def _get_batchnorm_weights(self, layer, opname, size):
         """Parse the weights for batchnorm, which includes, scales, moving mean
@@ -570,6 +638,18 @@ class GraphProto(object):
             attr.update({'coords' : layer.coords})
             attr.update({'background' : layer.background})
             attr.update({'softmax' : layer.softmax})
+
+        elif LAYERTYPE.YOLO == layer.type:
+            attr.update({'n' : layer.n})
+            attr.update({'classes' : layer.classes})
+            attr.update({'shape' : (1, layer.c, layer.h, layer.w)})
+
+        elif LAYERTYPE.UPSAMPLE == layer.type:
+            attr.update({'scale' : layer.stride})
+
+        elif LAYERTYPE.L2NORM == layer.type:
+            pass
+
         else:
             err = "Darknet layer type {} is not supported in nnvm.".format(layer.type)
             raise NotImplementedError(err)
@@ -588,6 +668,11 @@ class GraphProto(object):
         elif LAYERTYPE.CONNECTED == layer.type:
             self._get_connected_weights(layer, opname)
 
+        elif LAYERTYPE.REGION == layer.type:
+            self._get_region_weights(layer, opname)
+
+        elif LAYERTYPE.YOLO == layer.type:
+            self._get_yolo_weights(layer, opname)
     def _preproc_layer(self, layer, layer_num):
         """To preprocess each darknet layer, some layer doesnt need processing."""
         if layer_num == 0:
@@ -623,16 +708,16 @@ class GraphProto(object):
         """Returs the layer name."""
         return layer.type
 
-    def _new_rnn_state_sym(self, state=None):
+    def _new_rnn_state_sym(self, state=None, name='rnn'):
         """Returs a symbol for state"""
-        name = "rnn%d_state" % (self._rnn_state_ctr)
-        self._rnn_state_ctr += 1
-        return _sym.Variable(name=name, init=state)
+        sym_name = name + "%d_state" % self._state_ctr[name]
+        self._state_ctr[name] += 1
+        return _sym.Variable(name=sym_name, init=state)
 
-    def _get_rnn_state_buffer(self, layer):
+    def _get_rnn_state_buffer(self, layer, name):
         """Get the state buffer for rnn."""
         buffer = np.zeros((1, layer.outputs), self.dtype)
-        return self._new_rnn_state_sym(buffer)
+        return self._new_rnn_state_sym(buffer, name)
 
     def _get_darknet_rnn_attrs(self, layer, sym):
         """Get the rnn converted symbol from attributes."""
@@ -653,7 +738,7 @@ class GraphProto(object):
             attr.update({'batch' : layer.batch})
             attr.update({'num_hidden' : str(layer.outputs)})
 
-            state = self._get_rnn_state_buffer(layer)
+            state = self._get_rnn_state_buffer(layer, 'rnn')
 
             for _ in range(layer.steps):
                 input_layer = layer.input_layer
@@ -678,7 +763,7 @@ class GraphProto(object):
             attr.update({'batch' : layer.batch})
             attr.update({'num_hidden' : str(layer.outputs)})
 
-            state = self._get_rnn_state_buffer(layer)
+            state = self._get_rnn_state_buffer(layer, 'crnn')
 
             for _ in range(layer.steps):
                 input_layer = layer.input_layer
@@ -698,7 +783,145 @@ class GraphProto(object):
             self._sym_array[layer_num] = sym
             processed = True
 
+        elif LAYERTYPE.LSTM == layer.type:
+            if layer.steps > 1:
+                raise NotImplementedError("Currently support only single step GRU")
+
+            op_name_add = 'elemwise_add'
+            op_name_mul = 'elemwise_mul'
+            attrs = {}
+            act_attr = {}
+
+            h_state = self._get_rnn_state_buffer(layer, 'lstm')
+            c_state = self._get_rnn_state_buffer(layer, 'cell_state')
+            for _ in range(layer.steps):
+                sym_wf = self._get_darknet_rnn_attrs(layer.wf, h_state)
+                sym_wi = self._get_darknet_rnn_attrs(layer.wi, h_state)
+                sym_wg = self._get_darknet_rnn_attrs(layer.wg, h_state)
+                sym_wo = self._get_darknet_rnn_attrs(layer.wo, h_state)
+
+                input_sym = sym
+                sym_uf = self._get_darknet_rnn_attrs(layer.uf, input_sym)
+                sym_ui = self._get_darknet_rnn_attrs(layer.ui, input_sym)
+                sym_ug = self._get_darknet_rnn_attrs(layer.ug, input_sym)
+                sym_uo = self._get_darknet_rnn_attrs(layer.uo, input_sym)
+
+                new_inputs = _as_list([sym_wf, sym_uf])
+                add_f = _darknet_get_nnvm_op(op_name_add)(*new_inputs, **attrs)
+
+                new_inputs = _as_list([sym_wi, sym_ui])
+                add_i = _darknet_get_nnvm_op(op_name_add)(*new_inputs, **attrs)
+
+                new_inputs = _as_list([sym_wg, sym_ug])
+                add_g = _darknet_get_nnvm_op(op_name_add)(*new_inputs, **attrs)
+
+                new_inputs = _as_list([sym_wo, sym_uo])
+                add_o = _darknet_get_nnvm_op(op_name_add)(*new_inputs, **attrs)
+
+                act_attr['activation'] = ACTIVATION.LOGISTIC
+                act_f, _ = _darknet_activations(_as_list(add_f), act_attr)
+
+                act_attr['activation'] = ACTIVATION.LOGISTIC
+                act_i, _ = _darknet_activations(_as_list(add_i), act_attr)
+
+                act_attr['activation'] = ACTIVATION.TANH
+                act_g, _ = _darknet_activations(_as_list(add_g), act_attr)
+
+                act_attr['activation'] = ACTIVATION.LOGISTIC
+                act_o, _ = _darknet_activations(_as_list(add_o), act_attr)
+
+                new_inputs = _as_list([act_i, act_g])
+                mul_t = _darknet_get_nnvm_op(op_name_mul)(*new_inputs, **attrs)
+
+                new_inputs = _as_list([act_f, c_state])
+                c_state = _darknet_get_nnvm_op(op_name_mul)(*new_inputs, **attrs)
+
+                new_inputs = _as_list([mul_t, c_state])
+                c_state = _darknet_get_nnvm_op(op_name_add)(*new_inputs, **attrs)
+
+                act_attr['activation'] = ACTIVATION.TANH
+                h_state, _ = _darknet_activations(_as_list(c_state), act_attr)
+
+                new_inputs = _as_list([act_o, h_state])
+                h_state = _darknet_get_nnvm_op(op_name_mul)(*new_inputs, **attrs)
+                self._outs = self._outs + [c_state, h_state]
+                sym = h_state
+            self._sym_array[layer_num] = sym
+            processed = True
+
+        elif LAYERTYPE.GRU == layer.type:
+            if layer.steps > 1:
+                raise NotImplementedError("Currently support only single step GRU")
+
+            op_name_add = 'elemwise_add'
+            op_name_mul = 'elemwise_mul'
+            attrs = {}
+            act_attr = {}
+
+            state = self._get_rnn_state_buffer(layer, "gru")
+            for _ in range(layer.steps):
+                sym_wz = self._get_darknet_rnn_attrs(layer.wz, state)
+                sym_wr = self._get_darknet_rnn_attrs(layer.wr, state)
+
+                input_sym = sym
+                sym_uz = self._get_darknet_rnn_attrs(layer.uz, input_sym)
+                sym_ur = self._get_darknet_rnn_attrs(layer.ur, input_sym)
+                sym_uh = self._get_darknet_rnn_attrs(layer.uh, input_sym)
+
+                new_inputs = _as_list([sym_uz, sym_wz])
+                add_z = _darknet_get_nnvm_op(op_name_add)(*new_inputs, **attrs)
+
+                new_inputs = _as_list([sym_ur, sym_wr])
+                add_r = _darknet_get_nnvm_op(op_name_add)(*new_inputs, **attrs)
+
+                act_attr['activation'] = ACTIVATION.LOGISTIC
+                act_z, _ = _darknet_activations(_as_list(add_z), act_attr)
+
+                act_attr['activation'] = ACTIVATION.LOGISTIC
+                act_r, _ = _darknet_activations(_as_list(add_r), act_attr)
+
+                new_inputs = _as_list([act_r, state])
+                forgot = _darknet_get_nnvm_op(op_name_mul)(*new_inputs, **attrs)
+
+                sym_wh = self._get_darknet_rnn_attrs(layer.wh, forgot)
+
+                new_inputs = _as_list([sym_uh, sym_wh])
+                h_state = _darknet_get_nnvm_op(op_name_add)(*new_inputs, **attrs)
+
+                if layer.tanh == 1:
+                    act_attr['activation'] = ACTIVATION.TANH
+                else:
+                    act_attr['activation'] = ACTIVATION.LOGISTIC
+                h_state, _ = _darknet_activations(_as_list(h_state), act_attr)
+
+                sym = act_z * state + (1 - act_z) * h_state
+
+                self._outs = self._outs + [sym]
+            self._sym_array[layer_num] = sym
+            processed = True
+
         return processed, sym
+
+    def _make_outlist(self, sym, op_name, layer, layer_num):
+        if layer.type == LAYERTYPE.REGION:
+            k = self._get_tvm_params_name(op_name, 'attr')
+            self._outs.insert(0, _sym.Variable(name=k, init=self._tvmparams[k].asnumpy()))
+            k = self._get_tvm_params_name(op_name, 'bias')
+            self._outs.insert(0, _sym.Variable(name=k, init=self._tvmparams[k].asnumpy()))
+            if layer_num != self.net.n-1:
+                self._outs.insert(0, sym)
+
+        elif layer.type == LAYERTYPE.YOLO:
+            k = self._get_tvm_params_name(op_name, 'attr')
+            self._outs.insert(0, _sym.Variable(name=k, init=self._tvmparams[k].asnumpy()))
+            k = self._get_tvm_params_name(op_name, 'bias')
+            self._outs.insert(0, _sym.Variable(name=k, init=self._tvmparams[k].asnumpy()))
+            k = self._get_tvm_params_name(op_name, 'mask')
+            self._outs.insert(0, _sym.Variable(name=k, init=self._tvmparams[k].asnumpy()))
+            if layer_num != self.net.n-1:
+                self._outs.insert(0, sym)
+
+        return
 
     def from_darknet(self):
         """To convert the darknet symbol to nnvm symbols."""
@@ -717,6 +940,8 @@ class GraphProto(object):
             layer_name, sym = _darknet_convert_symbol(op_name, _as_list(sym), attr)
             self._get_darknet_params(self.net.layers[i], layer_name)
             self._sym_array[i] = sym
+            self._make_outlist(sym, layer_name, layer, i)
+
         self._outs = _as_list(sym) + self._outs
         if isinstance(self._outs, list):
             sym = _sym.Group(self._outs)

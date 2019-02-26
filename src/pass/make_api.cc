@@ -12,8 +12,8 @@
 #include <utility>
 #include <unordered_set>
 
-#include "./ir_util.h"
-#include "./arg_binder.h"
+#include "ir_util.h"
+#include "arg_binder.h"
 #include "../arithmetic/compute_expr.h"
 
 namespace tvm {
@@ -132,7 +132,7 @@ LoweredFunc MakeAPI(Stmt body,
     }
   }
 
-  std::shared_ptr<LoweredFuncNode> n = std::make_shared<LoweredFuncNode>();
+  NodePtr<LoweredFuncNode> n = make_node<LoweredFuncNode>();
   n->name = name;
   n->args = args;
   n->handle_data_type = binder.def_handle_dtype();
@@ -197,7 +197,7 @@ class DeviceTypeBinder: public IRMutator {
 
 LoweredFunc BindDeviceType(LoweredFunc f,
                            int device_type) {
-  auto n = std::make_shared<LoweredFuncNode>(*f.operator->());
+  auto n = make_node<LoweredFuncNode>(*f.operator->());
   n->body = DeviceTypeBinder(device_type).Mutate(n->body);
   return LoweredFunc(n);
 }

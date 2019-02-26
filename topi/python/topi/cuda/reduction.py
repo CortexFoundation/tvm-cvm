@@ -63,10 +63,12 @@ def _schedule_reduce(op, sch, is_idx_reduce=False):
             sch[temp_val_input].compute_at(sch[real_output], outer_in)
     else:
         if is_idx_reduce:
+            spatial_axis = sch[real_output].fuse(*(sch[real_output].op.axis))
+            sch[real_output].bind(spatial_axis, tvm.thread_axis("blockIdx.x"))
             sch[temp_idx_input].compute_at(sch[real_output],
-                                           sch[real_output].op.axis[0])
+                                           spatial_axis)
             sch[temp_val_input].compute_at(sch[real_output],
-                                           sch[real_output].op.axis[0])
+                                           spatial_axis)
     sch[real_output].set_store_predicate(thread_x.equal(0))
     return sch
 
@@ -107,7 +109,10 @@ def schedule_reduce(outs):
     def traverse_after_reduce(operator):
         """Internal travserse function"""
         if tag.is_broadcast(operator.tag):
-            raise RuntimeError("Not yet support ewise after reduce")
+            if operator not in scheduled_ops:
+                _schedule_injective(operator, sch)
+            for tensor in operator.input_tensors:
+                traverse_after_reduce(tensor.op)
         elif operator.tag == 'comm_reduce':
             _schedule_reduce(operator, sch, is_idx_reduce=False)
             for tensor in operator.input_tensors:

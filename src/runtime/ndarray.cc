@@ -7,7 +7,7 @@
 #include <tvm/runtime/ndarray.h>
 #include <tvm/runtime/c_runtime_api.h>
 #include <tvm/runtime/device_api.h>
-#include "./runtime_base.h"
+#include "runtime_base.h"
 
 // deleter for arrays used by DLPack exporter
 extern "C" void NDArrayDLPackDeleter(DLManagedTensor* tensor);
@@ -20,18 +20,11 @@ inline void VerifyDataType(DLDataType dtype) {
   if (dtype.code == kDLFloat) {
     CHECK_EQ(dtype.bits % 8, 0);
   } else {
+    // allow uint1 as a special flag for bool.
+    if (dtype.bits == 1 && dtype.code == kDLUInt) return;
     CHECK_EQ(dtype.bits % 8, 0);
   }
   CHECK_EQ(dtype.bits & (dtype.bits - 1), 0);
-}
-
-inline size_t GetDataSize(const DLTensor& arr) {
-  size_t size = 1;
-  for (tvm_index_t i = 0; i < arr.ndim; ++i) {
-    size *= arr.shape[i];
-  }
-  size *= (arr.dtype.bits * arr.dtype.lanes + 7) / 8;
-  return size;
 }
 
 inline size_t GetDataAlignment(const DLTensor& arr) {
@@ -129,8 +122,8 @@ DLManagedTensor* NDArray::ToDLPack() const {
 }
 
 NDArray NDArray::Empty(std::vector<int64_t> shape,
-                        DLDataType dtype,
-                        DLContext ctx) {
+                       DLDataType dtype,
+                       DLContext ctx) {
   NDArray ret = Internal::Create(shape, dtype, ctx);
   // setup memory content
   size_t size = GetDataSize(ret.data_->dl_tensor);

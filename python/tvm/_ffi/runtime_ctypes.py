@@ -48,6 +48,13 @@ class TVMType(ctypes.Structure):
         super(TVMType, self).__init__()
         if isinstance(type_str, np.dtype):
             type_str = str(type_str)
+
+        if type_str == "bool":
+            self.bits = 1
+            self.type_code = 1
+            self.lanes = 1
+            return
+
         arr = type_str.split("x")
         head = arr[0]
         self.lanes = int(arr[1]) if len(arr) > 1 else 1
@@ -67,12 +74,14 @@ class TVMType(ctypes.Structure):
             bits = 64
             head = ""
         else:
-            raise ValueError("Donot know how to handle type %s" % type_str)
+            raise ValueError("Do not know how to handle type %s" % type_str)
         bits = int(head) if head else bits
         self.bits = bits
 
 
     def __repr__(self):
+        if self.bits == 1 and self.lanes == 1:
+            return "bool"
         x = "%s%d" % (TVMType.CODE2STR[self.type_code], self.bits)
         if self.lanes != 1:
             x += "x%d" % self.lanes
@@ -109,12 +118,14 @@ class TVMContext(ctypes.Structure):
         'llvm': 1,
         'stackvm': 1,
         'cpu': 1,
+        'c': 1,
         'gpu': 2,
         'cuda': 2,
         'nvptx': 2,
         'cl': 4,
         'opencl': 4,
         'aocl' : 5,
+        'aocl_sw_emu' : 5,
         'sdaccel': 6,
         'vulkan': 7,
         'metal': 8,

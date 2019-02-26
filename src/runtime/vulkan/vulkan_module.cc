@@ -8,8 +8,8 @@
 #include <array>
 #include <string>
 #include <mutex>
-#include "./vulkan_common.h"
-#include "./vulkan_module.h"
+#include "vulkan_common.h"
+#include "vulkan_module.h"
 #include "../pack_args.h"
 #include "../thread_storage_scope.h"
 #include "../meta_data.h"
@@ -223,7 +223,7 @@ class VulkanModuleNode final :public runtime::ModuleNode {
   std::mutex mutex_;
 };
 
-// a wrapped function class to get packed fucn.
+// a wrapped function class to get packed func.
 class VulkanWrappedFunc {
  public:
   // initialize the VULKAN function.

@@ -14,7 +14,7 @@ The whole workflow is illustrated by a matrix multiplication example.
 
 ######################################################################
 # Install dependencies
-# ----------------------------------------
+# --------------------
 # To use autotvm package in tvm, we need to install some extra dependencies.
 # (change "3" to "2" if you use python2):
 #
@@ -44,7 +44,7 @@ from tvm import autotvm
 
 ######################################################################
 # Step 1:  Define the search space
-# ---------------------------------
+# --------------------------------
 # In this section, we will rewrite a deterministic tvm schedule code to a
 # tunable schedule template. You can regard the process of search space definition
 # as the parametrization of our exiting schedule code.
@@ -73,7 +73,7 @@ def matmul_v0(N, L, M, dtype):
 
 #####################################################################
 # Parametrize the schedule
-# ^^^^^^^^^^^^^^^^^^^^^^^^^
+# ^^^^^^^^^^^^^^^^^^^^^^^^
 # In the previous schedule code, we use a constant "8" as tiling factor.
 # However, it might not be the best one because the best tiling factor depends
 # on real hardware environment and input shape.
@@ -271,9 +271,12 @@ print(task.config_space)
 logging.getLogger('autotvm').setLevel(logging.DEBUG)
 logging.getLogger('autotvm').addHandler(logging.StreamHandler(sys.stdout))
 
-# use local cpu, measure 5 times for every config to reduce variance
-measure_option = autotvm.measure_option('local',
-                                        number=5)
+# There are two steps for measuring a config: build and run.
+# By default, we use all cpu cores to compile program. Then measure them sequentially.
+# We measure 5 times and take average to reduce variance.
+measure_option = autotvm.measure_option(
+    builder='local',
+    runner=autotvm.LocalRunner(number=5))
 
 # begin tuning, log records to file `matmul.log`
 tuner = autotvm.tuner.RandomTuner(task)
@@ -302,4 +305,4 @@ c_np = a_np.dot(b_np)
 c_tvm = tvm.nd.empty(c_np.shape)
 func(tvm.nd.array(a_np), tvm.nd.array(b_np), c_tvm)
 
-np.testing.assert_allclose(c_np, c_tvm.asnumpy(), rtol=1e-2)
+tvm.testing.assert_allclose(c_np, c_tvm.asnumpy(), rtol=1e-2)

@@ -12,13 +12,13 @@ from ..rpc.proxy import Proxy
 
 def find_example_resource():
     """Find resource examples."""
-    curr_path = os.path.dirname(os.path.abspath(os.path.expanduser(__file__)))
+    curr_path = os.path.dirname(os.path.realpath(os.path.expanduser(__file__)))
     base_path = os.path.join(curr_path, "../../../")
     index_page = os.path.join(base_path, "web/example_rpc.html")
     js_files = [
         os.path.join(base_path, "web/tvm_runtime.js"),
-        os.path.join(base_path, "lib/libtvm_web_runtime.js"),
-        os.path.join(base_path, "lib/libtvm_web_runtime.js.mem")
+        os.path.join(base_path, "build/libtvm_web_runtime.js"),
+        os.path.join(base_path, "build/libtvm_web_runtime.js.mem")
     ]
     for fname in [index_page] + js_files:
         if not os.path.exists(fname):

@@ -33,7 +33,7 @@ sys.path.insert(0, os.path.join(curr_path, '../vta/python'))
 # General information about the project.
 project = u'tvm'
 author = u'%s developers' % project
-copyright = u'2017, %s' % author
+copyright = u'2018, %s' % author
 github_doc_root = 'https://github.com/tqchen/tvm/tree/master/docs/'
 
 # add markdown parser
@@ -189,9 +189,11 @@ examples_dirs = ["../tutorials/", "../vta/tutorials/"]
 gallery_dirs = ["tutorials", "vta/tutorials"]
 
 subsection_order = ExplicitOrder(
-    ['../tutorials/language',
+    ['../tutorials/frontend',
+     '../tutorials/language',
      '../tutorials/optimize',
      '../tutorials/autotvm',
+     '../tutorials/dev',
      '../tutorials/vta',
      '../tutorials/topi',
      '../tutorials/deployment',

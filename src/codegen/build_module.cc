@@ -32,7 +32,7 @@ TVM_STATIC_IR_FUNCTOR(IRPrinter, vtable)
 */
 Target CreateTarget(const std::string& target_name,
                     const std::vector<std::string>& options) {
-  auto target = Target(std::make_shared<TargetNode>());
+  auto target = Target(make_node<TargetNode>());
   auto t = static_cast<TargetNode*>(target.node_.get());
 
   t->target_name = target_name;
@@ -58,7 +58,7 @@ Target CreateTarget(const std::string& target_name,
   }
   t->device_type = kDLCPU;
   t->thread_warp_size = 1;
-  if (target_name == "llvm") {
+  if (target_name == "c" || target_name == "llvm") {
     t->keys_array.push_back(ir::StringImm::make("cpu"));
   } else if (target_name == "cuda" || target_name == "nvptx") {
     t->device_type = kDLGPU;
@@ -92,7 +92,7 @@ Target CreateTarget(const std::string& target_name,
     t->device_type = kDLOpenCL;
     t->keys_array.push_back(ir::StringImm::make("sdaccel"));
     t->keys_array.push_back(ir::StringImm::make("hls"));
-  } else if (target_name == "aocl") {
+  } else if (target_name == "aocl" || target_name == "aocl_sw_emu") {
     t->device_type = kDLAOCL;
     t->keys_array.push_back(ir::StringImm::make("aocl"));
     t->keys_array.push_back(ir::StringImm::make("hls"));
@@ -102,7 +102,9 @@ Target CreateTarget(const std::string& target_name,
   } else if (target_name == "stackvm") {
     t->device_type = kDLCPU;
   } else if (target_name == "ext_dev") {
-    t->device_type = kExtDev;
+    t->device_type = kDLExtDev;
+  } else if (target_name == "hybrid") {
+    t->device_type = kDLCPU;
   } else {
     LOG(ERROR) << "Unknown target name " << target_name;
     return target::stackvm();
@@ -154,13 +156,15 @@ std::unordered_set<std::string> TargetNode::libs() const {
   return result;
 }
 
-std::string TargetNode::str() const {
+const std::string& TargetNode::str() const {
+  if (str_repr_.length() != 0) return str_repr_;
   std::ostringstream result;
   result << target_name;
   for (const auto &x : options()) {
     result << " " << x;
   }
-  return result.str();
+  str_repr_ = result.str();
+  return str_repr_;
 }
 
 
@@ -362,7 +366,8 @@ Stmt BuildStmt(Schedule sch,
   stmt = ir::InjectPrefetch(stmt);
 
   // Phase 1
-  stmt = ir::StorageFlatten(stmt, out_binds, 64);
+  stmt = ir::StorageFlatten(stmt, out_binds, 64,
+                            config->instrument_bound_checkers);
   stmt = ir::CanonicalSimplify(stmt);
   if (loop_partition) {
     stmt = ir::LoopPartition(stmt, config->partition_const_loop);
@@ -378,7 +383,12 @@ Stmt BuildStmt(Schedule sch,
   stmt = ir::Simplify(stmt);
   stmt = ir::LowerStorageAccessInfo(stmt);
   stmt = ir::RemoveNoOp(stmt);
-  stmt = ir::RewriteUnsafeSelect(stmt);
+
+  if (!(config->disable_select_rewriting))
+    stmt = ir::RewriteUnsafeSelect(stmt);
+
+  if (config->instrument_bound_checkers)
+    stmt = ir::InstrumentBoundCheckers(stmt);
 
   return stmt;
 }
@@ -475,7 +485,7 @@ runtime::Module build(const Array<LoweredFunc>& funcs,
 }
 
 BuildConfig build_config() {
-  return BuildConfig(std::make_shared<BuildConfigNode>());
+  return BuildConfig(make_node<BuildConfigNode>());
 }
 
 /*! \brief Entry to hold the BuildConfig context stack. */
@@ -528,12 +538,14 @@ TVM_STATIC_IR_FUNCTOR(IRPrinter, vtable)
   p->stream << "restricted_func=" << op->restricted_func << ", ";
   p->stream << "detect_global_barrier=" << op->detect_global_barrier << ", ";
   p->stream << "partition_const_loop=" << op->partition_const_loop << ", ";
-  p->stream << "dump_pass_ir=" << op->dump_pass_ir;
+  p->stream << "dump_pass_ir=" << op->dump_pass_ir << ", ";
+  p->stream << "instrument_bound_checkers=" << op->instrument_bound_checkers << ", ";
+  p->stream << "disable_select_rewriting=" << op->disable_select_rewriting;
   p->stream << ")";
 });
 
 struct GenericFunc::Manager {
-  std::unordered_map<std::string, std::shared_ptr<Node> > fmap;
+  std::unordered_map<std::string, NodePtr<Node> > fmap;
   // mutex
   std::mutex mutex;
 
@@ -551,7 +563,7 @@ GenericFunc GenericFunc::Get(const std::string& name) {
   std::lock_guard<std::mutex>(m->mutex);
   auto it = m->fmap.find(name);
   if (it == m->fmap.end()) {
-    auto f = std::make_shared<GenericFuncNode>();
+    auto f = make_node<GenericFuncNode>();
     f->name_ = name;
     m->fmap[name] = f;
     return GenericFunc(f);
@@ -669,7 +681,7 @@ TVM_REGISTER_API("_BuildConfigGetAddLowerPassInfo")
 
 TVM_REGISTER_API("_GenericFuncCreate")
 .set_body([](TVMArgs args, TVMRetValue* ret) {
-  *ret = GenericFunc(std::make_shared<GenericFuncNode>());
+  *ret = GenericFunc(make_node<GenericFuncNode>());
   });
 
 TVM_REGISTER_API("_GenericFuncGetGlobal")

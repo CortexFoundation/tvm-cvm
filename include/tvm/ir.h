@@ -10,9 +10,9 @@
 #include <ir/IR.h>
 #include <type_traits>
 #include <string>
-#include "./base.h"
-#include "./expr.h"
-#include "./runtime/util.h"
+#include "base.h"
+#include "expr.h"
+#include "runtime/util.h"
 
 namespace tvm {
 namespace ir {
@@ -28,7 +28,7 @@ struct CommReducerNode;
 
 struct CommReducer : public NodeRef {
   CommReducer() {}
-  explicit CommReducer(std::shared_ptr<Node> n) : NodeRef(n) {}
+  explicit CommReducer(NodePtr<Node> n) : NodeRef(n) {}
   /*!
    * \brief access the internal node container
    * \return the pointer to the internal node container
@@ -206,6 +206,8 @@ constexpr const char* scan_init_scope = "scan_init_scope";
  *  This gives hint to require stride of dim to be k * align + offset.
  */
 constexpr const char* buffer_dim_align = "buffer_dim_align";
+/*! \brief Mark stores/loads with theirs bounds.  */
+constexpr const char* buffer_bound = "buffer_bound";
 /*!
  * \brief Bind the buffer specification to the region of the op
  *  When this scope occurs, the stmt.node is a Array<NodeRef> = [buffer, tensor]
@@ -236,6 +238,11 @@ constexpr const char* pipeline_exec_scope = "pipeline_exec_scope";
  * Store statement.
  */
 constexpr const char* opengl_stage_scope = "opengl_stage_scope";
+
+/*!
+ * \brief Mark that it is in the device scope.
+ */
+constexpr const char* device_scope = "device_scope";
 
 /*!
  * \brief Check if attr_key is a pragma key extension
@@ -388,6 +395,17 @@ constexpr const char* tvm_stack_make_array = "tvm_stack_make_array";
 constexpr const char* tvm_call_packed = "tvm_call_packed";
 /*!
  * \brief See pesudo code
+ *
+ *  int tvm_call_trace_packed(name, TVMValue* args) {
+ *     ModuleNode* env = GetCurrentEnv();
+ *     const PackedFunc* f = env->GetFuncFromEnv(name);
+ *     (*f)(args, type_code_of(args), len(args));
+ *     return 0;
+ *  }
+ */
+constexpr const char *tvm_call_trace_packed = "tvm_call_trace_packed";
+/*!
+ * \brief See pesudo code
  *  Mark the content as thread local context, can get optimized
  *  by only call the call once at thread start.
  *
@@ -415,6 +433,25 @@ constexpr const char* tvm_thread_context = "tvm_thread_context";
  *  }
  */
 constexpr const char* tvm_call_packed_lowered = "tvm_call_packed_lowered";
+/*!
+ * \brief Lowered version of trace intrinsic, the space of value and
+ *  type codes are explicitly allocated. The return value is the
+ *  (end - 1) value on the stack.
+ *
+ *  int tvm_call_trace_packed_lowered(name,
+ *                                    TVMValue* value_stack,
+ *                                    int* tcode_stack,
+ *                                    int begin,
+ *                                    int end) {
+ *     ModuleNode* env = GetCurrentEnv();
+ *     const PackedFunc* f = env->GetFuncFromEnv(name);
+ *     f->CallPacked(TVMArgs(value_stack[begin:end],
+ *                           tcode_stack[begin:end]),
+ *                   TVMRetValue(value_stack + end, tcode_stack + end));
+ *  }
+ */
+constexpr const char *tvm_call_trace_packed_lowered =
+    "tvm_call_trace_packed_lowered";
 /*!
  * \brief See pseudo code
  *
@@ -495,8 +532,6 @@ using HalideIR::Internal::Block;
 using HalideIR::Internal::IfThenElse;
 using HalideIR::Internal::Evaluate;
 using HalideIR::Internal::Shuffle;
-// ir functions
-using HalideIR::Internal::is_const_power_of_two_integer;
 
 /*!
  * \brief Create a type annotation expression

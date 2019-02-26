@@ -556,7 +556,7 @@ def inject_dma_intrin(stmt_in):
             return irb.get()
 
         else:
-            raise RuntimeError("Donot support copy %s->%s" % (src.scope, dst.scope))
+            raise RuntimeError("Do not support copy %s->%s" % (src.scope, dst.scope))
 
     return tvm.ir_pass.InjectCopyIntrin(stmt_in, "dma_copy", _inject_copy)
 
@@ -700,7 +700,7 @@ def inject_alu_intrin(stmt_in):
             elif isinstance(loop_body.value, tvm.expr.Load):
                 alu_opcode = env.dev.ALU_OPCODE_SHR
                 lhs = loop_body.value
-                rhs = tvm.const(0)
+                rhs = tvm.const(0, "int32")
             else:
                 raise RuntimeError(
                     "Expression not recognized %s, %s, %s" % (

@@ -23,6 +23,7 @@ namespace codegen {
  */
 class CodeGenSourceBase {
  public:
+  virtual ~CodeGenSourceBase() = default;
   /*!
    * \brief Register constant value appeared in expresion tree
    *  This avoid generated a ssa id for each appearance of the value
@@ -110,6 +111,13 @@ class CodeGenSourceBase {
  * \param fmt The code. format.
  */
 runtime::Module SourceModuleCreate(std::string code, std::string fmt);
+
+/*!
+ * \brief Create a C source module for viewing and compiling GCC code.
+ * \param code The code to be viewed.
+ * \param fmt The code. format.
+ */
+runtime::Module CSourceModuleCreate(std::string code, std::string fmt);
 
 /*!
  * \brief Create a source module for viewing and limited saving for device.

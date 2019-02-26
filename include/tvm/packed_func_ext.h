@@ -10,12 +10,13 @@
 #include <sstream>
 #include <string>
 #include <memory>
+#include <limits>
 #include <type_traits>
 
-#include "./base.h"
-#include "./expr.h"
-#include "./tensor.h"
-#include "./runtime/packed_func.h"
+#include "base.h"
+#include "expr.h"
+#include "tensor.h"
+#include "runtime/packed_func.h"
 
 namespace tvm {
 using runtime::TVMArgs;
@@ -34,6 +35,8 @@ struct NodeTypeChecker {
     // It can be turned off, but will make non strict checking.
     // TODO(tqchen) possibly find alternative to turn of RTTI
     using ContainerType = typename T::ContainerType;
+    // always allow nullptr.
+    if (sptr == nullptr) return true;
     return sptr->derived_from<ContainerType>();
   }
   static inline void PrintName(std::ostringstream& os) { // NOLINT(*)
@@ -45,7 +48,7 @@ struct NodeTypeChecker {
 template<typename T>
 struct NodeTypeChecker<Array<T> > {
   static inline bool Check(Node* sptr) {
-    if (sptr == nullptr) return false;
+    if (sptr == nullptr) return true;
     if (!sptr->is_type<ArrayNode>()) return false;
     ArrayNode* n = static_cast<ArrayNode*>(sptr);
     for (const auto& p : n->data) {
@@ -63,7 +66,7 @@ struct NodeTypeChecker<Array<T> > {
 template<typename V>
 struct NodeTypeChecker<Map<std::string, V> > {
   static inline bool Check(Node* sptr) {
-    if (sptr == nullptr) return false;
+    if (sptr == nullptr) return true;
     if (!sptr->is_type<StrMapNode>()) return false;
     StrMapNode* n = static_cast<StrMapNode*>(sptr);
     for (const auto& kv : n->data) {
@@ -82,7 +85,7 @@ struct NodeTypeChecker<Map<std::string, V> > {
 template<typename K, typename V>
 struct NodeTypeChecker<Map<K, V> > {
   static inline bool Check(Node* sptr) {
-    if (sptr == nullptr) return false;
+    if (sptr == nullptr) return true;
     if (!sptr->is_type<MapNode>()) return false;
     MapNode* n = static_cast<MapNode*>(sptr);
     for (const auto& kv : n->data) {
@@ -114,9 +117,9 @@ inline TNodeRef TVMArgValue::AsNodeRef() const {
   static_assert(
       std::is_base_of<NodeRef, TNodeRef>::value,
       "Conversion only works for NodeRef");
-  if (type_code_ == kNull) return TNodeRef();
+  if (type_code_ == kNull) return TNodeRef(NodePtr<Node>(nullptr));
   TVM_CHECK_TYPE_CODE(type_code_, kNodeHandle);
-  std::shared_ptr<Node>& sptr = *ptr<std::shared_ptr<Node> >();
+  NodePtr<Node>& sptr = *ptr<NodePtr<Node> >();
   CHECK(NodeTypeChecker<TNodeRef>::Check(sptr.get()))
       << "Expected type " << NodeTypeName<TNodeRef>()
       << " but get " << sptr->type_key();
@@ -126,13 +129,15 @@ inline TNodeRef TVMArgValue::AsNodeRef() const {
 inline TVMArgValue::operator HalideIR::Expr() const {
   if (type_code_ == kNull) return Expr();
   if (type_code_ == kDLInt) {
+    CHECK_LE(value_.v_int64, std::numeric_limits<int>::max());
+    CHECK_GE(value_.v_int64, std::numeric_limits<int>::min());
     return Expr(static_cast<int>(value_.v_int64));
   }
   if (type_code_ == kDLFloat) {
     return Expr(static_cast<float>(value_.v_float64));
   }
   TVM_CHECK_TYPE_CODE(type_code_, kNodeHandle);
-  std::shared_ptr<Node>& sptr = *ptr<std::shared_ptr<Node> >();
+  NodePtr<Node>& sptr = *ptr<NodePtr<Node> >();
   if (sptr->is_type<IterVarNode>()) {
     return IterVar(sptr)->var;
   }
@@ -145,27 +150,41 @@ inline TVMArgValue::operator HalideIR::Expr() const {
   return Expr(sptr);
 }
 
-inline std::shared_ptr<Node>& TVMArgValue::node_sptr() {
+inline TVMArgValue::operator tvm::Integer() const {
+  if (type_code_ == kNull) return Integer();
+  if (type_code_ == kDLInt) {
+    CHECK_LE(value_.v_int64, std::numeric_limits<int>::max());
+    CHECK_GE(value_.v_int64, std::numeric_limits<int>::min());
+    return Integer(static_cast<int>(value_.v_int64));
+  }
+  NodePtr<Node>& sptr = *ptr<NodePtr<Node> >();
+  CHECK(NodeTypeChecker<Integer>::Check(sptr.get()))
+      << "Expected type " << NodeTypeName<Expr>()
+      << " but get " << sptr->type_key();
+  return Integer(sptr);
+}
+
+inline NodePtr<Node>& TVMArgValue::node_sptr() {
   TVM_CHECK_TYPE_CODE(type_code_, kNodeHandle);
-  return *ptr<std::shared_ptr<Node> >();
+  return *ptr<NodePtr<Node> >();
 }
 
 
 template<typename TNodeRef, typename>
 inline bool TVMArgValue::IsNodeType() const {
   TVM_CHECK_TYPE_CODE(type_code_, kNodeHandle);
-  std::shared_ptr<Node>& sptr =
-      *ptr<std::shared_ptr<Node> >();
+  NodePtr<Node>& sptr =
+      *ptr<NodePtr<Node> >();
   return NodeTypeChecker<TNodeRef>::Check(sptr.get());
 }
 
 // extensions for TVMRetValue
 inline TVMRetValue& TVMRetValue::operator=(
-    const std::shared_ptr<Node>& other) {
+    const NodePtr<Node>& other) {
   if (other.get() == nullptr) {
     SwitchToPOD(kNull);
   } else {
-    SwitchToClass<std::shared_ptr<Node> >(kNodeHandle, other);
+    SwitchToClass<NodePtr<Node> >(kNodeHandle, other);
   }
   return *this;
 }
@@ -174,7 +193,7 @@ inline TVMRetValue& TVMRetValue::operator=(const NodeRef& other) {
   if (!other.defined()) {
     SwitchToPOD(kNull);
   } else {
-    SwitchToClass<std::shared_ptr<Node> >(kNodeHandle, other.node_);
+    SwitchToClass<NodePtr<Node> >(kNodeHandle, other.node_);
   }
   return *this;
 }
@@ -186,7 +205,7 @@ inline TNodeRef TVMRetValue::AsNodeRef() const {
       "Conversion only works for NodeRef");
   if (type_code_ == kNull) return TNodeRef();
   TVM_CHECK_TYPE_CODE(type_code_, kNodeHandle);
-  std::shared_ptr<Node>& sptr = *ptr<std::shared_ptr<Node> >();
+  NodePtr<Node>& sptr = *ptr<NodePtr<Node> >();
   CHECK(NodeTypeChecker<TNodeRef>::Check(sptr.get()))
       << "Expected type " << NodeTypeName<TNodeRef>()
       << " but get " << sptr->type_key();
@@ -195,7 +214,7 @@ inline TNodeRef TVMRetValue::AsNodeRef() const {
 
 inline void TVMArgsSetter::operator()(size_t i, const NodeRef& other) const {  // NOLINT(*)
   if (other.defined()) {
-    values_[i].v_handle = const_cast<std::shared_ptr<Node>*>(&(other.node_));
+    values_[i].v_handle = const_cast<NodePtr<Node>*>(&(other.node_));
     type_codes_[i] = kNodeHandle;
   } else {
     type_codes_[i] = kNull;

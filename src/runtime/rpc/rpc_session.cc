@@ -11,7 +11,11 @@
 #include <array>
 #include <string>
 #include <chrono>
-#include "./rpc_session.h"
+#include <vector>
+#include <utility>
+#include <cmath>
+#include <algorithm>
+#include "rpc_session.h"
 #include "../../common/ring_buffer.h"
 
 namespace tvm {
@@ -130,19 +134,22 @@ class RPCSession::EventHandler : public dmlc::Stream {
           break;
         }
         case kReturnReceived: {
-          CHECK_EQ(arg_buf_->value.size(), 1U);
+          CHECK_GE(arg_buf_->value.size(), 1U);
+
           TVMArgValue argv = arg_buf_->AsTVMArgs()[0];
           if (argv.type_code() == kFuncHandle ||
-              argv.type_code() == kModuleHandle) {
+              argv.type_code() == kModuleHandle ||
+              argv.type_code() == kArrayHandle) {
             CHECK(fwrap != nullptr) << "function/module wrapper not available";
             fwrap->CallPacked(arg_buf_->AsTVMArgs(), rv);
           } else {
+            CHECK_EQ(arg_buf_->value.size(), 1U);
             *rv = argv;
           }
           arg_buf_.reset();
           this->SwitchToState(kRecvCode);
           std::swap(client_mode_, client_mode);
-          return  RPCCode::kReturn;
+          return RPCCode::kReturn;
         }
         case kCopyAckReceived: {
           std::swap(client_mode_, client_mode);
@@ -172,15 +179,22 @@ class RPCSession::EventHandler : public dmlc::Stream {
     ctx.device_type = static_cast<DLDeviceType>(dev_type % kRPCSessMask);
     return ctx;
   }
-  // send Packed sequence to writer.
-  void SendPackedSeq(const TVMValue* arg_values, const int* type_codes, int n) {
+  // Send Packed sequence to writer.
+  // return_ndarray is a special flag to handle returning of ndarray
+  //    In this case, we return the shape, context and data of the array,
+  //    as well as a customized PackedFunc that handles deletion of
+  //    the array in the remote.
+  void SendPackedSeq(const TVMValue* arg_values,
+                     const int* type_codes,
+                     int n,
+                     bool return_ndarray = false) {
     this->Write(n);
-    // only handles .
     for (int i = 0; i < n; ++i) {
       int tcode = type_codes[i];
       if (tcode == kNDArrayContainer) tcode = kArrayHandle;
       this->Write(tcode);
     }
+
     // Argument packing.
     for (int i = 0; i < n; ++i) {
       int tcode = type_codes[i];
@@ -215,18 +229,32 @@ class RPCSession::EventHandler : public dmlc::Stream {
         case kNDArrayContainer:
         case kArrayHandle: {
           DLTensor* arr = static_cast<DLTensor*>(value.v_handle);
-          TVMContext ctx = StripSessMask(arr->ctx);
-          uint64_t data = reinterpret_cast<uint64_t>(
-              static_cast<RemoteSpace*>(arr->data)->data);
+          TVMContext ctx;
+          uint64_t data;
+          if (!return_ndarray) {
+            // in the client mode
+            // ctx contains the remote table index
+            // the space is wrapped by an RemoteSpace
+            // that holds reference to the session.
+            ctx = StripSessMask(arr->ctx);
+            data = reinterpret_cast<uint64_t>(
+                static_cast<RemoteSpace*>(arr->data)->data);
+          } else {
+            // When we return NDArray, we directly return
+            // the space and the context
+            // The client will be further wrapping
+            ctx = arr->ctx;
+            data = reinterpret_cast<uint64_t>(arr->data);
+          }
           this->Write(data);
           this->Write(ctx);
           this->Write(arr->ndim);
           this->Write(arr->dtype);
           this->WriteArray(arr->shape, arr->ndim);
           CHECK(arr->strides == nullptr)
-              << "Donot support strided remote array";
+              << "Do not support strided remote array";
           CHECK_EQ(arr->byte_offset, 0)
-              << "Donot support send byte offset";
+              << "Do not support send byte offset";
           break;
         }
         case kNull: break;
@@ -458,29 +486,28 @@ class RPCSession::EventHandler : public dmlc::Stream {
           arg_recv_stage_ = 1;
           this->RequestBytes(len);
           break;
-        break;
-      }
-      case kArrayHandle: {
-        temp_array_.reset(new RPCDataArrayBuffer());
-        uint64_t handle;
-        this->Read(&handle);
-        DLTensor& tensor = temp_array_->tensor;
-        tensor.data = reinterpret_cast<void*>(handle);
-        this->Read(&(tensor.ctx));
-        this->Read(&(tensor.ndim));
-        this->Read(&(tensor.dtype));
-        temp_array_->shape.resize(tensor.ndim);
-        tensor.shape = temp_array_->shape.data();
-        arg_recv_stage_ = 1;
-        tensor.strides = nullptr;
-        tensor.byte_offset = 0;
-        this->RequestBytes(sizeof(int64_t) * tensor.ndim);
-        break;
-      }
-      default: {
-        LOG(FATAL) << "RPC cannot handle type " << TypeCode2Str(tcode);
-        break;
-      }
+        }
+        case kArrayHandle: {
+          temp_array_.reset(new RPCDataArrayBuffer());
+          uint64_t handle;
+          this->Read(&handle);
+          DLTensor& tensor = temp_array_->tensor;
+          tensor.data = reinterpret_cast<void*>(handle);
+          this->Read(&(tensor.ctx));
+          this->Read(&(tensor.ndim));
+          this->Read(&(tensor.dtype));
+          temp_array_->shape.resize(tensor.ndim);
+          tensor.shape = temp_array_->shape.data();
+          arg_recv_stage_ = 1;
+          tensor.strides = nullptr;
+          tensor.byte_offset = 0;
+          this->RequestBytes(sizeof(int64_t) * tensor.ndim);
+          break;
+        }
+        default: {
+          LOG(FATAL) << "RPC cannot handle type " << TypeCode2Str(tcode);
+          break;
+        }
       }
     } else {
       CHECK_EQ(arg_recv_stage_, 1);
@@ -701,6 +728,21 @@ class RPCSession::EventHandler : public dmlc::Stream {
               << "Only server can send function and module handle back.";
         rv.MoveToCHost(&ret_value, &ret_tcode);
         SendPackedSeq(&ret_value, &ret_tcode, 1);
+      } else if (rv.type_code() == kNDArrayContainer) {
+        // always send handle in 64 bit.
+        CHECK(!client_mode_)
+            << "Only server can send NDArray back";
+        // We follow a special protocol to return NDArray to client side
+        // The first pack value is the NDArray handle as DLTensor
+        // The second pack value is a customized deleter that deletes the NDArray.
+        TVMValue ret_value_pack[2];
+        int ret_tcode_pack[2];
+        rv.MoveToCHost(&ret_value_pack[0], &ret_tcode_pack[0]);
+
+        NDArray::Container* nd = static_cast<NDArray::Container*>(ret_value_pack[0].v_handle);
+        ret_value_pack[1].v_handle = nd;
+        ret_tcode_pack[1] = kHandle;
+        SendPackedSeq(ret_value_pack, ret_tcode_pack, 2, true);
       } else {
         ret_value = rv.value();
         ret_tcode = rv.type_code();
@@ -961,9 +1003,9 @@ void RPCSession::CopyFromRemote(void* from,
 }
 
 RPCFuncHandle RPCSession::GetTimeEvaluator(
-    RPCFuncHandle fhandle, TVMContext ctx, int number, int repeat) {
+    RPCFuncHandle fhandle, TVMContext ctx, int number, int repeat, int min_repeat_ms) {
   return this->CallRemote(
-      RPCCode::kGetTimeEvaluator, fhandle, ctx, number, repeat);
+      RPCCode::kGetTimeEvaluator, fhandle, ctx, number, repeat, min_repeat_ms);
 }
 
 // Event handler functions
@@ -1090,9 +1132,14 @@ void RPCModuleGetSource(TVMArgs args, TVMRetValue *rv) {
   *rv = (*static_cast<Module*>(mhandle))->GetSource(fmt);
 }
 
+void RPCNDArrayFree(TVMArgs args, TVMRetValue *rv) {
+  void* handle = args[0];
+  static_cast<NDArray::Container*>(handle)->DecRef();
+}
+
 void RPCGetTimeEvaluator(TVMArgs args, TVMRetValue *rv) {
   PackedFunc *pf = static_cast<PackedFunc*>(args[0].operator void*());
-  void *fhandle = new PackedFunc(WrapTimeEvaluator(*pf, args[1], args[2], args[3]));
+  void *fhandle = new PackedFunc(WrapTimeEvaluator(*pf, args[1], args[2], args[3], args[4]));
   delete pf;
   *rv = fhandle;
 }
@@ -1138,26 +1185,48 @@ void RPCSession::EventHandler::HandlePackedCall() {
     case RPCCode::kModuleFree: CallHandler(RPCModuleFree); break;
     case RPCCode::kModuleGetFunc: CallHandler(RPCModuleGetFunc); break;
     case RPCCode::kModuleGetSource: CallHandler(RPCModuleGetSource); break;
+    case RPCCode::kNDArrayFree: CallHandler(RPCNDArrayFree); break;
     default: LOG(FATAL) << "Unknown event " << static_cast<int>(code_);
   }
   CHECK_EQ(state_, kRecvCode);
 }
 
-PackedFunc WrapTimeEvaluator(PackedFunc pf, TVMContext ctx, int number, int repeat) {
-  auto ftimer = [pf, ctx, number, repeat](TVMArgs args, TVMRetValue *rv) {
+PackedFunc WrapTimeEvaluator(PackedFunc pf,
+                             TVMContext ctx,
+                             int number,
+                             int repeat,
+                             int min_repeat_ms) {
+  auto ftimer = [pf, ctx, number, repeat, min_repeat_ms](TVMArgs args, TVMRetValue *rv) mutable {
     TVMRetValue temp;
     std::ostringstream os;
     // skip first time call, to activate lazy compilation components.
     pf.CallPacked(args, &temp);
     DeviceAPI::Get(ctx)->StreamSync(ctx, nullptr);
+
     for (int i = 0; i < repeat; ++i) {
-      // start timing
-      auto tbegin = std::chrono::high_resolution_clock::now();
-      for (int i = 0; i < number; ++i) {
-        pf.CallPacked(args, &temp);
-      }
-      DeviceAPI::Get(ctx)->StreamSync(ctx, nullptr);
-      auto tend = std::chrono::high_resolution_clock::now();
+      std::chrono::time_point<
+        std::chrono::high_resolution_clock, std::chrono::nanoseconds> tbegin, tend;
+      double duration_ms = 0.0;
+
+      do {
+        if (duration_ms > 0.0) {
+          number = static_cast<int>(
+              std::max((min_repeat_ms / (duration_ms / number) + 1),
+                       number * 1.618));   // 1.618 is chosen by random
+        }
+
+        tbegin = std::chrono::high_resolution_clock::now();
+        // start timing
+        for (int i = 0; i < number; ++i) {
+          pf.CallPacked(args, &temp);
+        }
+        DeviceAPI::Get(ctx)->StreamSync(ctx, nullptr);
+        tend = std::chrono::high_resolution_clock::now();
+
+        duration_ms = std::chrono::duration_cast<std::chrono::duration<double> >
+            (tend - tbegin).count() * 1000;
+      } while (duration_ms < min_repeat_ms);
+
       double speed = std::chrono::duration_cast<std::chrono::duration<double> >(
           tend - tbegin).count() / number;
       os.write(reinterpret_cast<char*>(&speed), sizeof(speed));

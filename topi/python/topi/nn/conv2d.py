@@ -16,7 +16,7 @@ Workload = namedtuple('Workload',
                        'hkernel', 'wkernel', 'hpad', 'wpad', 'hstride', 'wstride'])
 
 @tvm.target.generic_func
-def conv2d(input, filter, strides, padding, layout='NCHW', out_dtype=None):
+def conv2d(input, filter, strides, padding, dilation, layout='NCHW', out_dtype=None):
     """Conv2D operator.
 
     Parameters
@@ -33,6 +33,9 @@ def conv2d(input, filter, strides, padding, layout='NCHW', out_dtype=None):
     padding : int or a list/tuple of two ints
         padding size, or [pad_height, pad_width]
 
+    dilation: int or a list/tuple of two ints
+        dilation size, or [dilation_height, dilation_width]
+
     layout : str
         layout of data
 
@@ -44,27 +47,34 @@ def conv2d(input, filter, strides, padding, layout='NCHW', out_dtype=None):
     # search platform specific declaration first
     # default declaration
     if layout == 'NCHW':
-        return conv2d_nchw(input, filter, strides, padding, out_dtype)
+        return conv2d_nchw(input, filter, strides, padding, dilation, out_dtype)
     elif layout == 'HWCN':
-        return conv2d_hwcn(input, filter, strides, padding, out_dtype)
+        return conv2d_hwcn(input, filter, strides, padding, dilation, out_dtype)
     elif layout == 'NHWC':
-        return conv2d_nhwc(input, filter, strides, padding, out_dtype)
+        return conv2d_nhwc(input, filter, strides, padding, dilation, out_dtype)
     else:
         raise ValueError("not support this layout {} yet".format(layout))
 
 
 @tvm.target.generic_func
-def conv2d_alter_layout(attrs, inputs, tinfos):
+def conv2d_alter_layout(attrs, inputs, tinfos, F):
     """Change Conv2D layout.
 
     Parameters
     ----------
-    attrs : nnvm.top.AttrDict
+    attrs : nnvm.top.AttrDict or tvm.attrs.Attrs
         Attributes of current convolution
-    inputs : nnvm.symbol
+    inputs : nnvm.symbol or tvm.relay.Expr
         Grouped input symbols
     tinfos : list
         Input shape and dtype
+    F: symbol
+        The context, can be either nnvm.sym or relay.op
+
+    Note
+    ----
+    Unlike other TOPI functions, this function operates on both graph level and operator level,
+    so we have to pass 'F' to make it support our two versions of graph IR, NNVM and Relay.
     """
     # not to change by default
     return None
@@ -79,46 +89,13 @@ def _get_workload(data, kernel, stride, padding, out_dtype):
         HSTR, WSTR = stride
     else:
         HSTR, WSTR = stride, stride
-    assert data.dtype == kernel.dtype, \
+    assert (data.dtype == kernel.dtype) or (data.dtype == 'uint8' and kernel.dtype == 'int8'), \
         "Do not support inputs with different data types now. ' \
         '{} vs. {}".format(data.dtype, kernel.dtype)
     return Workload(data.dtype, out_dtype, IH, IW, CI, CO, KH, KW, HPAD, WPAD, HSTR, WSTR)
 
 
-@tvm.target.generic_func
-def _get_alter_layout_schedule(wkl):
-    # pylint: disable=unreachable
-    """ Get the platform specific schedule for conv2d_alter_layout. """
-    target = tvm.target.current_target()
-    raise RuntimeError(
-        "No schedule for current target:{}".format(target))
-    # This return has no use, merely to supress pylint warning
-    return wkl
-
-
-@tvm.target.generic_func
-def _get_schedule(wkl):
-    # pylint: disable=unreachable
-    """ Get the platform specific schedule. """
-    target = tvm.target.current_target()
-    raise RuntimeError(
-        "No schedule for current target:{}".format(target))
-    # This return has no use, merely to supress pylint warning
-    return wkl
-
-
-@tvm.target.generic_func
-def _get_schedule_NCHWc(wkl, layout, out_layout):
-    # pylint: disable=unreachable
-    """ Get the platform specific schedule. """
-    target = tvm.target.current_target()
-    raise RuntimeError(
-        "No schedule for current target:{}".format(target))
-    # This return has no use, merely to supress pylint warning
-    return wkl
-
-
-def conv2d_nchw(Input, Filter, stride, padding, out_dtype=None):
+def conv2d_nchw(Input, Filter, stride, padding, dilation, out_dtype=None):
     """Convolution operator in NCHW layout.
 
     Parameters
@@ -135,6 +112,9 @@ def conv2d_nchw(Input, Filter, stride, padding, out_dtype=None):
     padding : int or str
         Padding size, or ['VALID', 'SAME']
 
+    dilation: int or a list/tuple of two ints
+        dilation size, or [dilation_height, dilation_width]
+
     Returns
     -------
     Output : tvm.Tensor
@@ -143,18 +123,27 @@ def conv2d_nchw(Input, Filter, stride, padding, out_dtype=None):
     if out_dtype is None:
         out_dtype = Input.dtype
     assert isinstance(stride, int) or len(stride) == 2
-    batch, in_channel, in_height, in_width = Input.shape
-    num_filter, channel, kernel_h, kernel_w = Filter.shape
+    assert isinstance(dilation, int) or len(dilation) == 2
     if isinstance(stride, int):
         stride_h = stride_w = stride
     else:
         stride_h, stride_w = stride
-    pad_top, pad_left, pad_down, pad_right = get_pad_tuple(
-        padding, (kernel_h, kernel_w))
+
+    if isinstance(dilation, int):
+        dilation_h = dilation_w = dilation
+    else:
+        dilation_h, dilation_w = dilation
+
+    batch, in_channel, in_height, in_width = Input.shape
+    num_filter, channel, kernel_h, kernel_w = Filter.shape
     # compute the output shape
+    dilated_kernel_h = (kernel_h - 1) * dilation_h + 1
+    dilated_kernel_w = (kernel_w - 1) * dilation_w + 1
+    pad_top, pad_left, pad_down, pad_right = get_pad_tuple(
+        padding, (dilated_kernel_h, dilated_kernel_w))
     out_channel = num_filter
-    out_height = simplify((in_height - kernel_h + pad_top + pad_down) // stride_h + 1)
-    out_width = simplify((in_width - kernel_w + pad_left + pad_right) // stride_w + 1)
+    out_height = simplify((in_height - dilated_kernel_h + pad_top + pad_down) // stride_h + 1)
+    out_width = simplify((in_width - dilated_kernel_w + pad_left + pad_right) // stride_w + 1)
     # compute graph
     pad_before = [0, 0, pad_top, pad_left]
     pad_after = [0, 0, pad_down, pad_right]
@@ -166,12 +155,13 @@ def conv2d_nchw(Input, Filter, stride, padding, out_dtype=None):
     return tvm.compute(
         (batch, out_channel, out_height, out_width),
         lambda nn, ff, yy, xx: tvm.sum(
-            temp[nn, rc, yy * stride_h + ry, xx * stride_w + rx].astype(out_dtype) *
+            temp[nn, rc, yy * stride_h + ry * dilation_h,
+                 xx * stride_w + rx * dilation_w].astype(out_dtype) *
             Filter[ff, rc, ry, rx].astype(out_dtype),
             axis=[rc, ry, rx]), tag="conv2d_nchw")
 
 
-def conv2d_hwcn(Input, Filter, stride, padding, out_dtype=None):
+def conv2d_hwcn(Input, Filter, stride, padding, dilation, out_dtype=None):
     """Convolution operator in HWCN layout.
 
     Parameters
@@ -188,6 +178,9 @@ def conv2d_hwcn(Input, Filter, stride, padding, out_dtype=None):
     padding : int or str
         Padding size, or ['VALID', 'SAME']
 
+    dilation: int or a list/tuple of two ints
+        dilation size, or [dilation_height, dilation_width]
+
     Returns
     -------
     output : tvm.Tensor
@@ -196,19 +189,28 @@ def conv2d_hwcn(Input, Filter, stride, padding, out_dtype=None):
     if out_dtype is None:
         out_dtype = Input.dtype
     assert isinstance(stride, int) or len(stride) == 2
-    in_height, in_width, in_channel, batch = Input.shape
-    kernel_h, kernel_w, channel, num_filter = Filter.shape
+    assert isinstance(dilation, int) or len(dilation) == 2
+
     if isinstance(stride, int):
         stride_h = stride_w = stride
     else:
         stride_h, stride_w = stride
 
-    pad_top, pad_left, pad_down, pad_right = get_pad_tuple(
-        padding, (kernel_h, kernel_w))
+    if isinstance(dilation, int):
+        dilation_h = dilation_w = dilation
+    else:
+        dilation_h, dilation_w = dilation
+
+    in_height, in_width, in_channel, batch = Input.shape
+    kernel_h, kernel_w, channel, num_filter = Filter.shape
     # compute the output shape
+    dilated_kernel_h = (kernel_h - 1) * dilation_h + 1
+    dilated_kernel_w = (kernel_w - 1) * dilation_w + 1
+    pad_top, pad_left, pad_down, pad_right = get_pad_tuple(
+        padding, (dilated_kernel_h, dilated_kernel_w))
     out_channel = num_filter
-    out_height = simplify((in_height - kernel_h + pad_top + pad_down) // stride_h + 1)
-    out_width = simplify((in_width - kernel_w + pad_left + pad_right) // stride_w + 1)
+    out_height = simplify((in_height - dilated_kernel_h + pad_top + pad_down) // stride_h + 1)
+    out_width = simplify((in_width - dilated_kernel_w + pad_left + pad_right) // stride_w + 1)
     pad_before = [pad_top, pad_left, 0, 0]
     pad_after = [pad_down, pad_right, 0, 0]
     PaddedInput = pad(Input, pad_before, pad_after, name="PaddedInput")
@@ -218,13 +220,14 @@ def conv2d_hwcn(Input, Filter, stride, padding, out_dtype=None):
     Output = tvm.compute(
         (out_height, out_width, out_channel, batch),
         lambda yy, xx, ff, nn: tvm.sum(
-            PaddedInput[yy * stride_h + ry, xx * stride_w + rx, rc, nn].astype(out_dtype) *
+            PaddedInput[yy * stride_h + ry * dilation_h, xx * stride_w + rx * dilation_w,
+                        rc, nn].astype(out_dtype) *
             Filter[ry, rx, rc, ff].astype(out_dtype), axis=[ry, rx, rc]),
         name="Conv2dOutput", tag="conv2d_hwcn")
     return Output
 
 
-def conv2d_nhwc(Input, Filter, stride, padding, out_dtype='float32'):
+def conv2d_nhwc(Input, Filter, stride, padding, dilation, out_dtype='float32'):
     """Convolution operator in NHWC layout.
 
     Parameters
@@ -241,25 +244,37 @@ def conv2d_nhwc(Input, Filter, stride, padding, out_dtype='float32'):
     padding : int or str
         Padding size, or ['VALID', 'SAME']
 
+    dilation: int or a list/tuple of two ints
+        dilation size, or [dilation_height, dilation_width]
+
     Returns
     -------
     output : tvm.Tensor
         4-D with shape [batch, out_height, out_width, out_channel]
     """
     assert isinstance(stride, int) or len(stride) == 2
-    batch, in_height, in_width, in_channel = Input.shape
-    kernel_h, kernel_w, channel, num_filter = Filter.shape
+    assert isinstance(dilation, int) or len(dilation) == 2
+
     if isinstance(stride, int):
         stride_h = stride_w = stride
     else:
         stride_h, stride_w = stride
 
-    pad_top, pad_left, pad_down, pad_right = get_pad_tuple(
-        padding, (kernel_h, kernel_w))
+    if isinstance(dilation, int):
+        dilation_h = dilation_w = dilation
+    else:
+        dilation_h, dilation_w = dilation
+
+    batch, in_height, in_width, in_channel = Input.shape
+    kernel_h, kernel_w, channel, num_filter = Filter.shape
     # compute the output shape
+    dilated_kernel_h = (kernel_h - 1) * dilation_h + 1
+    dilated_kernel_w = (kernel_w - 1) * dilation_w + 1
+    pad_top, pad_left, pad_down, pad_right = get_pad_tuple(
+        padding, (dilated_kernel_h, dilated_kernel_w))
     out_channel = num_filter
-    out_height = simplify((in_height - kernel_h + pad_top + pad_down) // stride_h + 1)
-    out_width = simplify((in_width - kernel_w + pad_left + pad_right) // stride_w + 1)
+    out_height = simplify((in_height - dilated_kernel_h + pad_top + pad_down) // stride_h + 1)
+    out_width = simplify((in_width - dilated_kernel_w + pad_left + pad_right) // stride_w + 1)
     pad_before = [0, pad_top, pad_left, 0]
     pad_after = [0, pad_down, pad_right, 0]
     PaddedInput = pad(Input, pad_before, pad_after, name="PaddedInput")
@@ -269,15 +284,15 @@ def conv2d_nhwc(Input, Filter, stride, padding, out_dtype='float32'):
     Output = tvm.compute(
         (batch, out_height, out_width, out_channel),
         lambda nn, yy, xx, ff: tvm.sum(
-            PaddedInput[nn, yy * stride_h + ry, xx * stride_w + rx, rc].astype(out_dtype) *
+            PaddedInput[nn, yy * stride_h + ry * dilation_h,
+                        xx * stride_w + rx * dilation_w, rc].astype(out_dtype) *
             Filter[ry, rx, rc, ff].astype(out_dtype), axis=[ry, rx, rc]),
         name="Conv2dOutput", tag="conv2d_nhwc")
     return Output
 
 
 @tvm.target.generic_func
-def conv2d_NCHWc(data, kernel, num_filter, kernel_size, stride,
-                 padding, layout, out_layout, out_dtype='float32'):
+def conv2d_NCHWc(data, kernel, stride, padding, dilation, layout, out_layout, out_dtype='float32'):
     """Conv2D operator for nChw[x]c layout.
 
     Parameters
@@ -290,17 +305,14 @@ def conv2d_NCHWc(data, kernel, num_filter, kernel_size, stride,
         [num_filter_chunk, in_channel_chunk, filter_height, filter_width,
         in_channel_block, num_filter_block]
 
-    num_filter : int
-        number of filters, i.e., output channel size
-
-    kernel_size : tuple of two ints
-       [kernel_height, kernel_width]
-
     stride : int or a list/tuple of two ints
         stride size, or [stride_height, stride_width]
 
     padding : int or a list/tuple of two ints
         padding size, or [pad_height, pad_width]
+
+    dilation: int or a list/tuple of two ints
+        dilation size, or [dilation_height, dilation_width]
 
     layout : str
         Input data layout
@@ -373,7 +385,7 @@ def conv2d_winograd_weight_transform(kernel, tile_size):
 
 
 @tvm.target.generic_func
-def conv2d_winograd_without_weight_transform(input, filter, strides, padding,
+def conv2d_winograd_without_weight_transform(input, filter, strides, padding, dilation,
                                              layout, out_dtype, tile_size):
     """Compute convolution in winograd algorithm. The filter is supposed to be transformed
     in advance.
@@ -397,3 +409,80 @@ def conv2d_winograd_without_weight_transform(input, filter, strides, padding,
         4-D with shape [batch, out_height, out_width, out_channel]
     """
     raise ValueError("missing register for topi.nn.conv2d_winograd_without_weight_transform")
+
+
+@tvm.target.generic_func
+def group_conv2d_nchw(Input, Filter, stride, padding, dilation, groups, out_dtype=None):
+    """Group convolution operator in NCHW layout.
+
+    Parameters
+    ----------
+    Input : tvm.Tensor
+        4-D with shape [batch, in_channel, in_height, in_width]
+
+    Filter : tvm.Tensor
+        4-D with shape [num_filter, in_channel // groups, filter_height, filter_width]
+
+    stride : int or a list/tuple of two ints
+        Stride size, or [stride_height, stride_width]
+
+    padding : int or str
+        Padding size, or ['VALID', 'SAME']
+
+    dilation : int or a list/tuple of two ints
+        dilation size, or [dilation_height, dilation_width]
+
+    groups : int
+        number of groups
+
+    out_dtype : str
+        The output type. This is used for mixed precision.
+
+    Returns
+    -------
+    Output : tvm.Tensor
+        4-D with shape [batch, out_channel, out_height, out_width]
+    """
+    if out_dtype is None:
+        out_dtype = Input.dtype
+    assert isinstance(stride, int) or len(stride) == 2
+    assert isinstance(dilation, int) or len(dilation) == 2
+    if isinstance(stride, int):
+        stride_h = stride_w = stride
+    else:
+        stride_h, stride_w = stride
+
+    if isinstance(dilation, int):
+        dilation_h = dilation_w = dilation
+    else:
+        dilation_h, dilation_w = dilation
+
+    batch, in_channel, in_height, in_width = get_const_tuple(Input.shape)
+    num_filter, _, kernel_h, kernel_w = get_const_tuple(Filter.shape)
+
+    assert in_channel % groups == 0, "input channels must divide group size"
+    assert num_filter % groups == 0, "output channels must divide group size"
+
+    pad_top, pad_left, pad_down, pad_right = get_pad_tuple(
+        padding, (kernel_h, kernel_w))
+    # compute the output shape
+    out_channel = num_filter
+    out_height = simplify(
+        (in_height - (kernel_h - 1) * dilation_h - 1 + pad_top + pad_down) // stride_h + 1)
+    out_width = simplify(
+        (in_width - (kernel_w - 1) * dilation_w - 1 + pad_left + pad_right) // stride_w + 1)
+    # compute graph
+    pad_before = [0, 0, pad_top, pad_left]
+    pad_after = [0, 0, pad_down, pad_right]
+    temp = pad(Input, pad_before, pad_after, name="pad_temp")
+    rc = tvm.reduce_axis((0, in_channel // groups), name='rc')
+    ry = tvm.reduce_axis((0, kernel_h), name='ry')
+    rx = tvm.reduce_axis((0, kernel_w), name='rx')
+    return tvm.compute(
+        (batch, out_channel, out_height, out_width),
+        lambda nn, ff, yy, xx: tvm.sum(
+            temp[nn, ff // (num_filter//groups) * (in_channel//groups) + rc,
+                 yy * stride_h + ry * dilation_h,
+                 xx * stride_w + rx * dilation_w].astype(out_dtype) *
+            Filter[ff, rc, ry, rx].astype(out_dtype),
+            axis=[rc, ry, rx]), tag="conv2d_nchw")

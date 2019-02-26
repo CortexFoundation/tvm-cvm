@@ -12,7 +12,7 @@
 #include <nnvm/op_attr_types.h>
 #include <nnvm/compiler/op_attr_types.h>
 #include <nnvm/top/nn.h>
-#include "./nn_common.h"
+#include "nn_common.h"
 #include "../op_common.h"
 #include "../elemwise_op_common.h"
 #include "topi/nn/dense.h"
@@ -410,7 +410,8 @@ NNVM_REGISTER_OP(log_softmax)
                     const Array<Tensor>& inputs,
                     const Array<Tensor>& out_info) {
     const SoftmaxParam& param = nnvm::get<SoftmaxParam>(attrs.parsed);
-    CHECK_EQ(param.axis, -1) << "Currently only axis=-1 is supported";
+    CHECK(param.axis == -1 || param.axis == static_cast<int32_t>(inputs[0].ndim()) - 1)
+        << "log_softmax currently only works on last dimension";
     return Array<Tensor>{ topi::nn::log_softmax(inputs[0]) };
   })
 .set_attr<FGradient>(
@@ -619,7 +620,8 @@ NNVM_REGISTER_OP(pad)
     for (size_t i = 0; i < pad_width.ndim(); ++i) {
       pad_after.push_back(tvm::make_const(tvm::Int(32), pad_width[i][1]));
     }
-    return Array<Tensor>{ topi::pad(inputs[0], pad_before, pad_after, param.pad_value) };
+    return Array<Tensor>{ topi::pad(inputs[0], pad_before, pad_after,
+                          tvm::make_const(inputs[0]->dtype, param.pad_value)) };
 })
 .set_support_level(1);
 

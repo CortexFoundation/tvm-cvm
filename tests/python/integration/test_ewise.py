@@ -31,13 +31,52 @@ def test_exp():
         a = tvm.nd.array(np.random.uniform(size=n).astype(A.dtype), ctx)
         b = tvm.nd.array(np.zeros(n, dtype=B.dtype), ctx)
         fexp(a, b)
-        np.testing.assert_allclose(
+        tvm.testing.assert_allclose(
             b.asnumpy(), np.exp(a.asnumpy()), rtol=1e-5)
 
     check_device("opencl -device=intel_graphics")
     check_device("cuda", "llvm")
     check_device("vulkan")
 
+def test_fmod():
+    # graph
+    def run(dtype):
+        n = tvm.var('n')
+        A = tvm.placeholder((n,), name='A', dtype=dtype)
+        B = tvm.placeholder((n,), name='B', dtype=dtype)
+        C = tvm.compute(A.shape, lambda *i: tvm.fmod(A(*i), B(*i)), name='C')
+        s = tvm.create_schedule(C.op)
+        # create iter var and assign them tags.
+        num_thread = 8
+        bx, tx = s[C].split(C.op.axis[0], factor=num_thread)
+
+        def check_device(device):
+            ctx = tvm.context(device, 0)
+            if not ctx.exist:
+                print("skip because %s is not enabled.." % device)
+                return
+            target = tvm.target.create(device)
+            if "cpu" not in target.keys:
+                s[C].bind(bx, tvm.thread_axis("blockIdx.x"))
+                s[C].bind(tx, tvm.thread_axis("threadIdx.x"))
+            fmod = tvm.build(s, [A, B, C], device, name="myfmod")
+
+            # launch the kernel.
+            n = 1024
+            a = tvm.nd.array((np.random.uniform(size=n) * 256).astype(A.dtype), ctx)
+            b = tvm.nd.array((np.random.uniform(size=n) * 256).astype(B.dtype), ctx)
+            c = tvm.nd.array(np.zeros(n, dtype=C.dtype), ctx)
+            ftimer = fmod.time_evaluator(fmod.entry_name, ctx, number=1)
+            tcost = ftimer(a, b, c).mean
+            #fmod(a, b, c)
+            np.testing.assert_allclose(
+                c.asnumpy(), np.mod(a.asnumpy(), b.asnumpy()), rtol=1e-5)
+
+        check_device("cuda")
+        check_device("opencl -device=intel_graphics")
+        check_device("metal")
+
+    run("float32")
 
 def test_multiple_cache_write():
     # graph
@@ -75,7 +114,7 @@ def test_multiple_cache_write():
         a1 = tvm.nd.array(np.random.uniform(size=n).astype(A1.dtype), ctx)
         c = tvm.nd.array(np.zeros(n, dtype=C.dtype), ctx)
         func(a0, a1, c)
-        np.testing.assert_allclose(
+        tvm.testing.assert_allclose(
             c.asnumpy(), a0.asnumpy() + a1.asnumpy() + (a0.asnumpy() * a1.asnumpy()),
             rtol=1e-5)
 
@@ -106,7 +145,7 @@ def test_log_pow_llvm():
     ftimer = flog.time_evaluator(flog.entry_name, ctx, number=1, repeat=repeat)
     res = ftimer(a, b)
     assert(len(res.results) == repeat)
-    np.testing.assert_allclose(
+    tvm.testing.assert_allclose(
         b.asnumpy(), np.power(np.log(a.asnumpy()), 2.0), rtol=1e-5)
 
 
@@ -136,7 +175,7 @@ def test_popcount():
             a = tvm.nd.array(np.random.randint(low=0, high=1000, size=n, dtype=A.dtype), ctx)
             b = tvm.nd.array(np.zeros(shape=n, dtype=B.dtype), ctx)
             func(a, b)
-            np.testing.assert_allclose(
+            tvm.testing.assert_allclose(
                 b.asnumpy(), list(map(lambda x: bin(x).count('1'), a.asnumpy())), rtol=1e-5)
 
         check_device("llvm")
@@ -186,7 +225,7 @@ def test_add():
             c = tvm.nd.array(np.zeros(n, dtype=C.dtype), ctx)
             ftimer = fadd.time_evaluator(fadd.entry_name, ctx, number=1)
             tcost = ftimer(a, b, c).mean
-            np.testing.assert_allclose(
+            tvm.testing.assert_allclose(
                 c.asnumpy(), a.asnumpy() + b.asnumpy(), rtol=1e-6)
 
         check_device("opencl")
@@ -233,7 +272,7 @@ def try_warp_memory():
         a = tvm.nd.array((np.random.uniform(size=m) * 256).astype(A.dtype), ctx)
         b = tvm.nd.array(np.zeros(m, dtype=B.dtype), ctx)
         f(a, b)
-        np.testing.assert_allclose(
+        tvm.testing.assert_allclose(
             b.asnumpy(), a.asnumpy() + 3, rtol=1e-6)
     check_device("cuda")
 
@@ -245,3 +284,4 @@ if __name__ == "__main__":
     test_add()
     test_log_pow_llvm()
     test_popcount()
+    test_fmod()

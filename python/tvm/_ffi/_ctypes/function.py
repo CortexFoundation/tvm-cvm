@@ -15,8 +15,9 @@ from . import ndarray as _nd
 from .ndarray import NDArrayBase, _make_array
 from .types import TVMValue, TypeCode
 from .types import TVMPackedCFunc, TVMCFuncFinalizer
-from .types import RETURN_SWITCH, C_TO_PY_ARG_SWITCH, _wrap_arg_func
+from .types import RETURN_SWITCH, C_TO_PY_ARG_SWITCH, _wrap_arg_func, _ctx_to_int64
 from .node import NodeBase
+from . import node as _node
 
 FunctionHandle = ctypes.c_void_p
 ModuleHandle = ctypes.c_void_p
@@ -109,7 +110,7 @@ def _make_tvm_args(args, temp_args):
             values[i].v_str = c_str(str(arg))
             type_codes[i] = TypeCode.STR
         elif isinstance(arg, TVMContext):
-            values[i].v_ctx = arg
+            values[i].v_int64 = _ctx_to_int64(arg)
             type_codes[i] = TypeCode.TVM_CONTEXT
         elif isinstance(arg, bytearray):
             arr = TVMByteArray()
@@ -186,6 +187,23 @@ class FunctionBase(object):
         _ = args
         return RETURN_SWITCH[ret_tcode.value](ret_val)
 
+
+def __init_handle_by_constructor__(fconstructor, args):
+    """Initialize handle by constructor"""
+    temp_args = []
+    values, tcodes, num_args = _make_tvm_args(args, temp_args)
+    ret_val = TVMValue()
+    ret_tcode = ctypes.c_int()
+    check_call(_LIB.TVMFuncCall(
+        fconstructor.handle, values, tcodes, ctypes.c_int(num_args),
+        ctypes.byref(ret_val), ctypes.byref(ret_tcode)))
+    _ = temp_args
+    _ = args
+    assert ret_tcode.value == TypeCode.NODE_HANDLE
+    handle = ret_val.v_handle
+    return handle
+
+
 def _return_module(x):
     """Return function"""
     handle = x.v_handle
@@ -202,6 +220,7 @@ def _handle_return_func(x):
 
 
 # setup return handle for function type
+_node.__init_by_constructor__ = __init_handle_by_constructor__
 RETURN_SWITCH[TypeCode.FUNC_HANDLE] = _handle_return_func
 RETURN_SWITCH[TypeCode.MODULE_HANDLE] = _return_module
 RETURN_SWITCH[TypeCode.NDARRAY_CONTAINER] = lambda x: _make_array(x.v_handle, False)

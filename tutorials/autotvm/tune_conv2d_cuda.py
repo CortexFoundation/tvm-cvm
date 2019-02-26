@@ -10,7 +10,7 @@ vendor provided library CuDNN in many cases.
 
 ######################################################################
 # Install dependencies
-# ----------------------------------------
+# --------------------
 # To use autotvm package in tvm, we need to install some extra dependencies.
 # (change "3" to "2" if you use python2):
 #
@@ -20,7 +20,6 @@ vendor provided library CuDNN in many cases.
 #
 # To make tvm run faster in tuning, it is recommended to use cython
 # as FFI of tvm. In the root directory of tvm, execute
-# (change "3" to "2" if you use python2):
 #
 # .. code-block:: bash
 #
@@ -41,7 +40,7 @@ from tvm import autotvm
 
 ######################################################################
 # Step 1:  Define the search space
-# ---------------------------------
+# --------------------------------
 # There are plenty of useful schedule primitives in tvm. You can also find 
 # some tutorials that describe them in more details, such as 
 # (1). :ref:`opt-conv-gpu`
@@ -64,13 +63,28 @@ from tvm import autotvm
 #
 
 @autotvm.template
-def conv2d_no_batching(N, H, W, CI, CO, KH, KW, stride, padding):
+def conv2d_no_batching(N, H, W, CO, CI, KH, KW, stride, padding):
     assert N == 1, "Only consider batch_size = 1 in this template"
 
     data = tvm.placeholder((N, CI, H, W), name='data')
     kernel = tvm.placeholder((CO, CI, KH, KW), name='kernel')
-    conv = topi.nn.conv2d_nchw(data, kernel, stride, padding, 'float32')
+    conv = topi.nn.conv2d_nchw(data, kernel, stride, padding, dilation=1, out_dtype='float32')
     s = tvm.create_schedule([conv.op])
+
+    ##### space definition begin #####
+    n, f, y, x = s[conv].op.axis
+    rc, ry, rx = s[conv].op.reduce_axis
+
+    cfg = autotvm.get_config()
+    cfg.define_split("tile_f", f, num_outputs=4)
+    cfg.define_split("tile_y", y, num_outputs=4)
+    cfg.define_split("tile_x", x, num_outputs=4)
+    cfg.define_split("tile_rc", rc, num_outputs=3)
+    cfg.define_split("tile_ry", ry, num_outputs=3)
+    cfg.define_split("tile_rx", rx, num_outputs=3)
+    cfg.define_knob("auto_unroll_max_step", [0, 512, 1500])
+    cfg.define_knob("unroll_explicit", [0, 1])
+    ##### space definition end #####
 
     # inline padding
     pad_data = s[conv].op.input_tensors[0]
@@ -88,10 +102,6 @@ def conv2d_no_batching(N, H, W, CI, CO, KH, KW, stride, padding):
 
     # tile and bind spatial axes
     n, f, y, x = s[output].op.axis
-    cfg = autotvm.get_config()
-    cfg.define_split("tile_f", cfg.axis(f), num_outputs=4)
-    cfg.define_split("tile_y", cfg.axis(y), num_outputs=4)
-    cfg.define_split("tile_x", cfg.axis(x), num_outputs=4)
     bf, vf, tf, fi = cfg["tile_f"].apply(s, output, f)
     by, vy, ty, yi = cfg["tile_y"].apply(s, output, y)
     bx, vx, tx, xi = cfg["tile_x"].apply(s, output, x)
@@ -109,12 +119,9 @@ def conv2d_no_batching(N, H, W, CI, CO, KH, KW, stride, padding):
     s[output].reorder(n, bf, by, bx, vf, vy, vx, tf, ty, tx, fi, yi, xi)
     s[OL].compute_at(s[output], tx)
 
-    # tile and bind reduction axes
+    # tile reduction axes
     n, f, y, x = s[OL].op.axis
     rc, ry, rx = s[OL].op.reduce_axis
-    cfg.define_split("tile_rc", cfg.axis(rc), num_outputs=3)
-    cfg.define_split("tile_ry", cfg.axis(ry), num_outputs=3)
-    cfg.define_split("tile_rx", cfg.axis(rx), num_outputs=3)
     rco, rcm, rci = cfg['tile_rc'].apply(s, OL, rc)
     ryo, rym, ryi = cfg['tile_rx'].apply(s, OL, ry)
     rxo, rxm, rxi = cfg['tile_ry'].apply(s, OL, rx)
@@ -137,8 +144,6 @@ def conv2d_no_batching(N, H, W, CI, CO, KH, KW, stride, padding):
         s[load].bind(tx, tvm.thread_axis("threadIdx.x"))
 
     # tune unroll
-    cfg.define_knob("auto_unroll_max_step", [0, 512, 1500])
-    cfg.define_knob("unroll_explicit", [0, 1])
     s[output].pragma(kernel_scope, 'auto_unroll_max_step', cfg['auto_unroll_max_step'].val)
     s[output].pragma(kernel_scope, 'unroll_explicit', cfg['unroll_explicit'].val)
 
@@ -164,14 +169,16 @@ task = autotvm.task.create(conv2d_no_batching,
                            target='cuda')
 print(task.config_space)
 
-# use local gpu, measure 5 times for every config to reduce variance
-# run 8 parallel threads for compilation
-measure_option = autotvm.measure_option('local',
-                                        number=5,
-                                        n_parallel=8,
-                                        timeout=20)
+# Use local gpu, measure 10 times for every config to reduce variance
+# The timeout of compiling a program is 10 seconds, the timeout for running is 4 seconds
+measure_option = autotvm.measure_option(
+    builder=autotvm.LocalBuilder(),
+    runner=autotvm.LocalRunner(repeat=3, min_repeat_ms=100, timeout=4)
+)
 
-# begin tuning, log records to file `conv2d.log`
+# Begin tuning, log records to file `conv2d.log`
+# During tuning we will also try many invalid configs, so you are expected to
+# see many error reports. As long as you can see non-zero GFLOPS, it is okay.
 tuner = autotvm.tuner.XGBTuner(task)
 tuner.tune(n_trial=20,
            measure_option=measure_option,
@@ -204,10 +211,10 @@ w_tvm = tvm.nd.array(w_np, ctx=ctx)
 c_tvm = tvm.nd.empty(c_np.shape, ctx=ctx)
 func(a_tvm, w_tvm, c_tvm)
 
-np.testing.assert_allclose(c_np, c_tvm.asnumpy(), rtol=1e-2)
+tvm.testing.assert_allclose(c_np, c_tvm.asnumpy(), rtol=1e-2)
 
-# Evaluate running time. Here we choose a large repeat number (200) to reduce the noise
+# Evaluate running time. Here we choose a large repeat number (400) to reduce the noise
 # and the overhead of kernel launch. You can also use nvprof to validate the result.
-evaluator = func.time_evaluator(func.entry_name, ctx, number=200)
+evaluator = func.time_evaluator(func.entry_name, ctx, number=400)
 print('Time cost of this operator: %f' % evaluator(a_tvm, w_tvm, c_tvm).mean)
 

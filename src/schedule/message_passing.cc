@@ -6,7 +6,7 @@
 #include <tvm/arithmetic.h>
 #include <tvm/ir.h>
 #include <tvm/ir_pass.h>
-#include "./message_passing.h"
+#include "message_passing.h"
 #include "../arithmetic/compute_expr.h"
 
 namespace tvm {
@@ -419,8 +419,7 @@ void PassUpBoundCheck(const Stage& s,
   using HalideIR::Internal::can_prove;
   for (size_t i = s->relations.size(); i != 0; --i) {
     IterVarRelation rel = s->relations[i - 1];
-    if (rel.as<SplitNode>()) {
-      const SplitNode* s = rel.as<SplitNode>();
+    if (const SplitNode* s = rel.as<SplitNode>()) {
       bool outer = state.at(s->outer);
       bool inner = state.at(s->inner);
 
@@ -439,13 +438,11 @@ void PassUpBoundCheck(const Stage& s,
       } else {
         state[s->parent] = true;
       }
-    } else if (rel.as<FuseNode>()) {
-      const FuseNode* s = rel.as<FuseNode>();
+    } else if (const FuseNode* s = rel.as<FuseNode>()) {
       bool fused = state.at(s->fused);
       state[s->outer] = fused;
       state[s->inner] = fused;
-    } else if (rel.as<RebaseNode>()) {
-      const RebaseNode* s = rel.as<RebaseNode>();
+    } else if (const RebaseNode* s = rel.as<RebaseNode>()) {
       state[s->parent] = state.at(s->rebased);
     } else if (rel.as<SingletonNode>()) {
       // nop
@@ -475,27 +472,32 @@ std::vector<Expr> MakeBoundCheck(
     iset_dmap[kv.first->var.get()] = IntSet::range(kv.second);
   }
 
-  for (IterVar iv : stage->op->root_iter_vars()) {
+  for (const IterVar& iv : stage->all_iter_vars) {
     if (skip_iter.count(iv) || iv->iter_type == kOpaque) continue;
-    Range dom = dom_map.at(iv);
     if (bound_state.at(iv)) {
+      Range dom = dom_map.at(iv);
       Expr value = ComputeExpr<Sub>(value_map.at(iv), dom->min);
       Expr vmax = EvalSet(value, iset_dmap).max();
       if (vmax.type() != value.type() || !can_prove(vmax < dom->extent)) {
         preds.emplace_back(value < dom->extent);
       }
     }
+  }
+  for (const IterVar& iv : stage->op->root_iter_vars()) {
+    if (skip_iter.count(iv) || iv->iter_type == kOpaque) continue;
+    Range dom = dom_map.at(iv);
     CHECK(iv->dom.defined());
     if (!skip_ivar_domain && !iv->dom.same_as(dom)) {
       Expr value = ComputeExpr<Sub>(value_map.at(iv), iv->dom->min);
       IntSet s = EvalSet(value, iset_dmap);
       Expr vmin = s.min();
       Expr vmax = s.max();
-      if (vmin.type() != value.type() || !can_prove(vmin >= iv->dom->min)) {
+      // The range of `value` resides in [vmin, vmax]
+      if (vmin.type() != value.type() || !can_prove(vmin >= 0)) {
         preds.emplace_back(value >= 0);
       }
       if (vmax.type() != value.type() || !can_prove(vmax < iv->dom->extent)) {
-        preds.emplace_back(value < (iv->dom->extent - iv->dom->min));
+        preds.emplace_back(value < iv->dom->extent);
       }
     }
   }

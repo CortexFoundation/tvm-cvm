@@ -22,7 +22,7 @@ class GATuner(Tuner):
     mutation_prob: float
         probability of mutation of a knob in a gene
     """
-    def __init__(self, task, pop_size, elite_num=3, mutation_prob=0.1):
+    def __init__(self, task, pop_size=100, elite_num=3, mutation_prob=0.1):
         super(GATuner, self).__init__(task)
 
         # algorithm configurations
@@ -47,6 +47,7 @@ class GATuner(Tuner):
 
         # random initialization
         self.pop_size = min(self.pop_size, len(self.space))
+        self.elite_num = min(self.pop_size, self.elite_num)
         for _ in range(self.pop_size):
             tmp_gene = point2knob(np.random.randint(len(self.space)), self.dims)
             while knob2point(tmp_gene, self.dims) in self.visited:
@@ -70,9 +71,9 @@ class GATuner(Tuner):
                 y = inp.task.flop / np.mean(res.costs)
                 self.scores.append(y)
             else:
-                self.scores.append(0)
+                self.scores.append(0.0)
 
-        if len(self.scores) >= len(self.genes):
+        if len(self.scores) >= len(self.genes) and len(self.visited) < len(self.space):
             genes = self.genes + self.elites
             scores = np.array(self.scores[:len(self.genes)] + self.elite_scores)
 
@@ -85,6 +86,7 @@ class GATuner(Tuner):
 
             # cross over
             indices = np.arange(len(genes))
+            scores += 1e-8
             scores /= np.max(scores)
             probs = scores / np.sum(scores)
             tmp_genes = []

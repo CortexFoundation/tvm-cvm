@@ -64,7 +64,7 @@ inline tvm::Tensor relu(const tvm::Tensor& t,
 * \param name The name of the operation
 * \param tag The tag to mark the operation
 *
-* \return A Tensor whose op member is the relu operation
+* \return A Tensor whose op member is the leaky relu operation
 */
 inline tvm::Tensor leaky_relu(const tvm::Tensor& t,
                               double alpha = 0.1,
@@ -75,7 +75,7 @@ inline tvm::Tensor leaky_relu(const tvm::Tensor& t,
     [&](const tvm::Array<tvm::Var>& i) {
       auto value = t(i);
       auto calpha = tvm::make_const(value.type(), alpha);
-      return tvm::select(value > 0, value, value * calpha);
+      return tvm::ir::Select::make(value > 0, value, value * calpha);
     },
     name,
     tag);
@@ -90,7 +90,7 @@ inline tvm::Tensor leaky_relu(const tvm::Tensor& t,
  * \param name The name of the operation
  * \param tag The tag to mark the operation
  *
- * \return A Tensor whose op member is the relu operation
+ * \return A Tensor whose op member is the parametric relu operation
  */
 inline tvm::Tensor prelu(const tvm::Tensor &x,
                          const tvm::Tensor &slope,
@@ -106,9 +106,11 @@ inline tvm::Tensor prelu(const tvm::Tensor &x,
 
   return tvm::compute(x->shape,
                      [&](const tvm::Array<tvm::Var> &indices) {
-                        return tvm::select(x(indices) > 0,
-                                           x(indices),
-                                           x(indices) * slope(indices[axis]));
+                        auto xval = x(indices);
+                        return tvm::ir::Select::make(
+                            xval > 0,
+                            xval,
+                            xval * slope(indices[axis]));
                       },
                       name,
                       tag);
@@ -193,40 +195,10 @@ inline tvm::Tensor pad(const tvm::Tensor& t,
       }
     }
     if (sel.size() != 0) {
-      return tvm::select(detail::Map(sel, tvm::ir::And::make), t(indices), pad_value);
+      return tvm::if_then_else(
+          detail::Map(sel, tvm::ir::And::make), t(indices), pad_value);
     }
     return t(indices);
-  };
-  return tvm::compute(output_shape, l, name, tag);
-}
-
-/*!
- * \brief Creates an operation that calculates a matrix multiplication
- *  (row-major notation):
- *      A(i, k) * B(k, j), if trans_a == trans_b
- *          the usual transposed combinations, otherwise
- *
- * \param A The matrix A
- * \param B The matrix B
- * \param trans_a Is A's layout transposed?
- * \param trans_b Is B's layout transposed?
- * \param name The name of the operation
- * \param tag The tag to mark the operation
- *
- * \return A Tensor whose op member is the matmul operation
- */
-inline tvm::Tensor matmul(const tvm::Tensor& A,
-                           const tvm::Tensor& B,
-                           bool trans_a = false,
-                           bool trans_b = false,
-                           std::string name = "tensor",
-                           std::string tag = kMatMul) {
-  tvm::Array<tvm::Expr> output_shape{A->shape[trans_a ? 1 : 0],
-                                     B->shape[trans_b ? 0 : 1]};
-  auto k = tvm::reduce_axis(tvm::Range{0, A->shape[trans_a ? 0 : 1]}, "k");
-  auto l = [&](tvm::Var i, tvm::Var j) {
-    return tvm::sum((trans_a ? A[k][i] : A[i][k]) * (trans_b ? B[j][k] : B[k][j]),
-                    {k});
   };
   return tvm::compute(output_shape, l, name, tag);
 }
@@ -265,7 +237,7 @@ inline tvm::Tensor conv2d_nchw(const tvm::Tensor& I,
   auto pW = I->shape[3];
   tvm::Array<tvm::Expr> output_shape{
       I->shape[0],                                            // B
-      W->shape[1],                                            // O
+      W->shape[0],                                            // O
       (I->shape[2] - W->shape[2] + 2 * pad_h) / stride_h + 1,  // H
       (I->shape[3] - W->shape[3] + 2 * pad_w) / stride_w + 1   // W
   };
@@ -479,6 +451,7 @@ inline tvm::Tensor group_conv2d_ngchw(const tvm::Tensor& I,
 }
 
 using FLayoutIndicesTransform = std::function<Array<Expr>(const Array<Var>& indices)>;
+
 /*!
  * \brief Transform the layout according to the mapping function \p to_src_indices.
  * \param src the source input.

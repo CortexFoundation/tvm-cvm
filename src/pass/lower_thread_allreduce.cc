@@ -7,7 +7,7 @@
 #include <tvm/ir_mutator.h>
 #include <tvm/ir_pass.h>
 #include <unordered_set>
-#include "./ir_util.h"
+#include "ir_util.h"
 #include "../arithmetic/compute_expr.h"
 #include "../runtime/thread_storage_scope.h"
 
@@ -317,7 +317,7 @@ class ThreadAllreduceBuilder final : public IRMutator {
 LoweredFunc
 LowerThreadAllreduce(LoweredFunc f, int warp_size) {
   CHECK_NE(f->func_type, kHostFunc);
-  auto n = std::make_shared<LoweredFuncNode>(*f.operator->());
+  auto n = make_node<LoweredFuncNode>(*f.operator->());
   n->body = ThreadAllreduceBuilder(warp_size).Mutate(n->body);
   return LoweredFunc(n);
 }

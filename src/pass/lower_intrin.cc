@@ -8,7 +8,7 @@
 #include <tvm/ir_pass.h>
 #include <tvm/api_registry.h>
 #include <unordered_set>
-#include "./ir_util.h"
+#include "ir_util.h"
 
 namespace tvm {
 namespace ir {
@@ -104,7 +104,7 @@ class IntrinInjecter : public IRMutator {
 
 LoweredFunc
 LowerIntrin(LoweredFunc f, const std::string& target) {
-  auto n = std::make_shared<LoweredFuncNode>(*f.operator->());
+  auto n = make_node<LoweredFuncNode>(*f.operator->());
   n->body = IntrinInjecter(target).Mutate(n->body);
   return LoweredFunc(n);
 }

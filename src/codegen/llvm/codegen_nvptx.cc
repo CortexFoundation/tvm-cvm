@@ -6,7 +6,7 @@
 #ifdef TVM_LLVM_VERSION
 
 #include <tvm/runtime/device_api.h>
-#include "./codegen_llvm.h"
+#include "codegen_llvm.h"
 #include "../build_common.h"
 #include "../../pass/ir_util.h"
 #include "../../runtime/cuda/cuda_module.h"
@@ -49,8 +49,10 @@ class CodeGenNVPTX : public CodeGenLLVM {
       if (info.scope.rank == runtime::StorageRank::kLocal) {
         // const int local_address_space = 5;
         // TODO(tqchen): for higher version of LLVM, local address space can be set.
-        llvm::AllocaInst* alloca = builder_->CreateAlloca(
-            LLVMType(op->type), ConstInt32(constant_size));
+        llvm::AllocaInst* alloca = WithFunctionEntry([&]() {
+            return builder_->CreateAlloca(
+                LLVMType(op->type), ConstInt32(constant_size));
+          });
         if (alloca->getAlignment() < static_cast<uint32_t>(info.alignment)) {
           alloca->setAlignment(info.alignment);
         }
@@ -171,10 +173,10 @@ runtime::Module BuildNVPTX(Array<LoweredFunc> funcs, std::string target) {
   config << "-mtriple=nvptx64-nvidia-cuda -mcpu=sm_"
          << compute_ver
          << target.substr(5, target.length() - 5);
-  llvm::TargetMachine* tm = GetLLVMTargetMachine(config.str());
+  std::unique_ptr<llvm::TargetMachine> tm = GetLLVMTargetMachine(config.str());
   std::unique_ptr<CodeGenNVPTX> cg(new CodeGenNVPTX());
   std::unique_ptr<llvm::LLVMContext> ctx(new llvm::LLVMContext());
-  cg->Init(funcs[0]->name, tm, ctx.get(), false, false);
+  cg->Init(funcs[0]->name, tm.get(), ctx.get(), false, false);
   for (LoweredFunc f :  funcs) {
     cg->AddFunction(f);
   }

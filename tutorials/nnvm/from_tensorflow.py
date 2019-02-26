@@ -5,9 +5,7 @@ This article is an introductory tutorial to deploy tensorflow models with TVM.
 
 For us to begin with, tensorflow python module is required to be installed.
 
-A quick solution is to install tensorflow from
-
-https://www.tensorflow.org/install
+Please refer to https://www.tensorflow.org/install
 """
 
 # tvm and nnvm
@@ -25,7 +23,7 @@ from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import tensor_util
 
 # Tensorflow utility functions
-import nnvm.testing.tf
+import tvm.relay.testing.tf as tf_testing
 
 # Base location for model related files.
 repo_base = 'https://github.com/dmlc/web-data/raw/master/tensorflow/models/InceptionV1/'
@@ -34,13 +32,18 @@ repo_base = 'https://github.com/dmlc/web-data/raw/master/tensorflow/models/Incep
 img_name = 'elephant-299.jpg'
 image_url = os.path.join(repo_base, img_name)
 
-# InceptionV1 model protobuf
+######################################################################
+# Tutorials
+# ---------
 # .. note::
 #
 #   protobuf should be exported with :any:`add_shapes=True` option.
 #   Could use https://github.com/dmlc/web-data/tree/master/tensorflow/scripts/tf-to-nnvm.py
 #   to add shapes for existing models.
 #
+# Please refer docs/frontend/tensorflow.md for more details for various models
+# from tensorflow.
+
 model_name = 'classify_image_graph_def-with_shapes.pb'
 model_url = os.path.join(repo_base, model_name)
 
@@ -52,6 +55,16 @@ map_proto_url = os.path.join(repo_base, map_proto)
 lable_map = 'imagenet_synset_to_human_label_map.txt'
 lable_map_url = os.path.join(repo_base, lable_map)
 
+# Target settings
+# Use these commented settings to build for cuda.
+#target = 'cuda'
+#target_host = 'llvm'
+#layout = "NCHW"
+#ctx = tvm.gpu(0)
+target = 'llvm'
+target_host = 'llvm'
+layout = None
+ctx = tvm.cpu(0)
 
 ######################################################################
 # Download required files
@@ -64,7 +77,6 @@ download(model_url, model_name)
 download(map_proto_url, map_proto)
 download(lable_map_url, lable_map)
 
-
 ######################################################################
 # Import model
 # ------------
@@ -75,15 +87,17 @@ with tf.gfile.FastGFile(os.path.join("./", model_name), 'rb') as f:
     graph_def.ParseFromString(f.read())
     graph = tf.import_graph_def(graph_def, name='')
     # Call the utility to import the graph definition into default graph.
-    graph_def = nnvm.testing.tf.ProcessGraphDefParam(graph_def)
-
+    graph_def = tf_testing.ProcessGraphDefParam(graph_def)
+    # Add shapes to the graph.
+    with tf.Session() as sess:
+        graph_def = tf_testing.AddShapesToGraphDef(sess, 'softmax')
 
 ######################################################################
 # Decode image
 # ------------
 # .. note::
 #
-#   tensorflow frontend import doesn't support preprocessing ops like JpegDecode
+#   tensorflow frontend import doesn't support preprocessing ops like JpegDecode.
 #   JpegDecode is bypassed (just return source node).
 #   Hence we supply decoded frame to TVM instead.
 #
@@ -101,7 +115,7 @@ x = np.array(image)
 # Results:
 #   sym: nnvm graph for given tensorflow protobuf.
 #   params: params converted from tensorflow params (tensor protobuf).
-sym, params = nnvm.frontend.from_tensorflow(graph_def)
+sym, params = nnvm.frontend.from_tensorflow(graph_def, layout=layout)
 
 print ("Tensorflow protobuf imported as nnvm graph")
 ######################################################################
@@ -115,18 +129,16 @@ print ("Tensorflow protobuf imported as nnvm graph")
 #   lib: target library which can be deployed on target with tvm runtime.
 
 import nnvm.compiler
-target = 'llvm'
 shape_dict = {'DecodeJpeg/contents': x.shape}
 dtype_dict = {'DecodeJpeg/contents': 'uint8'}
-graph, lib, params = nnvm.compiler.build(sym, target, shape_dict, dtype=dtype_dict, params=params)
+graph, lib, params = nnvm.compiler.build(sym, shape=shape_dict, target=target, target_host=target_host, dtype=dtype_dict, params=params)
 
 ######################################################################
 # Execute the portable graph on TVM
 # ---------------------------------
-# Now we can try deploying the NNVM compiled model on cpu target.
+# Now we can try deploying the NNVM compiled model on target.
 
 from tvm.contrib import graph_runtime
-ctx = tvm.cpu(0)
 dtype = 'uint8'
 m = graph_runtime.create(graph, lib, ctx)
 # set inputs
@@ -145,7 +157,7 @@ predictions = tvm_output.asnumpy()
 predictions = np.squeeze(predictions)
 
 # Creates node ID --> English string lookup.
-node_lookup = nnvm.testing.tf.NodeLookup(label_lookup_path=os.path.join("./", map_proto),
+node_lookup = tf_testing.NodeLookup(label_lookup_path=os.path.join("./", map_proto),
                                          uid_lookup_path=os.path.join("./", lable_map))
 
 # Print top 5 predictions from TVM output.
@@ -168,7 +180,7 @@ def create_graph():
         graph_def.ParseFromString(f.read())
         graph = tf.import_graph_def(graph_def, name='')
         # Call the utility to import the graph definition into default graph.
-        graph_def = nnvm.testing.tf.ProcessGraphDefParam(graph_def)
+        graph_def = tf_testing.ProcessGraphDefParam(graph_def)
 
 def run_inference_on_image(image):
     """Runs inference on an image.
@@ -197,7 +209,7 @@ def run_inference_on_image(image):
         predictions = np.squeeze(predictions)
 
         # Creates node ID --> English string lookup.
-        node_lookup = nnvm.testing.tf.NodeLookup(label_lookup_path=os.path.join("./", map_proto),
+        node_lookup = tf_testing.NodeLookup(label_lookup_path=os.path.join("./", map_proto),
                                                  uid_lookup_path=os.path.join("./", lable_map))
 
         # Print top 5 predictions from tensorflow.

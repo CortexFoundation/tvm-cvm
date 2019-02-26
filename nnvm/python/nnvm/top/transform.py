@@ -2,6 +2,7 @@
 """Tensor transformation ops"""
 from __future__ import absolute_import
 
+import tvm
 import topi
 from .tensor import _fschedule_broadcast, _fschedule_injective
 from . import registry as reg
@@ -58,8 +59,13 @@ reg.register_pattern("squeeze", OpPattern.INJECTIVE)
 reg.register_schedule("squeeze", _fschedule_injective)
 
 # concatenate
+@reg.register_schedule("concatenate")
+def schedule_concatenate(_, outs, target):
+    """Schedule definition of concatenate"""
+    with tvm.target.create(target):
+        return topi.generic.schedule_concatenate(outs)
+
 reg.register_pattern("concatenate", OpPattern.INJECTIVE)
-reg.register_schedule("concatenate", _fschedule_injective)
 
 # split
 reg.register_pattern("split", OpPattern.INJECTIVE)
@@ -80,3 +86,7 @@ reg.register_schedule("slice_like", _fschedule_injective)
 # where
 reg.register_pattern("where", OpPattern.INJECTIVE)
 reg.register_schedule("where", _fschedule_injective)
+
+# gather_nd
+reg.register_pattern("gather_nd", OpPattern.INJECTIVE)
+reg.register_schedule("gather_nd", _fschedule_injective)

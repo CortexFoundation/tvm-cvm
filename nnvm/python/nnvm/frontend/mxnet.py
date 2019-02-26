@@ -259,18 +259,40 @@ def _crop_like(inputs, attrs):
 
 
 def _expand_dims(inputs, attrs):
-    op_name, new_attrs = "expand_dims", {}
+    op_name, new_attrs = 'expand_dims', {}
     new_attrs['axis'] = _required_attr(attrs, 'axis')
     return _get_nnvm_op(op_name)(*inputs, **new_attrs)
 
 def _lrn(inputs, attrs):
-    op_name, new_attrs = "lrn", {}
+    op_name, new_attrs = 'lrn', {}
     new_attrs['alpha'] = attrs.get('alpha', 0.0001)
     new_attrs['beta'] = attrs.get('beta', 0.75)
     new_attrs['bias'] = attrs.get('knorm', 2)
     # NCHW format and normalization along channel axis
     new_attrs['axis'] = 1
     new_attrs['size'] = _required_attr(attrs, 'nsize')
+    return _get_nnvm_op(op_name)(*inputs, **new_attrs)
+
+def _ones(_, attrs):
+    op_name = 'ones'
+    return _get_nnvm_op(op_name)(**attrs)
+
+def _zeros(_, attrs):
+    op_name = 'zeros'
+    return _get_nnvm_op(op_name)(**attrs)
+
+def _argmax(inputs, attrs):
+    op_name, new_attrs = 'argmax', {}
+    new_attrs['dtype'] = 'float32'
+    new_attrs['axis'] = attrs.get('axis', 0)
+    new_attrs['keepdims'] = _parse_bool_str(attrs, 'keepdims', default="False")
+    return _get_nnvm_op(op_name)(*inputs, **new_attrs)
+
+def _argmin(inputs, attrs):
+    op_name, new_attrs = 'argmin', {}
+    new_attrs['dtype'] = 'float32'
+    new_attrs['axis'] = attrs.get('axis', 0)
+    new_attrs['keepdims'] = _parse_bool_str(attrs, 'keepdims', default="False")
     return _get_nnvm_op(op_name)(*inputs, **new_attrs)
 
 _identity_list = ['__add_scalar__', '__add_symbol__', '__div_scalar__',
@@ -281,8 +303,9 @@ _identity_list = ['__add_scalar__', '__add_symbol__', '__div_scalar__',
                   'broadcast_sub', 'broadcast_to', 'cast', 'elemwise_add',
                   'elemwise_div', 'elemwise_mul', 'elemwise_sub', 'exp',
                   'flatten', 'log', 'log_softmax', 'max', 'min', 'negative',
-                  'relu', 'sigmoid', 'slice_like', 'softmax', 'sum', 'tanh',
-                  'transpose']
+                  'ones_like', 'relu', 'sigmoid', 'slice_like', 'softmax',
+                  'sum', 'tanh', 'transpose', 'zeros_like', 'gather_nd',
+                  'reshape_like']
 
 _convert_map = {
     '_copy'         : _rename('copy'),
@@ -294,6 +317,10 @@ _convert_map = {
     '_rminus_scalar': _rename('__rsub_scalar__'),
     '_contrib_MultiBoxPrior' : _rename('multibox_prior'),
     '_contrib_MultiBoxDetection' : _contrib_multibox_detection,
+    '_ones'         : _ones,
+    '_zeros'        : _zeros,
+    'argmax'        : _argmax,
+    'argmin'        : _argmin,
     'Activation'    : _activations,
     'BatchNorm'     : _batch_norm,
     'BatchNorm_v1'  : _batch_norm,
@@ -371,6 +398,55 @@ def _as_list(arr):
         return arr
     return [arr]
 
+def _topo_sort(symbol):
+    """Sort all symbols in the mxnet graph in topological order.
+
+    Parameters
+    ----------
+    symbol : mxnet.sym.Symbol
+
+    Returns:
+    -------
+    list
+        List of mxnet symbol
+    """
+    queue = []
+    symbol_map = {}
+    deps = {}
+    dep_cnts = {}
+    for s in symbol:
+        symbol_map[s.attr('name')] = s
+        queue.append(s)
+    while queue:
+        sym = queue.pop(0)
+        name = sym.attr('name')
+        childs = sym.get_children()
+        if childs is None:
+            dep_cnts[name] = 0
+        else:
+            dep_cnts[name] = len(set([c.attr('name') for c in childs]))
+            for child in childs:
+                child_name = child.attr('name')
+                if child_name not in deps:
+                    deps[child_name] = set()
+                deps[child_name].add(name)
+                if child_name not in symbol_map:
+                    symbol_map[child_name] = child
+                    queue.append(child)
+    order = []
+    while dep_cnts:
+        remove = []
+        for name in dep_cnts:
+            if dep_cnts[name] == 0:
+                order.append(symbol_map[name])
+                remove.append(name)
+                if name in deps:
+                    for other in deps[name]:
+                        dep_cnts[other] -= 1
+        for name in remove:
+            del dep_cnts[name]
+    return order
+
 def _from_mxnet_impl(symbol, graph):
     """Convert mxnet symbol to nnvm implementation.
     Reconstruct a nnvm symbol by traversing the mxnet symbol.
@@ -388,27 +464,37 @@ def _from_mxnet_impl(symbol, graph):
     nnvm.sym.Symbol
         Converted symbol
     """
-    if len(symbol.list_outputs()) > 1:
-        return [_from_mxnet_impl(s, graph) for s in symbol]
+    def get_node(sym):
+        name = sym.attr('name')
+        if name not in graph:
+            return None
+        output_index = json.loads(sym.tojson())['heads'][0][1]
+        return graph[name][output_index]
 
-    name = symbol.attr('name')
-    output_index = json.loads(symbol.tojson())['heads'][0][1]
-    node = graph.get(name, None)
-    if node:
-        return node[output_index]
-    attr = symbol.list_attr()
-    # op_name = symbol.attr('op_name')
-    childs = symbol.get_children()
-    if childs is not None:
-        op_name = symbol.attr('op_name')
-        childs = [_from_mxnet_impl(childs[i], graph) for i in range(len(childs.list_outputs()))]
-        childs = [x for y in childs for x in _as_list(y)]  # expand group symbol
-        node = _convert_symbol(op_name, childs, attr)
-    else:
-        op_name = json.loads(symbol.tojson())['nodes'][0]['op']
-        node = _sym.Variable(name=name, **attr)
-    graph[name] = node
-    return node[output_index]
+    assert symbol is not None
+    # Traverse all symbols in topological order
+    for sym in _topo_sort(symbol):
+        name = sym.attr('name')
+        attr = sym.list_attr()
+        op_name = sym.attr('op_name')
+        childs = sym.get_children()
+        if childs is not None:
+            childs = [get_node(child) for child in childs]
+            childs = [x for y in childs for x in _as_list(y)]
+            node = _convert_symbol(op_name, childs, attr)
+        elif op_name != 'null':
+            node = _convert_symbol(op_name, [], attr)
+        else:
+            node = _sym.Variable(name=name, **attr)
+        graph[name] = node
+    nodes = []
+    for sym in symbol:
+        node = get_node(sym)
+        assert node is not None
+        nodes.append(node)
+    if len(nodes) > 1:
+        return _sym.Group(nodes)
+    return nodes[0]
 
 def from_mxnet(symbol, arg_params=None, aux_params=None):
     """Convert from MXNet's model into compatible NNVM format.
