@@ -6,8 +6,9 @@
 #include <dmlc/logging.h>
 #include <tvm/runtime/serializer.h>
 #include <fstream>
+#include <vector>
 
-#include "./file_util.h"
+#include "file_util.h"
 
 namespace tvm {
 namespace runtime {
@@ -139,6 +140,10 @@ void LoadMetaDataFromFile(
   helper.DeclareField("func_info", fmap);
   helper.ReadAllFields(&reader);
   fs.close();
+}
+
+void RemoveFile(const std::string& file_name) {
+  std::remove(file_name.c_str());
 }
 
 }  // namespace runtime

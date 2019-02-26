@@ -12,7 +12,7 @@
 #include <tvm/packed_func_ext.h>
 #include <nnvm/compiler/op_attr_types.h>
 #include <tvm/tvm.h>
-#include "./nn_common.h"
+#include "nn_common.h"
 #include "../op_common.h"
 #include "../elemwise_op_common.h"
 #include "topi/nn.h"
@@ -73,16 +73,16 @@ inline bool Conv2DInferShape(const nnvm::NodeAttrs& attrs,
   CHECK_EQ(param.channels % param.groups, 0U)
       << "output channels must divide group size";
 
-  TShape wshape({param.channels / param.groups,
+  TShape wshape({param.channels,
                  dshape[1] / param.groups,
                  param.kernel_size[0],
                  param.kernel_size[1]});
 
   wshape = ConvertLayout(wshape, kOIHW, kernel_layout);
 
-  wshape[kernel_layout.indexof('O')] *= param.groups;
-
-  NNVM_ASSIGN_INPUT_SHAPE(attrs, *in_shape, Conv2DParam::kWeight, wshape);
+  if (in_shape->at(Conv2DParam::kWeight).ndim() == 0) {
+    NNVM_ASSIGN_INPUT_SHAPE(attrs, *in_shape, Conv2DParam::kWeight, wshape);
+  }
   if (param.use_bias) {
     static const Layout default_bias_layout("C");
     TShape bias_shape({param.channels});
@@ -343,7 +343,6 @@ NNVM_REGISTER_OP(_contrib_conv2d_NCHWc)
 .set_num_outputs(1)
 .set_num_inputs(UseBiasNumInputs<Conv2DParam>)
 .set_support_level(2);
-
 
 NNVM_REGISTER_OP(_contrib_conv2d_winograd_weight_transform)
 .describe(R"code(Weight transformation of winograd fast convolution algorithm.

@@ -60,7 +60,7 @@ class ExprOp(object):
         return self.__rdiv__(other)
 
     def __mod__(self, other):
-        return _make.Mod(self, other)
+        return _make._OpMod(self, other)
 
     def __neg__(self):
         neg_one = _api_internal._const(-1, self.dtype)
@@ -85,10 +85,10 @@ class ExprOp(object):
         return _make.Call(self.dtype, "bitwise_not", [self], Call.PureIntrinsic, None, 0)
 
     def __lt__(self, other):
-        return _make.LT(self, other)
+        return _make._OpLT(self, other)
 
     def __le__(self, other):
-        return _make.LE(self, other)
+        return _make._OpLE(self, other)
 
     def __eq__(self, other):
         return EqualOp(self, other)
@@ -97,10 +97,10 @@ class ExprOp(object):
         return NotEqualOp(self, other)
 
     def __gt__(self, other):
-        return _make.GT(self, other)
+        return _make._OpGT(self, other)
 
     def __ge__(self, other):
-        return _make.GE(self, other)
+        return _make._OpGE(self, other)
 
     def __nonzero__(self):
         raise ValueError("Cannot use and / or / not operator to Expr, hint: " +
@@ -122,7 +122,7 @@ class ExprOp(object):
         ret : Expr
             The equality expression.
         """
-        return _make.EQ(self, other)
+        return _make._OpEQ(self, other)
 
     def astype(self, dtype):
         """Cast the expression to other type.
@@ -169,7 +169,7 @@ class EqualOp(NodeGeneric, ExprOp):
 
     def asnode(self):
         """Convert node."""
-        return _make.EQ(self.a, self.b)
+        return _make._OpEQ(self.a, self.b)
 
 
 class NotEqualOp(NodeGeneric, ExprOp):
@@ -201,7 +201,7 @@ class NotEqualOp(NodeGeneric, ExprOp):
 
     def asnode(self):
         """Convert node."""
-        return _make.NE(self.a, self.b)
+        return _make._OpNE(self.a, self.b)
 
 
 class Expr(ExprOp, NodeBase):
@@ -225,127 +225,556 @@ class LogicalExpr(Expr):
 
 @register_node("Variable")
 class Var(Expr):
-    """Symbolic variable."""
-    pass
+    """Symbolic variable.
+
+    Parameters
+    ----------
+    name : str
+        The name
+
+    dtype : int
+        The data type
+    """
+    def __init__(self, name, dtype):
+        self.__init_handle_by_constructor__(
+            _api_internal._Var, name, dtype)
+
 
 @register_node
 class Reduce(Expr):
-    pass
+    """Reduce node.
+
+    Parameters
+    ----------
+    combiner : CommReducer
+        The combiner.
+
+    src : list of Expr
+        The source expression.
+
+    rdom : list of IterVar
+        The iteration domain
+
+    condition : Expr
+        The reduce condition.
+
+    value_index : int
+        The value index.
+    """
+    def __init__(self, combiner, src, rdom, condition, value_index):
+        self.__init_handle_by_constructor__(
+            _make.Reduce, combiner, src, rdom,
+            condition, value_index)
+
 
 @register_node
 class FloatImm(ConstExpr):
-    pass
+    """Float constant.
+
+    Parameters
+    ----------
+    dtype : str
+        The data type
+
+    value : float
+        The constant value.
+    """
+    def __init__(self, dtype, value):
+        self.__init_handle_by_constructor__(
+            _make.FloatImm, dtype, value)
 
 @register_node
 class IntImm(ConstExpr):
-    pass
+    """Int constant.
+
+    Parameters
+    ----------
+    dtype : str
+        The data type
+
+    value : int
+        The constant value.
+    """
+    def __init__(self, dtype, value):
+        self.__init_handle_by_constructor__(
+            _make.IntImm, dtype, value)
+
+    def __int__(self):
+        return self.value
+
 
 @register_node
 class UIntImm(ConstExpr):
-    pass
+    """UInt constant.
+
+    Parameters
+    ----------
+    dtype : str
+        The data type
+
+    value : int
+        The constant value.
+    """
+    def __init__(self, dtype, value):
+        self.__init_handle_by_constructor__(
+            _make.UIntImm, dtype, value)
+
 
 @register_node
 class StringImm(ConstExpr):
-    pass
+    """String constant.
+
+    Parameters
+    ----------
+    value : str
+        The value of the function.
+    """
+    def __init__(self, value):
+        self.__init_handle_by_constructor__(
+            _make.StringImm, value)
+
 
 @register_node
 class Cast(Expr):
-    pass
+    """Cast expression.
+
+    Parameters
+    ----------
+    dtype : str
+        The data type
+
+    value : Expr
+        The value of the function.
+    """
+    def __init__(self, dtype, value):
+        self.__init_handle_by_constructor__(
+            _make.Cast, dtype, value)
+
 
 @register_node
 class Add(BinaryOpExpr):
-    pass
+    """Add node.
+
+    Parameters
+    ----------
+    a : Expr
+        The left hand operand.
+
+    b : Expr
+        The right hand operand.
+    """
+    def __init__(self, a, b):
+        self.__init_handle_by_constructor__(
+            _make.Add, a, b)
+
 
 @register_node
 class Sub(BinaryOpExpr):
-    pass
+    """Sub node.
+
+    Parameters
+    ----------
+    a : Expr
+        The left hand operand.
+
+    b : Expr
+        The right hand operand.
+    """
+    def __init__(self, a, b):
+        self.__init_handle_by_constructor__(
+            _make.Sub, a, b)
+
 
 @register_node
 class Mul(BinaryOpExpr):
-    pass
+    """Mul node.
+
+    Parameters
+    ----------
+    a : Expr
+        The left hand operand.
+
+    b : Expr
+        The right hand operand.
+    """
+    def __init__(self, a, b):
+        self.__init_handle_by_constructor__(
+            _make.Mul, a, b)
+
 
 @register_node
 class Div(BinaryOpExpr):
-    pass
+    """Div node.
+
+    Parameters
+    ----------
+    a : Expr
+        The left hand operand.
+
+    b : Expr
+        The right hand operand.
+    """
+    def __init__(self, a, b):
+        self.__init_handle_by_constructor__(
+            _make.Div, a, b)
+
 
 @register_node
 class Mod(BinaryOpExpr):
-    pass
+    """Mod node.
+
+    Parameters
+    ----------
+    a : Expr
+        The left hand operand.
+
+    b : Expr
+        The right hand operand.
+    """
+    def __init__(self, a, b):
+        self.__init_handle_by_constructor__(
+            _make.Mod, a, b)
+
 
 @register_node
 class Min(BinaryOpExpr):
-    pass
+    """Min node.
+
+    Parameters
+    ----------
+    a : Expr
+        The left hand operand.
+
+    b : Expr
+        The right hand operand.
+    """
+    def __init__(self, a, b):
+        self.__init_handle_by_constructor__(
+            _make.Min, a, b)
+
 
 @register_node
 class Max(BinaryOpExpr):
-    pass
+    """Max node.
+
+    Parameters
+    ----------
+    a : Expr
+        The left hand operand.
+
+    b : Expr
+        The right hand operand.
+    """
+    def __init__(self, a, b):
+        self.__init_handle_by_constructor__(
+            _make.Max, a, b)
+
 
 @register_node
 class EQ(CmpExpr):
-    pass
+    """EQ node.
+
+    Parameters
+    ----------
+    a : Expr
+        The left hand operand.
+
+    b : Expr
+        The right hand operand.
+    """
+    def __init__(self, a, b):
+        self.__init_handle_by_constructor__(
+            _make.EQ, a, b)
+
 
 @register_node
 class NE(CmpExpr):
-    pass
+    """NE node.
+
+    Parameters
+    ----------
+    a : Expr
+        The left hand operand.
+
+    b : Expr
+        The right hand operand.
+    """
+    def __init__(self, a, b):
+        self.__init_handle_by_constructor__(
+            _make.NE, a, b)
+
 
 @register_node
 class LT(CmpExpr):
-    pass
+    """LT node.
+
+    Parameters
+    ----------
+    a : Expr
+        The left hand operand.
+
+    b : Expr
+        The right hand operand.
+    """
+    def __init__(self, a, b):
+        self.__init_handle_by_constructor__(
+            _make.LT, a, b)
+
 
 @register_node
 class LE(CmpExpr):
-    pass
+    """LE node.
+
+    Parameters
+    ----------
+    a : Expr
+        The left hand operand.
+
+    b : Expr
+        The right hand operand.
+    """
+    def __init__(self, a, b):
+        self.__init_handle_by_constructor__(
+            _make.LE, a, b)
+
 
 @register_node
 class GT(CmpExpr):
-    pass
+    """GT node.
+
+    Parameters
+    ----------
+    a : Expr
+        The left hand operand.
+
+    b : Expr
+        The right hand operand.
+    """
+    def __init__(self, a, b):
+        self.__init_handle_by_constructor__(
+            _make.GT, a, b)
+
 
 @register_node
 class GE(CmpExpr):
-    pass
+    """GE node.
+
+    Parameters
+    ----------
+    a : Expr
+        The left hand operand.
+
+    b : Expr
+        The right hand operand.
+    """
+    def __init__(self, a, b):
+        self.__init_handle_by_constructor__(
+            _make.GE, a, b)
+
 
 @register_node
 class And(LogicalExpr):
-    pass
+    """And node.
+
+    Parameters
+    ----------
+    a : Expr
+        The left hand operand.
+
+    b : Expr
+        The right hand operand.
+    """
+    def __init__(self, a, b):
+        self.__init_handle_by_constructor__(
+            _make.And, a, b)
+
 
 @register_node
 class Or(LogicalExpr):
-    pass
+    """Or node.
+
+    Parameters
+    ----------
+    a : Expr
+        The left hand operand.
+
+    b : Expr
+        The right hand operand.
+    """
+    def __init__(self, a, b):
+        self.__init_handle_by_constructor__(
+            _make.Or, a, b)
+
 
 @register_node
 class Not(LogicalExpr):
-    pass
+    """Not node.
+
+    Parameters
+    ----------
+    a : Expr
+        The input value
+    """
+    def __init__(self, a):
+        self.__init_handle_by_constructor__(
+            _make.Not, a)
+
 
 @register_node
 class Select(Expr):
-    pass
+    """Select node.
+
+    Note
+    ----
+    Select may compute both true_value and false_value.
+    Use :any:`tvm.if_then_else` instead if you want to
+    get a conditional expression that only evaluates
+    the correct branch.
+
+    Parameters
+    ----------
+    condition : Expr
+        The condition expression.
+
+    true_value : Expr
+        The value to take when condition is true.
+
+    false_value : Expr
+        The value to take when condition is false.
+
+    """
+    def __init__(self, condition, true_value, false_value):
+        self.__init_handle_by_constructor__(
+            _make.Select, condition, true_value, false_value)
+
 
 @register_node
 class Load(Expr):
-    pass
+    """Load node.
+
+    Parameters
+    ----------
+    dtype : str
+        The data type.
+
+    buffer_var : Var
+        The buffer variable in the load expression.
+
+    index : Expr
+        The index in the load.
+
+    predicate : Expr
+        The load predicate.
+    """
+    def __init__(self, dtype, buffer_var, index, predicate):
+        self.__init_handle_by_constructor__(
+            _make.Load, dtype, buffer_var, index, predicate)
+
 
 @register_node
 class Ramp(Expr):
-    pass
+    """Ramp node.
+
+    Parameters
+    ----------
+    base : Expr
+        The base expression.
+
+    stride : ramp stride
+        The stride of the ramp.
+
+    lanes : int
+        The lanes of the expression.
+    """
+    def __init__(self, base, stride, lanes):
+        self.__init_handle_by_constructor__(
+            _make.Ramp, base, stride, lanes)
+
 
 @register_node
 class Broadcast(Expr):
-    pass
+    """Broadcast node.
+
+    Parameters
+    ----------
+    value : Expr
+        The value of the expression.
+
+    lanes : int
+        The lanes of the expression.
+    """
+    def __init__(self, value, lanes):
+        self.__init_handle_by_constructor__(
+            _make.Broadcast, value, lanes)
+
 
 @register_node
 class Shuffle(Expr):
-    pass
+    """Shuffle node.
+
+    Parameters
+    ----------
+    vectors : Array of Expr
+        The vectors
+
+    indices : Array of indices
+        The indices
+    """
+    def __init__(self, vectors, indices):
+        self.__init_handle_by_constructor__(
+            _make.Shuffle, vectors, indices)
+
 
 @register_node
 class Call(Expr):
+    """Call node.
+
+    Parameters
+    ----------
+    dtype : str
+        The return data type
+
+    name : str
+        The name of the function
+
+    args : list of Expr
+        The input arguments to the call
+
+    call_type : int
+        The type of the call
+
+    func : Operation, optional
+        Operation if call_type is Halide
+
+    value_index : int
+        The output value index
+    """
     Extern = 0
     ExternCPlusPlus = 1
     PureExtern = 2
     Halide = 3
     Intrinsic = 4
     PureIntrinsic = 5
+    def __init__(self, dtype, name, args, call_type, func, value_index):
+        self.__init_handle_by_constructor__(
+            _make.Call, dtype, name, args, call_type, func, value_index)
 
 
 @register_node
 class Let(Expr):
-    pass
+    """Let node.
+
+    Parameters
+    ----------
+    var : Var
+        The variable in the binding.
+
+    value : Expr
+        The value in to be binded.
+
+    body : Expr
+        The body expression.
+    """
+    def __init__(self, var, value, body):
+        self.__init_handle_by_constructor__(
+            _make.Let, var, value, body)

@@ -1,11 +1,12 @@
 """
 Deploy Single Shot Multibox Detector(SSD) model
 ===============================================
-**Author**: `Yao Wang <https://github.com/kevinthesun>`_
+**Author**: `Yao Wang <https://github.com/kevinthesun>`_, \
+`Leyuan Wang <https://github.com/Laurawly>`_
 
 This article is an introductory tutorial to deploy SSD models with TVM.
 We will use mxnet pretrained SSD model with Resnet50 as body network and
-convert it to NNVM graph.
+convert it to NNVM graph;
 """
 import os
 import zipfile
@@ -16,24 +17,36 @@ import numpy as np
 
 from nnvm import compiler
 from nnvm.frontend import from_mxnet
+from tvm import relay
 from tvm.contrib.download import download
 from tvm.contrib import graph_runtime
 from mxnet.model import load_checkpoint
 
 
 ######################################################################
-# Set the parameters here
-# -----------------------
-# .. note::
+# Preliminary and Set parameters
+# ------------------------------
+# We should build TVM with sort support, in TVM root directory
 #
-#   Currently we support compiling SSD on CPU only.
-#   GPU support is in progress.
+# .. code-block:: bash
+#
+#   echo "set(USE_SORT ON)" > config.mk
+#   make -j8
+#
 
 model_name = "ssd_resnet50_512"
 model_file = "%s.zip" % model_name
 test_image = "dog.jpg"
 dshape = (1, 3, 512, 512)
 dtype = "float32"
+
+# Target settings
+# Use these commented settings to build for cuda.
+#target = 'cuda'
+#ctx = tvm.gpu(0)
+# Use these commented settings to build for opencl.
+#target = 'opencl'
+#ctx = tvm.opencl(0)
 target = "llvm"
 ctx = tvm.cpu()
 
@@ -47,10 +60,11 @@ model_url = "https://github.com/zhreshold/mxnet-ssd/releases/download/v0.6/" \
             "resnet50_ssd_512_voc0712_trainval.zip"
 image_url = "https://cloud.githubusercontent.com/assets/3307514/20012567/" \
             "cbb60336-a27d-11e6-93ff-cbc3f09f5c9e.jpg"
-inference_symbol_folder = "c1904e900848df4548ce5dfb18c719c7-a28c4856c827fe766aa3da0e35bad41d44f0fb26"
+inference_symbol_folder = \
+"c1904e900848df4548ce5dfb18c719c7-a28c4856c827fe766aa3da0e35bad41d44f0fb26"
 inference_symbol_url = "https://gist.github.com/kevinthesun/c1904e900848df4548ce5dfb18c719c7/" \
                        "archive/a28c4856c827fe766aa3da0e35bad41d44f0fb26.zip"
-            
+
 dir = "ssd_model"
 if not os.path.exists(dir):
     os.makedirs(dir)
@@ -69,13 +83,32 @@ zip_ref.extractall(dir)
 zip_ref.close()
 
 ######################################################################
-# Convert and compile model with NNVM for CPU.
+# Convert and compile model with NNVM or Relay for CPU.
 
 sym = mx.sym.load("%s/%s/ssd_resnet50_inference.json" % (dir, inference_symbol_folder))
 _, arg_params, aux_params = load_checkpoint("%s/%s" % (dir, model_name), 0)
-net, params = from_mxnet(sym, arg_params, aux_params)
-with compiler.build_config(opt_level=3):
-    graph, lib, params = compiler.build(net, target, {"data": dshape}, params=params)
+
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "-f", "--frontend",
+    help="Frontend for compilation, nnvm or relay",
+    type=str,
+    default="nnvm")
+args = parser.parse_args()
+if args.frontend == "relay":
+    net, params = relay.frontend.from_mxnet(sym, {"data": dshape}, arg_params=arg_params, \
+                                            aux_params=aux_params)
+    with relay.build_config(opt_level=3):
+        graph, lib, params = relay.build(net, target, params=params)
+elif args.frontend == "nnvm":
+    net, params = from_mxnet(sym, arg_params, aux_params)
+    with compiler.build_config(opt_level=3):
+        graph, lib, params = compiler.build(
+            net, target, {"data": dshape}, params=params)
+else:
+    parser.print_help()
+    parser.exit()
 
 ######################################################################
 # Create TVM runtime and do inference
@@ -94,8 +127,7 @@ m.set_input(**params)
 # execute
 m.run()
 # get outputs
-_, oshape = compiler.graph_util.infer_shape(graph, shape={"data": dshape})
-tvm_output = m.get_output(0, tvm.nd.empty(tuple(oshape[0]), dtype))
+tvm_output = m.get_output(0)
 
 
 ######################################################################
@@ -108,7 +140,7 @@ def display(img, out, thresh=0.5):
     import random
     import matplotlib as mpl
     import matplotlib.pyplot as plt
-    mpl.rcParams['figure.figsize'] = (10,10)
+    mpl.rcParams['figure.figsize'] = (10, 10)
     pens = dict()
     plt.clf()
     plt.imshow(img)
@@ -134,4 +166,3 @@ def display(img, out, thresh=0.5):
 
 image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 display(image, tvm_output.asnumpy()[0], thresh=0.45)
-

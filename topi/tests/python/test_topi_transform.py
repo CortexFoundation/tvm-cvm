@@ -2,6 +2,9 @@
 import numpy as np
 import tvm
 import topi
+import topi.testing
+
+from common import get_all_backend
 
 def verify_expand_dims(in_shape, out_shape, axis, num_newaxis):
     A = tvm.placeholder(shape=in_shape, name="A")
@@ -20,9 +23,9 @@ def verify_expand_dims(in_shape, out_shape, axis, num_newaxis):
         data_nd = tvm.nd.array(data_npy, ctx)
         out_nd = tvm.nd.array(np.empty(out_shape).astype(B.dtype), ctx)
         foo(data_nd, out_nd)
-        np.testing.assert_allclose(out_nd.asnumpy(), out_npy)
+        tvm.testing.assert_allclose(out_nd.asnumpy(), out_npy)
 
-    for device in ["llvm", "nvptx", "cuda", "opencl", "metal", "rocm", "vulkan", "sdaccel"]:
+    for device in get_all_backend():
         check_device(device)
 
 
@@ -43,9 +46,9 @@ def verify_tranpose(in_shape, axes):
         data_nd = tvm.nd.array(data_npy, ctx)
         out_nd = tvm.nd.empty(out_npy.shape, ctx=ctx, dtype=B.dtype)
         foo(data_nd, out_nd)
-        np.testing.assert_allclose(out_nd.asnumpy(), out_npy)
+        tvm.testing.assert_allclose(out_nd.asnumpy(), out_npy)
 
-    for device in ["llvm", "nvptx", "cuda", "opencl", "metal", "rocm", "vulkan", "sdaccel"]:
+    for device in get_all_backend():
         check_device(device)
 
 
@@ -66,9 +69,9 @@ def verify_reshape(src_shape, dst_shape):
         data_nd = tvm.nd.array(data_npy, ctx)
         out_nd = tvm.nd.empty(dst_shape, ctx=ctx, dtype=B.dtype)
         foo(data_nd, out_nd)
-        np.testing.assert_allclose(out_nd.asnumpy(), out_npy)
+        tvm.testing.assert_allclose(out_nd.asnumpy(), out_npy)
 
-    for device in ["llvm", "nvptx", "cuda", "opencl", "metal", "rocm", "vulkan", "sdaccel"]:
+    for device in get_all_backend():
         check_device(device)
 
 
@@ -88,15 +91,12 @@ def verify_squeeze(src_shape, axis):
         data_npy = np.random.normal(size=src_shape).astype(A.dtype)
         out_npy = np.squeeze(data_npy, axis=axis)
         data_nd = tvm.nd.array(data_npy, ctx)
-        if out_npy.shape == ():
-            out_nd_shape = (1,)
-        else:
-            out_nd_shape = out_npy.shape
+        out_nd_shape = out_npy.shape
         out_nd = tvm.nd.empty(out_nd_shape, ctx=ctx, dtype=B.dtype)
         foo(data_nd, out_nd)
-        np.testing.assert_allclose(out_nd.asnumpy(), out_npy)
+        tvm.testing.assert_allclose(out_nd.asnumpy(), out_npy)
 
-    for device in ["llvm", "nvptx", "cuda", "opencl", "metal", "rocm", "vulkan", "sdaccel"]:
+    for device in get_all_backend():
         check_device(device)
 
 def verify_concatenate(shapes, axis):
@@ -119,9 +119,9 @@ def verify_concatenate(shapes, axis):
         data_nds = [tvm.nd.array(data_npy, ctx) for data_npy in data_npys]
         out_nd = tvm.nd.empty(out_npy.shape, ctx=ctx, dtype=out_tensor.dtype)
         foo(*(data_nds + [out_nd]))
-        np.testing.assert_allclose(out_nd.asnumpy(), out_npy)
+        tvm.testing.assert_allclose(out_nd.asnumpy(), out_npy)
 
-    for device in ["llvm", "nvptx", "cuda", "opencl", "metal", "rocm", "vulkan", "sdaccel"]:
+    for device in get_all_backend():
         check_device(device)
 
 
@@ -137,16 +137,16 @@ def verify_split(src_shape, indices_or_sections, axis):
         with tvm.target.create(device):
             s = topi.generic.schedule_injective(tensor_l)
 
-        foo = tvm.build(s, [A] + tensor_l, device, name="split")
+        foo = tvm.build(s, [A] + list(tensor_l), device, name="split")
         data_npy = np.random.normal(size=src_shape).astype(A.dtype)
         out_npys = np.split(data_npy, indices_or_sections, axis=axis)
         data_nd = tvm.nd.array(data_npy, ctx)
         out_nds = [tvm.nd.empty(out_npy.shape, ctx=ctx, dtype=tensor_l[0].dtype) for out_npy in out_npys]
         foo(*([data_nd] + out_nds))
         for out_nd, out_npy in zip(out_nds, out_npys):
-            np.testing.assert_allclose(out_nd.asnumpy(), out_npy)
+            tvm.testing.assert_allclose(out_nd.asnumpy(), out_npy)
 
-    for device in ["llvm", "nvptx", "cuda", "opencl", "metal", "rocm", "vulkan", "sdaccel"]:
+    for device in get_all_backend():
         check_device(device)
 
 
@@ -179,7 +179,7 @@ def verify_expand_like(in_shape, out_shape, axis):
         tvm_shape_like = tvm.nd.array(np.zeros(out_shape).astype(B.dtype), ctx)
         out = tvm.nd.array(np.zeros(out_shape).astype(A.dtype), ctx)
         f(tvm_input, tvm_shape_like, out)
-        np.testing.assert_allclose(out.asnumpy(), input)
+        tvm.testing.assert_allclose(out.asnumpy(), input)
 
     for device in ["llvm"]:
         check_device(device)
@@ -202,9 +202,9 @@ def verify_flip(in_shape, axis):
         data_nd = tvm.nd.array(x_np, ctx)
         out_nd = tvm.nd.empty(out_npy.shape, ctx=ctx, dtype=A.dtype)
         foo(data_nd, out_nd)
-        np.testing.assert_allclose(out_nd.asnumpy(), out_npy)
+        tvm.testing.assert_allclose(out_nd.asnumpy(), out_npy)
 
-    for device in ["llvm", "cuda", "opencl", "sdaccel"]:
+    for device in ["llvm", "cuda", "opencl", "sdaccel", "aocl_sw_emu"]:
         check_device(device)
 
 def verify_take(src_shape, indices_src, axis=None):
@@ -241,18 +241,16 @@ def verify_take(src_shape, indices_src, axis=None):
         indices_nd = tvm.nd.array(indices_src, ctx)
         out_nd = tvm.nd.empty(out_npys.shape, ctx=ctx, dtype=src_dtype)
         foo(data_nd, indices_nd, out_nd)
-        np.testing.assert_allclose(out_nd.asnumpy(), out_npys)
+        tvm.testing.assert_allclose(out_nd.asnumpy(), out_npys)
 
-    for device in ["llvm", "opencl", "sdaccel"]:
+    for device in ["llvm", "opencl", "sdaccel", "aocl_sw_emu"]:
         check_device(device)
 
-def verify_strided_slice(in_shape, begin, end, stride=None):
-    stride = stride if stride else [1, 1, 1]
+def verify_strided_slice(in_shape, begin, end, strides=None):
     A = tvm.placeholder(shape=in_shape, name="A")
-    B = topi.strided_slice(A, begin, end, stride) + 1
-    def test_forward(x, begin, end, stride):
-        return x[begin[0]:end[0]:stride[0],
-                    begin[1]:end[1]:stride[1], begin[2]:end[2]:stride[2]] + 1
+    strides = [1,1,1] if strides is None else strides
+    B = topi.strided_slice(A, begin, end, strides) + 1
+
     def check_device(device):
         ctx = tvm.context(device, 0)
         if not ctx.exist:
@@ -264,13 +262,46 @@ def verify_strided_slice(in_shape, begin, end, stride=None):
 
         foo = tvm.build(s, [A, B], device, name="stride_slice")
         x_np = np.random.uniform(size=in_shape).astype(A.dtype)
-        out_npy = test_forward(x_np, begin, end, stride)
+        out_npy = topi.testing.strided_slice_python(
+            x_np, begin, end, strides) + 1
         data_nd = tvm.nd.array(x_np, ctx)
         out_nd = tvm.nd.empty(out_npy.shape, ctx=ctx, dtype=A.dtype)
         foo(data_nd, out_nd)
-        np.testing.assert_allclose(out_nd.asnumpy(), out_npy)
+        tvm.testing.assert_allclose(out_nd.asnumpy(), out_npy)
 
-    for device in ["llvm", "opencl", "sdaccel"]:
+    for device in ["llvm", "opencl", "sdaccel", "aocl_sw_emu"]:
+        check_device(device)
+
+def verify_gather_nd(src_shape, indices_src, indices_dtype):
+    src_dtype = "float32"
+    indices_src = np.array(indices_src, dtype=indices_dtype)
+    A = tvm.placeholder(shape=src_shape, dtype=src_dtype, name="A")
+    indices = tvm.placeholder(shape=indices_src.shape, dtype=indices_dtype, name="indices")
+    out_tensor = topi.gather_nd(a=A, indices=indices)
+
+    def check_device(device):
+        ctx = tvm.context(device, 0)
+        if not ctx.exist:
+            print("Skip because %s is not enabled" % device)
+            return
+        print("Running on target: %s" % device)
+        with tvm.target.create(device):
+            s = topi.generic.schedule_injective(out_tensor)
+
+        func = tvm.build(s, [A, indices, out_tensor] , device, name="take")
+        shape_size = 1
+        for i in range(len(src_shape)):
+            shape_size = shape_size * src_shape[i]
+        data_npy = np.arange(shape_size, dtype=src_dtype).reshape((src_shape))
+        out_npys = topi.testing.gather_nd_python(data_npy, indices_src)
+
+        data_nd = tvm.nd.array(data_npy, ctx)
+        indices_nd = tvm.nd.array(indices_src, ctx)
+        out_nd = tvm.nd.empty(out_npys.shape, ctx=ctx, dtype=src_dtype)
+        func(data_nd, indices_nd, out_nd)
+        tvm.testing.assert_allclose(out_nd.asnumpy(), out_npys)
+
+    for device in get_all_backend():
         check_device(device)
 
 def test_strided_slice():
@@ -304,6 +335,21 @@ def test_squeeze():
     verify_squeeze((1, 2, 1, 4), None)
     verify_squeeze((1, 1, 1, 4), (1, 2))
     verify_squeeze((1, 1, 1, 1), None)
+
+    # a special case to trigger inline let expression
+    A = tvm.placeholder((2,), 'float32', 'A')
+    E = topi.squeeze(A)
+    C = tvm.compute((1,), lambda i: E[(2 * A[0] - 1).astype('int32')])
+    for device in ['cuda', 'opencl']:
+        ctx = tvm.context(device, 0)
+        if ctx.exist:
+            with tvm.target.create(device):
+                s = topi.generic.schedule_injective(C)
+                func = tvm.build(s, [A, C])
+            a = tvm.nd.array(np.array((1, 2)).astype('float32'), ctx=ctx)
+            c = tvm.nd.empty((1,), dtype='float32', ctx=ctx)
+            func(a, c)
+            assert c.asnumpy()[0] == 2
 
 
 def test_concatenate():
@@ -346,7 +392,23 @@ def test_take():
     verify_take((2,2), [[[1,0],[0,1]]], 1)
     verify_take((4,3,5,6), [[2,1,0,0]], -2)
 
+def test_gather_nd():
+    for indices_dtype in ['int32', 'float32']:
+        verify_gather_nd((4,), [[1.8]], indices_dtype)
+        verify_gather_nd((4,), [[1, 3, 2]], indices_dtype)
+        verify_gather_nd((2, 3), [[1]], indices_dtype)
+        verify_gather_nd((2, 3), [[1], [0]], indices_dtype)
+        verify_gather_nd((2, 3), [[1, 0], [0, 2]], indices_dtype)
+        verify_gather_nd((2, 3, 4), [[1, 0], [0, 2]], indices_dtype)
+        verify_gather_nd((2, 3, 4), [[1, 0], [0, 2], [3, 1]], indices_dtype)
+        verify_gather_nd((2, 3, 4), [[[1, 0], [0, 1]], [[0, 2], [1, 2]],
+                                     [[3, 1], [0, 2]]], indices_dtype)
+        verify_gather_nd((2, 3, 4, 5), [[1, 0], [0, 2]], indices_dtype)
+        verify_gather_nd((2, 3, 4, 5), [[1, 0], [2, 1], [3, 2], [4, 2]],
+                         indices_dtype)
+
 if __name__ == "__main__":
+    test_strided_slice()
     test_concatenate()
     test_tranpose()
     test_expand_dims()
@@ -356,4 +418,4 @@ if __name__ == "__main__":
     test_flip()
     test_expand_like()
     test_take()
-    test_strided_slice()
+    test_gather_nd()

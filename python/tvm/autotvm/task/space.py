@@ -1,5 +1,5 @@
 # pylint: disable=too-few-public-methods,invalid-name,unused-argument,arguments-differ
-# pylint: disable=consider-using-enumerate
+# pylint: disable=consider-using-enumerate,too-many-lines
 """
 Template configuration space.
 
@@ -423,7 +423,7 @@ class AnnotateSpace(TransformSpace):
         elif policy == 'locate_cache':
             self.num_axis = len(axes)
             num_anchor = kwargs["num_anchor"]
-            self.anns = list(itertools.combinations(np.arange(self.num_axis), num_anchor))
+            self.anns = list(itertools.combinations(range(self.num_axis), num_anchor))
             self.entities = [AnnotateEntity(x) for x in self.anns]
         else:  # none, vec, unroll, try_vec, try_unroll, try_vec_unroll, ...
             anns = policy.replace('try', 'none').split('_')
@@ -567,15 +567,16 @@ class ConfigSpace(object):
     """
     def __init__(self):
         # private dict to provide sugar
-        self.space_map = OrderedDict()  # name -> space
+        self.space_map = OrderedDict()    # name -> space
         self._collect = True
         self._length = None
-        self._entity_map = OrderedDict()
+        self._entity_map = OrderedDict()  # name -> entity
         self._constraints = []
         self.errors = []
         self.template_key = None
         self.code_hash = None
         self.flop = 0
+        self.is_fallback = False
 
     @staticmethod
     def axis(var):
@@ -607,6 +608,15 @@ class ConfigSpace(object):
             If is 'candidate', try listed candidate.
         kwargs: dict
             extra arguments for policy
+            see examples below for how to use filter
+
+        Examples
+        --------
+        >>> # use custom candidates
+        >>> cfg.define_split('tile_x', x, policy='candidate', candidate=[[1, 4, 4], [4, 1, 4]])
+
+        >>> # use a filter that only accepts the split scheme whose inner most tile is less then 4
+        >>> cfg.define_split('tile_y', y, policy='all', filter=lambda x: x.size[-1] <= 4)
         """
         axes = [axis]
         return self._add_new_transform(SplitSpace, name, axes, policy, **kwargs)
@@ -889,3 +899,114 @@ class ConfigEntity(ConfigSpace):
     def __repr__(self):
         return "%s,%s,%s,%d" % (str(self._entity_map)[12:-1], self.template_key,
                                 self.code_hash, self.index)
+
+
+class FallbackConfigEntity(ConfigSpace):
+    """The config entity created to support fallback"""
+
+    def __init__(self):
+        super(FallbackConfigEntity, self).__init__()
+        self.is_fallback = True
+
+    def fallback_split(self, name, constraints):
+        """Fallback a split knob
+
+        Parameters
+        ----------
+        name: str
+            name of the knob
+        constraints: List of int
+            The maximum tile size for every dimension. Value `-1` means no constraint.
+
+        Examples
+        --------
+        If you use cfg.define_split('tile_0', 128, num_outputs=3),
+        Then cfg.fallback_split('tile_0', [-1, 8, 4]) will give you cfg['tile_0'].size = [4, 8, 4]
+
+        If you use cfg.define_split('tile_0', 49, num_outputs=3),
+        Then cfg.fallback_split('tile_0', [-1, 8, 4]) will give you cfg['tile_0'].size = [7, 7, 1]
+        """
+        space = self.space_map[name]
+        assert isinstance(space, SplitSpace)
+        assert len(constraints) == space.num_outputs
+
+        # '-1' means no constraint
+        constraints = [x if x != -1 else 1e10 for x in constraints]
+
+        entity = self._entity_map[name]
+        now = space.product
+
+        for i in reversed(range(space.num_outputs)):
+            factors = get_factors(now)
+
+            find = len(factors) - 1
+            for j, f in enumerate(factors):
+                if f > constraints[i]:
+                    find = j - 1
+                    break
+
+            if find >= 0:
+                entity.size[i] = factors[find]
+                now //= factors[find]
+            else:
+                raise RuntimeError("Cannot find feasible fallback split entity for node: " + name)
+
+    def fallback_with_reference_log(self, ref_log):
+        """A data driven fallback mechanism.
+        We use tuned parameters from TopHub as reference data.
+        For an unseen shape, we find the most similar tuned one from TopHub and
+        mimic its parameters.
+
+        Parameters
+        ----------
+        ref_log: List of (MeasureInput, MeasureResult)
+            The reference log
+        """
+        knob_names = [x for x in self.space_map.keys() if
+                      isinstance(self.space_map[x], SplitSpace)]
+
+        # find best match config in reference data by matching tiling factors
+        factor_list = []
+        for knob_name in knob_names:
+            factor_list.append(get_factors(self.space_map[knob_name].product))
+
+        best_match_cfg = None
+        best_match_score = 0
+        for inp, _ in ref_log:
+            match_score = 0
+            for i, knob_name in enumerate(knob_names):
+                factors = get_factors(int(np.prod(inp.config[knob_name].size)))
+                match_score += (float(len(set(factor_list[i]).intersection(factors))) /
+                                len(factor_list[i]))
+
+                if match_score > best_match_score:
+                    best_match_score, best_match_cfg = match_score, inp.config
+
+        if best_match_cfg is None:
+            return
+
+        # mimic its tiling strategy
+        for knob_name in knob_names:
+            constraint = list(best_match_cfg[knob_name].size)
+            constraint[0] = -1
+            self.fallback_split(knob_name, constraint)
+
+        # copy other knobs
+        for knob_name in self.space_map.keys():
+            if not isinstance(self.space_map[knob_name], SplitSpace):
+                self._entity_map[knob_name] = best_match_cfg[knob_name]
+
+    def __setitem__(self, name, entity):
+        """set the entity(knob) of by name
+
+        Parameters
+        ----------
+        name: str
+            name of the entity
+        entity: SplitEntity, ReorderEntity, AnnotateEntity, OtherOptionEntity
+            value of the entity
+        """
+        self._entity_map[name] = entity
+
+    def __repr__(self):
+        return "%s,%s,%s" % (str(self._entity_map)[12:-1], self.template_key, self.code_hash)

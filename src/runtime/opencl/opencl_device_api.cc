@@ -4,7 +4,7 @@
  */
 #include <tvm/runtime/registry.h>
 #include <dmlc/thread_local.h>
-#include "./opencl_common.h"
+#include "opencl_common.h"
 
 namespace tvm {
 namespace runtime {
@@ -232,7 +232,6 @@ void OpenCLWorkspace::Init(const std::string& type_key, const std::string& devic
   if (initialized_) return;
   std::lock_guard<std::mutex> lock(this->mu);
   if (initialized_) return;
-  initialized_ = true;
   if (context != nullptr) return;
   // matched platforms
   std::vector<cl_platform_id> platform_ids = cl::GetPlatformIDs();
@@ -246,17 +245,18 @@ void OpenCLWorkspace::Init(const std::string& type_key, const std::string& devic
       continue;
     }
     std::vector<cl_device_id> devices_matched = cl::GetDeviceIDs(platform_id, device_type);
+    if ((devices_matched.size() == 0) && (device_type == "gpu")) {
+      LOG(WARNING) << "Using CPU OpenCL device";
+      devices_matched = cl::GetDeviceIDs(platform_id, "cpu");
+    }
     if (devices_matched.size() > 0) {
       this->type_key = type_key;
       this->platform_id = platform_id;
       this->platform_name = cl::GetPlatformInfo(platform_id, CL_PLATFORM_NAME);
       this->device_type = device_type;
       this->devices = devices_matched;
-      LOG(INFO) << "Initialize OpenCL platform \'" << this->platform_name << '\'';
       break;
     }
-    LOG(INFO) << "\'" << cl::GetPlatformInfo(platform_id, CL_PLATFORM_NAME)
-              << "\' platform has no OpenCL device: " << device_type << " mode";
   }
   if (this->platform_id == nullptr) {
     LOG(WARNING) << "No OpenCL device";
@@ -273,10 +273,8 @@ void OpenCLWorkspace::Init(const std::string& type_key, const std::string& devic
     this->queues.push_back(
         clCreateCommandQueue(this->context, did, 0, &err_code));
     OPENCL_CHECK_ERROR(err_code);
-    LOG(INFO) << type_key << "(" << i
-              << ")=\'" << cl::GetDeviceInfo(did, CL_DEVICE_NAME)
-              << "\' cl_device_id=" << did;
   }
+  initialized_ = true;
 }
 
 TVM_REGISTER_GLOBAL("device_api.opencl")

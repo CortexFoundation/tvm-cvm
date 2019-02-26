@@ -8,11 +8,11 @@
 
 #include <dmlc/logging.h>
 #include <dmlc/registry.h>
-#include <tvm/node.h>
+#include <tvm/node/node.h>
 #include <string>
 #include <memory>
 #include <functional>
-#include "./runtime/registry.h"
+#include "runtime/registry.h"
 
 namespace tvm {
 
@@ -25,7 +25,7 @@ using ::tvm::AttrVisitor;
   class TypeName : public ::tvm::NodeRef {                       \
    public:                                                       \
     TypeName() {}                                                 \
-    explicit TypeName(std::shared_ptr<::tvm::Node> n) : NodeRef(n) {}   \
+    explicit TypeName(::tvm::NodePtr<::tvm::Node> n) : NodeRef(n) {}     \
     const NodeName* operator->() const {                          \
       return static_cast<const NodeName*>(node_.get());           \
     }                                                             \
@@ -48,7 +48,7 @@ std::string SaveJSON(const NodeRef& node);
  *
  * \return The shared_ptr of the Node.
  */
-std::shared_ptr<Node> LoadJSON_(std::string json_str);
+NodePtr<Node> LoadJSON_(std::string json_str);
 
 /*!
  * \brief Load the node from json string.
@@ -68,26 +68,72 @@ inline NodeType LoadJSON(const std::string& json_str) {
   return NodeType(LoadJSON_(json_str));
 }
 
-/*! \brief typedef the factory function of data iterator */
-using NodeFactory = std::function<std::shared_ptr<Node> ()>;
 /*!
- * \brief Registry entry for NodeFactory
+ * \brief Registry entry for NodeFactory.
+ *
+ *  There are two types of Nodes that can be serialized.
+ *  The normal node requires a registration a creator function that
+ *  constructs an empty Node of the corresponding type.
+ *
+ *  The global singleton(e.g. global operator) where only global_key need to be serialized,
+ *  in this case, FGlobalKey need to be defined.
  */
-struct NodeFactoryReg
-    : public dmlc::FunctionRegEntryBase<NodeFactoryReg,
-                                        NodeFactory> {
+struct NodeFactoryReg {
+  /*!
+   * \brief creator function.
+   * \param global_key Key that identifies a global single object.
+   *        If this is not empty then FGlobalKey
+   * \return The created function.
+   */
+  using FCreate = std::function<NodePtr<Node>(const std::string& global_key)>;
+  /*!
+   * \brief Global key function, only needed by global objects.
+   * \param node The node pointer.
+   * \return node The global key to the node.
+   */
+  using FGlobalKey = std::function<std::string(const Node* node)>;
+  /*! \brief registered name */
+  std::string name;
+  /*!
+   * \brief The creator function
+   */
+  FCreate fcreator = nullptr;
+  /*!
+   * \brief The global key function.
+   */
+  FGlobalKey fglobal_key = nullptr;
+  // setter of creator
+  NodeFactoryReg& set_creator(FCreate f) {  // NOLINT(*)
+    this->fcreator = f;
+    return *this;
+  }
+  // setter of creator
+  NodeFactoryReg& set_global_key(FGlobalKey f) {  // NOLINT(*)
+    this->fglobal_key = f;
+    return *this;
+  }
+  // global registry singleton
+  TVM_DLL static ::dmlc::Registry<::tvm::NodeFactoryReg> *Registry();
 };
 
+/*!
+ * \brief Register a Node type
+ * \note This is necessary to enable serialization of the Node.
+ */
 #define TVM_REGISTER_NODE_TYPE(TypeName)                                \
   static DMLC_ATTRIBUTE_UNUSED ::tvm::NodeFactoryReg & __make_Node ## _ ## TypeName ## __ = \
-      ::dmlc::Registry<::tvm::NodeFactoryReg>::Get()->__REGISTER__(TypeName::_type_key) \
-      .set_body([]() { return std::make_shared<TypeName>(); })
+      ::tvm::NodeFactoryReg::Registry()->__REGISTER__(TypeName::_type_key) \
+      .set_creator([](const std::string&) { return ::tvm::make_node<TypeName>(); })
 
-TVM_DLL::dmlc::Registry<::tvm::NodeFactoryReg > * GetTVMNodeFactoryRegistry();
 
-#define TVM_EXTERNAL_REGISTER_NODE_TYPE(TypeName)                                \
-  static DMLC_ATTRIBUTE_UNUSED ::tvm::NodeFactoryReg & __make_Node ## _ ## TypeName ## __ = \
-      ::tvm::GetTVMNodeFactoryRegistry()->__REGISTER__(TypeName::_type_key) \
-      .set_body([]() { return std::make_shared<TypeName>(); })
+#define TVM_STRINGIZE_DETAIL(x) #x
+#define TVM_STRINGIZE(x) TVM_STRINGIZE_DETAIL(x)
+#define TVM_DESCRIBE(...) describe(__VA_ARGS__ "\n\nFrom:" __FILE__ ":" TVM_STRINGIZE(__LINE__))
+/*!
+ * \brief Macro to include current line as string
+ */
+#define TVM_ADD_FILELINE "\n\nDefined in " __FILE__ ":L" TVM_STRINGIZE(__LINE__)
+
+
 }  // namespace tvm
 #endif  // TVM_BASE_H_

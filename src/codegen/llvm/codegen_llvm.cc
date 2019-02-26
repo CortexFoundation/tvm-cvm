@@ -7,8 +7,8 @@
 
 #include <tvm/runtime/device_api.h>
 #include <tvm/runtime/c_runtime_api.h>
-#include "./codegen_llvm.h"
-#include "./codegen_cpu.h"
+#include "codegen_llvm.h"
+#include "codegen_cpu.h"
 #include "../codegen_common.h"
 #include "../../pass/ir_util.h"
 #include "../../arithmetic/compute_expr.h"
@@ -235,6 +235,16 @@ void CodeGenLLVM::InitPassManagerBuilder(llvm::PassManagerBuilder* builder) {
 }
 
 void CodeGenLLVM::Optimize() {
+  // pass manager
+  FPassManager fpass(module_.get());
+  MPassManager mpass;
+  mpass.add(llvm::createTargetTransformInfoWrapperPass(
+              target_machine_ ? target_machine_->getTargetIRAnalysis() :
+                                llvm::TargetIRAnalysis()));
+  fpass.add(llvm::createTargetTransformInfoWrapperPass(
+              target_machine_ ? target_machine_->getTargetIRAnalysis() :
+              llvm::TargetIRAnalysis()));
+
   // place optimization pass
   llvm::PassManagerBuilder builder;
   builder.OptLevel = 3;
@@ -252,9 +262,6 @@ void CodeGenLLVM::Optimize() {
   target_machine_->adjustPassManager(builder);
 #endif
 
-  // pass manager
-  FPassManager fpass(module_.get());
-  MPassManager mpass;
   builder.populateFunctionPassManager(fpass);
   builder.populateModulePassManager(mpass);
 
@@ -647,6 +654,8 @@ llvm::Value* CodeGenLLVM::CreateIntrinsic(const Call* op) {
   } else if (op->is_intrinsic(intrinsic::tvm_handle_is_null)) {
     return builder_->CreateIsNull(MakeValue(op->args[0]));
   } else if (op->is_intrinsic(intrinsic::tvm_if_then_else)) {
+    CHECK_EQ(op->args[0].type().lanes(), 1)
+        << "if_then_else can only take scalar condition";
     using llvm::BasicBlock;
     BasicBlock* then_block = BasicBlock::Create(
         *ctx_, "if_then", function_);
@@ -788,11 +797,7 @@ DEFINE_CODEGEN_CMP_OP(GE);
 llvm::Value* CodeGenLLVM::VisitExpr_(const Div* op) {
   llvm::Value* a = MakeValue(op->a);
   llvm::Value* b = MakeValue(op->b);
-  int shift;
-  if ((op->type.is_int() || op->type.is_uint()) &&
-      is_const_power_of_two_integer(op->b, &shift)) {
-    return builder_->CreateAShr(a, shift);
-  } else if (op->type.is_int()) {
+  if (op->type.is_int()) {
     return builder_->CreateSDiv(a, b);
   } else if (op->type.is_uint()) {
     return builder_->CreateUDiv(a, b);
@@ -1049,8 +1054,10 @@ void CodeGenLLVM::VisitStmt_(const Allocate* op) {
     if (info.alignment > 16) {
       info.alignment = 16;
     }
-    llvm::AllocaInst* alloca = builder_->CreateAlloca(
-        LLVMType(op->type), ConstInt32(constant_size));
+    llvm::AllocaInst* alloca = WithFunctionEntry([&]() {
+        return builder_->CreateAlloca(
+            LLVMType(op->type), ConstInt32(constant_size));
+      });
     if (alloca->getAlignment() < static_cast<uint32_t>(info.alignment)) {
       alloca->setAlignment(info.alignment);
     }

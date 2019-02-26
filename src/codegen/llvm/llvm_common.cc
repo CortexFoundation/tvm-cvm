@@ -5,15 +5,16 @@
 #ifdef TVM_LLVM_VERSION
 
 #include <tvm/base.h>
+#include <atomic>
 #include <mutex>
-#include "./llvm_common.h"
+#include "llvm_common.h"
 
 namespace tvm {
 namespace codegen {
 
 struct LLVMEnv {
   std::mutex mu;
-  bool all_initialized{false};
+  std::atomic<bool> all_initialized{false};
 
   static LLVMEnv* Global() {
     static LLVMEnv inst;
@@ -23,15 +24,15 @@ struct LLVMEnv {
 
 void InitializeLLVM() {
   LLVMEnv* e = LLVMEnv::Global();
-  if (!e->all_initialized) {
+  if (!e->all_initialized.load(std::memory_order::memory_order_acquire)) {
     std::lock_guard<std::mutex> lock(e->mu);
-    if (!e->all_initialized) {
-      e->all_initialized = true;
+    if (!e->all_initialized.load(std::memory_order::memory_order_acquire)) {
       llvm::InitializeAllTargetInfos();
       llvm::InitializeAllTargets();
       llvm::InitializeAllTargetMCs();
       llvm::InitializeAllAsmParsers();
       llvm::InitializeAllAsmPrinters();
+      e->all_initialized.store(true, std::memory_order::memory_order_release);
     }
   }
 }
@@ -103,8 +104,8 @@ void ParseLLVMTargetOptions(const std::string& target_str,
   opt.LessPreciseFPMADOption = true;
   #endif
   opt.AllowFPOpFusion = llvm::FPOpFusion::Fast;
-  opt.UnsafeFPMath = true;
-  opt.NoInfsFPMath = true;
+  opt.UnsafeFPMath = false;
+  opt.NoInfsFPMath = false;
   opt.NoNaNsFPMath = true;
   if (soft_float_abi) {
     opt.FloatABIType = llvm::FloatABI::Soft;
@@ -114,7 +115,7 @@ void ParseLLVMTargetOptions(const std::string& target_str,
 }
 
 
-llvm::TargetMachine*
+std::unique_ptr<llvm::TargetMachine>
 GetLLVMTargetMachine(const std::string& target_str,
                      bool allow_null) {
   std::string target_triple, mcpu, mattr;
@@ -143,7 +144,7 @@ GetLLVMTargetMachine(const std::string& target_str,
   }
   llvm::TargetMachine* tm = target->createTargetMachine(
       target_triple, mcpu, mattr, opt, llvm::Reloc::PIC_);
-  return tm;
+  return std::unique_ptr<llvm::TargetMachine>(tm);
 }
 
 }  // namespace codegen

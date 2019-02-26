@@ -209,15 +209,13 @@ std::shared_ptr<Symbol> JSONGraph2Symbol(const JSONGraph &jgraph, bool no_parse)
   for (const JSONNode &n : jgraph.nodes) {
     n.node->inputs.reserve(n.inputs.size());
     for (const JSONNode::Entry &e : n.inputs) {
+      CHECK(e.node_id < jgraph.nodes.size());
       n.node->inputs.emplace_back(NodeEntry{jgraph.nodes[e.node_id].node, e.index, e.version});
     }
     n.node->control_deps.reserve(n.control_deps.size());
     for (uint32_t nid : n.control_deps) {
+      CHECK(nid < jgraph.nodes.size());
       n.node->control_deps.push_back(jgraph.nodes[nid].node);
-    }
-    // rebuild attribute parser
-    if (!no_parse && n.node->op() != nullptr && n.node->op()->attr_parser != nullptr) {
-      n.node->op()->attr_parser(&(n.node->attrs));
     }
     for (const JSONGraph &subgraph : n.subgraphs) {
       // The "no_parse" option here, is to be compatible with
@@ -227,14 +225,23 @@ std::shared_ptr<Symbol> JSONGraph2Symbol(const JSONGraph &jgraph, bool no_parse)
       // incubator-mxnet/src/nnvm/legacy_json_util.cc:UpgradeJSON_Parse
       n.node->attrs.subgraphs.push_back(JSONGraph2Symbol(subgraph, false));
     }
+    // rebuild attribute parser
+    if (!no_parse && n.node->op() != nullptr && n.node->op()->attr_parser != nullptr) {
+      n.node->op()->attr_parser(&(n.node->attrs));
+    } else if (!no_parse && n.node->is_variable()) {
+      n.node->attrs.parsed =
+        Symbol::CreateVariable(n.node->attrs.name).outputs[0].node->attrs.parsed;
+    }
   }
   // consistency check
   for (uint32_t nid : jgraph.arg_nodes) {
+    CHECK(nid < jgraph.nodes.size());
     CHECK(jgraph.nodes[nid].node->is_variable());
   }
   std::shared_ptr<Symbol> symbol = std::make_shared<Symbol>();
   symbol->outputs.reserve(jgraph.heads.size());
   for (const JSONNode::Entry &e : jgraph.heads) {
+    CHECK(e.node_id < jgraph.nodes.size());
     symbol->outputs.emplace_back(NodeEntry{jgraph.nodes[e.node_id].node, e.index, e.version});
   }
   return symbol;

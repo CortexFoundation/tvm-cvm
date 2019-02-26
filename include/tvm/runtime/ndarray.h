@@ -9,8 +9,8 @@
 #include <atomic>
 #include <vector>
 #include <utility>
-#include "./c_runtime_api.h"
-#include "./serializer.h"
+#include "c_runtime_api.h"
+#include "serializer.h"
 
 namespace tvm {
 namespace runtime {
@@ -21,7 +21,7 @@ namespace runtime {
 class NDArray {
  public:
   // internal container type
-  struct Container;
+  class Container;
   /*! \brief default constructor */
   NDArray() {}
   /*!
@@ -30,8 +30,11 @@ class NDArray {
    */
   explicit inline NDArray(Container* data);
   /*!
-   * \brief copy constructor
-   * \param other The value to be copied
+   * \brief copy constructor.
+   *
+   * It does not make a copy, but the reference count of the input NDArray is incremented
+   *
+   * \param other NDArray that shares internal data with the input NDArray.
    */
   inline NDArray(const NDArray& other);  // NOLINT(*)
   /*!
@@ -170,7 +173,7 @@ class NDArray {
 
   // internal namespace
   struct Internal;
- private:
+ protected:
   /*! \brief Internal Data content */
   Container* data_{nullptr};
   // enable internal functions
@@ -195,7 +198,7 @@ inline bool SaveDLTensor(dmlc::Stream* strm, const DLTensor* tensor);
  *
  * \note: do not use this function directly, use NDArray.
  */
-struct NDArray::Container {
+class NDArray::Container {
  public:
   // NOTE: the first part of this structure is the same as
   // DLManagedTensor, note that, however, the deleter
@@ -222,6 +225,28 @@ struct NDArray::Container {
    *  currently defined by the system.
    */
   void (*deleter)(Container* self) = nullptr;
+
+ protected:
+  friend class NDArray;
+  friend class RPCWrappedFunc;
+  /*!
+   * \brief Type flag used to indicate subclass.
+   *  Default value 0 means normal NDArray::Conatainer.
+   *
+   *  We can extend a more specialized NDArray::Container
+   *  and use the array_type_index_ to indicate
+   *  the specific array subclass.
+   */
+  uint32_t array_type_index_{0};
+  /*! \brief The internal reference counter */
+  std::atomic<int> ref_counter_{0};
+  /*!
+   * \brief The shape container,
+   *  can be used used for shape data.
+   */
+  std::vector<int64_t> shape_;
+
+ public:
   /*! \brief default constructor */
   Container() {
     dl_tensor.data = nullptr;
@@ -243,29 +268,22 @@ struct NDArray::Container {
       }
     }
   }
-
- private:
-  friend class NDArray;
-  friend class RPCWrappedFunc;
-  /*!
-   * \brief The shape container,
-   *  can be used used for shape data.
-   */
-  std::vector<int64_t> shape_;
-  /*! \brief The internal array object */
-  std::atomic<int> ref_counter_{0};
 };
 
 // implementations of inline functions
 // the usages of functions are documented in place.
 inline NDArray::NDArray(Container* data)
   : data_(data) {
-  data_->IncRef();
+  if (data != nullptr) {
+    data_->IncRef();
+  }
 }
 
 inline NDArray::NDArray(const NDArray& other)
   : data_(other.data_) {
-  data_->IncRef();
+  if (data_ != nullptr) {
+    data_->IncRef();
+  }
 }
 
 inline void NDArray::reset() {
@@ -273,6 +291,21 @@ inline void NDArray::reset() {
     data_->DecRef();
     data_ = nullptr;
   }
+}
+
+/*! \brief return the size of data the DLTensor hold, in term of number of bytes
+ *
+ *  \param arr the input DLTensor
+ *
+ *  \return number of  bytes of data in the DLTensor.
+ */
+inline size_t GetDataSize(const DLTensor& arr) {
+  size_t size = 1;
+  for (tvm_index_t i = 0; i < arr.ndim; ++i) {
+    size *= static_cast<size_t>(arr.shape[i]);
+  }
+  size *= (arr.dtype.bits * arr.dtype.lanes + 7) / 8;
+  return size;
 }
 
 inline void NDArray::CopyFrom(DLTensor* other) {

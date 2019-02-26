@@ -8,8 +8,8 @@
 #include <tvm/ir_visitor.h>
 #include <unordered_map>
 #include <unordered_set>
-#include "./ir_util.h"
-#include "./storage_access.h"
+#include "ir_util.h"
+#include "storage_access.h"
 #include "../runtime/thread_storage_scope.h"
 
 namespace tvm {
@@ -329,7 +329,7 @@ Stmt ThreadSync(Stmt stmt, std::string storage_scope) {
 
 LoweredFunc ThreadSync(LoweredFunc f, std::string storage_scope) {
   CHECK_NE(f->func_type, kHostFunc);
-  auto n = std::make_shared<LoweredFuncNode>(*f.operator->());
+  auto n = make_node<LoweredFuncNode>(*f.operator->());
   n->body = ThreadSync(f->body, storage_scope);
   return LoweredFunc(n);
 }

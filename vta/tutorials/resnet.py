@@ -61,8 +61,8 @@ def classify(m, image):
     m.set_input('data', image)
     timer = m.module.time_evaluator("run", ctx, number=1)
     tcost = timer()
-    tvm_output = m.get_output(0, tvm.nd.empty((1000,), "float32", remote.cpu(0)))
-    top = np.argmax(tvm_output.asnumpy())
+    tvm_output = m.get_output(0)
+    top = np.argmax(tvm_output.asnumpy()[0])
     tcost = "t={0:.2f}s".format(tcost.mean)
     return tcost + " {}".format(synset[top])
 
@@ -147,14 +147,13 @@ if not os.path.exists(data_dir):
 
 # Download files
 for file in [categ_fn, graph_fn, params_fn]:
-    if not os.path.isfile(file):
-        download(os.path.join(url, file), os.path.join(data_dir, file))
+    download(os.path.join(url, file), os.path.join(data_dir, file))
 
 # Read in ImageNet Categories
 synset = eval(open(os.path.join(data_dir, categ_fn)).read())
 
 # Download pre-tuned op parameters of conv2d for ARM CPU used in VTA
-autotvm.tophub.check_package('vta')
+autotvm.tophub.check_backend('vta')
 
 
 ######################################################################
@@ -237,8 +236,8 @@ timer = m.module.time_evaluator("run", ctx, number=1)
 tcost = timer()
 
 # Get classification results
-tvm_output = m.get_output(0, tvm.nd.empty((1000,), "float32", remote.cpu(0)))
-top_categories = np.argsort(tvm_output.asnumpy())
+tvm_output = m.get_output(0)
+top_categories = np.argsort(tvm_output.asnumpy()[0])
 
 # Report top-5 classification results
 print("ResNet-18 Prediction #1:", synset[top_categories[-1]])

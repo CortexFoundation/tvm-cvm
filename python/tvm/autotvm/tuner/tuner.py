@@ -31,6 +31,11 @@ class Tuner(object):
         self.best_measure_pair = None
         self.best_iter = 0
 
+        # time to leave
+        self.ttl = None
+        self.n_trial = None
+        self.early_stopping = None
+
     def has_next(self):
         """Whether has next untried config in the space
 
@@ -76,7 +81,7 @@ class Tuner(object):
         measure_option: dict
             The options for how to measure generated code.
             You should use the return value ot autotvm.measure_option for this argument.
-        early_stopping: int
+        early_stopping: int, optional
             Early stop the tuning when not finding better configs in this number of trials
         callbacks: List of callable
             A list of callback functions. The signature of callback function is
@@ -87,6 +92,9 @@ class Tuner(object):
         measure_batch = create_measure_batch(self.task, measure_option)
         n_parallel = getattr(measure_batch, 'n_parallel', 1)
         early_stopping = early_stopping or 1e9
+        self.n_trial = n_trial
+        self.early_stopping = early_stopping
+
         old_level = logger.level
 
         GLOBAL_SCOPE.in_tuning = True
@@ -121,17 +129,18 @@ class Tuner(object):
                              res, config)
 
             i += len(results)
+            self.ttl = min(early_stopping + self.best_iter, n_trial) - i
 
             self.update(inputs, results)
-
             for callback in callbacks:
                 callback(self, inputs, results)
 
-            if i > self.best_iter + early_stopping:
+            if i >= self.best_iter + early_stopping:
                 logger.debug("Early stopped. Best iter: %d.", self.best_iter)
                 break
 
-            if error_ct > 50:
+            if error_ct > 150:
+                logging.basicConfig()
                 logger.warning("Too many errors happen in the tuning. Now is in debug mode")
                 logger.setLevel(logging.DEBUG)
             else:

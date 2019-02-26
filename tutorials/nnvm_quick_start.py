@@ -49,8 +49,8 @@ image_shape = (3, 224, 224)
 data_shape = (batch_size,) + image_shape
 out_shape = (batch_size, num_class)
 
-net, params = nnvm.testing.resnet.get_workload(layers=18,
-        batch_size=batch_size, image_shape=image_shape)
+net, params = nnvm.testing.resnet.get_workload(
+    num_layers=18, batch_size=batch_size, image_shape=image_shape)
 print(net.debug_str())
 
 ######################################################################
@@ -117,7 +117,7 @@ print(out.asnumpy().flatten()[0:10])
 from tvm.contrib import util
 
 temp = util.tempdir()
-path_lib = temp.relpath("deploy_lib.so")
+path_lib = temp.relpath("deploy_lib.tar")
 lib.export_library(path_lib)
 with open(temp.relpath("deploy_graph.json"), "w") as fo:
     fo.write(graph.json())
@@ -133,9 +133,7 @@ loaded_lib = tvm.module.load(path_lib)
 loaded_params = bytearray(open(temp.relpath("deploy_param.params"), "rb").read())
 input_data = tvm.nd.array(np.random.uniform(size=data_shape).astype("float32"))
 
-module = graph_runtime.create(loaded_json, loaded_lib, tvm.gpu(0))
+module = graph_runtime.create(loaded_json, loaded_lib, ctx)
 module.load_params(loaded_params)
 module.run(data=input_data)
-
-out = module.get_output(0, out=tvm.nd.empty(out_shape))
-
+out = module.get_output(0).asnumpy()

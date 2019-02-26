@@ -321,7 +321,7 @@ class VTInjector : public IRMutator {
     CHECK_EQ(max_loop_depth_, 0);
     Stmt then_case = this->Mutate(op->then_case);
     Stmt else_case;
-    if (else_case.defined()) {
+    if (op->else_case.defined()) {
       int temp = max_loop_depth_;
       max_loop_depth_ = 0;
       else_case = this->Mutate(op->else_case);
@@ -430,7 +430,8 @@ class VTInjector : public IRMutator {
     } else {
       // insert a for loop
       Var idx(var_->name_hint + ".s", var_->type);
-      stmt = Substitute(stmt, {{var_, idx}});
+      Map<Var, Expr> values{{var_, idx}};
+      stmt = Substitute(stmt, values);
       return For::make(idx, make_zero(idx.type()),
                        make_const(idx.type(), num_threads_),
                        ForType::Serial, DeviceAPI::None, stmt);

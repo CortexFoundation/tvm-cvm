@@ -8,8 +8,8 @@
 #include <array>
 #include <string>
 #include <mutex>
-#include "./metal_module.h"
-#include "./metal_common.h"
+#include "metal_module.h"
+#include "metal_common.h"
 #include "../pack_args.h"
 #include "../thread_storage_scope.h"
 #include "../meta_data.h"
@@ -163,7 +163,7 @@ class MetalModuleNode final :public runtime::ModuleNode {
   std::mutex mutex_;
 };
 
-// a wrapped function class to get packed fucn.
+// a wrapped function class to get packed func.
 class MetalWrappedFunc {
  public:
   // initialize the METAL function.

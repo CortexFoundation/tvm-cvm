@@ -49,14 +49,14 @@ MakeLoopNest(const Stage& stage,
 std::vector<Stmt> MakeIfNest(const std::vector<Expr>& predicates);
 
 /*!
- * \brief Replace the tensor reference in stmt by the replace map.
+ * \brief Replace the tensor reference (especially in Call's) in stmt by the replace map.
  * \param stmt The statement to be processed.
  * \param replace The replacement rule.
  */
 Stmt ReplaceTensor(Stmt stmt,
                    const std::unordered_map<Tensor, Tensor>& replace);
 /*!
- * \brief Replace the tensor reference in expr by the replace map.
+ * \brief Replace the tensor reference (especially in Call's) in stmt by the replace map.
  * \param expr The expression to be processed.
  * \param replace The replacement rule.
  */
@@ -71,6 +71,18 @@ Expr ReplaceTensor(Expr expr,
  */
 Stmt Substitute(Stmt stmt,
                 const std::unordered_map<IterVar, Expr>& value_map);
+
+/*!
+ * \brief Converts Halide ForType to its corresponding IterVarType
+ * \param for_type The ForType to be converted
+ */
+IterVarType ForTypeToIterVarType(ir::ForType for_type);
+
+/*!
+ * \brief Converts IterVarType to its corresponding Halide ForType
+ * \param iter_type The IterVarType to be converted
+ */
+ir::ForType IterVarTypeToForType(IterVarType iter_type);
 
 }  // namespace op
 }  // namespace tvm

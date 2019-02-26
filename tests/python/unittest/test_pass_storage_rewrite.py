@@ -238,7 +238,8 @@ def test_parallel_alloc():
     n = tvm.var("n")
     with ib.for_range(0, n, name="t") as i:
         ib.scope_attr(
-            tvm.const(1) , "pragma_scope", tvm.make.StringImm("parallel_launch_point"))
+            tvm.const(1, "int32") , "pragma_scope",
+            tvm.make.StringImm("parallel_launch_point"))
         with ib.for_range(0, n, name="i", for_type="parallel") as i:
             with ib.for_range(0, 10, name="j") as j:
                 A = ib.allocate("float32", n, name="A", scope="global")
@@ -476,6 +477,30 @@ def test_replace_dataflow():
     assert isinstance(bounds, tvm.container.Map)
 
 
+def test_large_input():
+    @tvm.hybrid.script
+    def compute(a, b):
+        n = 16384
+        c = output_tensor((n, n), 'int32')
+        for i in range(n):
+            for j in range(n):
+                c[i, j] = a[i, j] - b[i, j]
+        return c
+
+    n = 16384
+    shape = (n, n)
+    a = tvm.placeholder(shape, name='a', dtype='int32')
+    b = tvm.placeholder(shape, name='b', dtype='int32')
+    c = tvm.compute(shape, lambda i, j: compute(a, b)[i, j])
+    c = tvm.compute(shape, lambda i, j: 1 + c[i, j])
+    s = tvm.create_schedule(c.op)
+    stmt = tvm.lower(s, [a, b, c], simple_mode=True)
+    def verify(n):
+        if isinstance(n, tvm.stmt.Allocate):
+            assert n.extents[0].value == 268435456
+    tvm.ir_pass.PostOrderVisit(stmt, verify)
+
+
 if __name__ == "__main__":
     test_alloc_seq()
     test_alloc_different_dtypes()
@@ -491,3 +516,4 @@ if __name__ == "__main__":
     test_alloc_seq_type2()
     test_reuse_small_buffer()
     test_replace_dataflow()
+    test_large_input()

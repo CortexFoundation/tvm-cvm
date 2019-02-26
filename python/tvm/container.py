@@ -17,14 +17,35 @@ class Array(NodeBase):
             start = i.start if i.start is not None else 0
             stop = i.stop if i.stop is not None else len(self)
             step = i.step if i.step is not None else 1
+            if start < 0:
+                start += len(self)
+            if stop < 0:
+                stop += len(self)
             return [self[idx] for idx in range(start, stop, step)]
 
-        if i >= len(self):
-            raise IndexError("array index out of range")
+        if i < -len(self) or i >= len(self):
+            raise IndexError("Array index out of range. Array size: {}, got index {}"
+                             .format(len(self), i))
+        if i < 0:
+            i += len(self)
         return _api_internal._ArrayGetItem(self, i)
 
     def __len__(self):
         return _api_internal._ArraySize(self)
+
+
+@register_node
+class EnvFunc(NodeBase):
+    """Environment function.
+
+    This is a global function object that can be serialized by its name.
+    """
+    def __call__(self, *args):
+        return _api_internal._EnvFuncCall(self, *args)
+
+    @property
+    def func(self):
+        return _api_internal._EnvFuncGetPackedFunc(self)
 
 
 @register_node

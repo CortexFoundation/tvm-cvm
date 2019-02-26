@@ -13,7 +13,7 @@
 #include <tvm/ir_visitor.h>
 #include <tvm/ir_pass.h>
 #include <unordered_set>
-#include "./ir_util.h"
+#include "ir_util.h"
 #include "../arithmetic/compute_expr.h"
 #include "../runtime/thread_storage_scope.h"
 
@@ -93,7 +93,7 @@ class WarpStoreCoeffFinder : private IRVisitor {
         arith::DetectLinearEquation(index, {warp_index_});
     CHECK_EQ(m.size(), 2U)
         << "LowerWarpMemory failed due to store index=" << index;
-    int coeff;
+    int coeff = 0;
     Expr mcoeff = ir::Simplify(m[0]);
 
     CHECK(arith::GetConstInt(mcoeff, &coeff) && coeff > 0)
@@ -317,7 +317,7 @@ class WarpMemoryRewriter : private IRMutator {
 LoweredFunc
 LowerWarpMemory(LoweredFunc f, int warp_size) {
   CHECK_EQ(f->func_type, kDeviceFunc);
-  auto n = std::make_shared<LoweredFuncNode>(*f.operator->());
+  auto n = make_node<LoweredFuncNode>(*f.operator->());
   n->body = WarpMemoryRewriter(warp_size).Rewrite(n->body);
   return LoweredFunc(n);
 }

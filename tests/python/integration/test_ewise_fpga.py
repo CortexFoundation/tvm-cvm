@@ -37,14 +37,14 @@ def test_exp():
         a = tvm.nd.array(np.random.uniform(size=n).astype(A.dtype), ctx)
         b = tvm.nd.array(np.zeros(n, dtype=B.dtype), ctx)
         fexp(a, b)
-        np.testing.assert_allclose(
+        tvm.testing.assert_allclose(
             b.asnumpy(), np.exp(a.asnumpy()), rtol=1e-5)
 
     check_device("sdaccel")
     if "AWS_PLATFORM" in os.environ:
         check_device("sdaccel -device=" + os.environ.get("AWS_PLATFORM"))
 
-    check_device("aocl -device=s5_ref -mattr=emulator")
+    check_device("aocl_sw_emu")
 
 def test_multi_kernel():
     # graph
@@ -78,11 +78,11 @@ def test_multi_kernel():
         c = tvm.nd.array(np.random.uniform(size=n).astype(C.dtype), ctx)
         d = tvm.nd.array(np.random.uniform(size=n).astype(D.dtype), ctx)
         fadd(a, b, c, d)
-        np.testing.assert_allclose(
+        tvm.testing.assert_allclose(
             d.asnumpy(), a.asnumpy() * 2 + b.asnumpy(), rtol=1e-5)
 
     check_device("sdaccel")
-    check_device("aocl -device=s5_ref -mattr=emulator")
+    check_device("aocl_sw_emu")
 
 
 if __name__ == "__main__":

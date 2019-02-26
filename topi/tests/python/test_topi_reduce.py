@@ -4,6 +4,8 @@ import numpy as np
 import tvm
 import topi
 
+from common import get_all_backend
+
 def _my_npy_argmax(arr, axis, keepdims):
     if not keepdims:
         return arr.argmax(axis=axis)
@@ -85,16 +87,20 @@ def verify_reduce_map_ele(in_shape, axis, keepdims, type="sum", dtype="float32")
                 sel_indices = other_indices[0:axis] + (out_tvm_indices,) + other_indices[axis:]
                 out_tvm_val = in_npy_map[sel_indices]
             if type == "argmax":
-                np.testing.assert_allclose(out_tvm_val, in_npy_map.max(axis=axis), 1E-3, 1E-3)
+                tvm.testing.assert_allclose(out_tvm_val, in_npy_map.max(axis=axis), 1E-3, 1E-3)
             elif type == "argmin":
-                np.testing.assert_allclose(out_tvm_val, in_npy_map.min(axis=axis), 1E-3, 1E-3)
+                tvm.testing.assert_allclose(out_tvm_val, in_npy_map.min(axis=axis), 1E-3, 1E-3)
         else:
-            np.testing.assert_allclose(out_tvm.asnumpy(), out_npy, 1E-3, 1E-3)
-    for device in ["cuda", "opencl", "metal", "llvm", "rocm", "vulkan", "nvptx"]:
+            tvm.testing.assert_allclose(out_tvm.asnumpy(), out_npy, 1E-3, 1E-3)
+    for device in get_all_backend():
         check_device(device)
 
 
 def test_reduce_map():
+    verify_reduce_map_ele(in_shape=(32,),
+                          axis=0,
+                          keepdims=False,
+                          type="argmax")
     verify_reduce_map_ele(in_shape=(128, 24, 128, 24),
                         axis=(1, 2, 3),
                         keepdims=True,

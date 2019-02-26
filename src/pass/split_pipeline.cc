@@ -11,7 +11,7 @@
 #include <tvm/channel.h>
 #include <unordered_map>
 #include <unordered_set>
-#include "./ir_util.h"
+#include "ir_util.h"
 
 namespace tvm {
 namespace ir {
@@ -102,9 +102,8 @@ class MarkChannelAccess : public IRMutator {
     } else {
       alloc_size = op->extents[0];
       for (size_t i = 1; i < op->extents.size(); ++i) {
-        alloc_size *= op->extents[i];
+        alloc_size = alloc_size * op->extents[i];
       }
-      alloc_size = ir::Simplify(alloc_size);
     }
 
     if (rw.write_count) {

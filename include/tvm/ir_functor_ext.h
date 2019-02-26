@@ -6,8 +6,8 @@
 #ifndef TVM_IR_FUNCTOR_EXT_H_
 #define TVM_IR_FUNCTOR_EXT_H_
 
-#include <tvm/ir_functor.h>
-#include "./ir.h"
+#include "tvm/node/ir_functor.h"
+#include "ir.h"
 
 namespace tvm {
 namespace ir {

@@ -4,11 +4,11 @@ ROOTDIR = $(CURDIR)
 	 cython cython2 cython3 web runtime vta
 
 ifndef DMLC_CORE_PATH
-  DMLC_CORE_PATH = $(ROOTDIR)/dmlc-core
+  DMLC_CORE_PATH = $(ROOTDIR)/3rdparty/dmlc-core
 endif
 
 ifndef DLPACK_PATH
-  DLPACK_PATH = $(ROOTDIR)/dlpack
+  DLPACK_PATH = $(ROOTDIR)/3rdparty/dlpack
 endif
 
 INCLUDE_FLAGS = -Iinclude -I$(DLPACK_PATH)/include -I$(DMLC_CORE_PATH)/include
@@ -32,7 +32,7 @@ cpptest:
 EMCC_FLAGS= -std=c++11 -DDMLC_LOG_STACK_TRACE=0\
 	-Oz -s RESERVED_FUNCTION_POINTERS=2 -s MAIN_MODULE=1 -s NO_EXIT_RUNTIME=1\
 	-s TOTAL_MEMORY=1073741824\
-	-s EXTRA_EXPORTED_RUNTIME_METHODS="['cwrap','getValue','setValue','addFunction']"\
+	-s EXTRA_EXPORTED_RUNTIME_METHODS="['addFunction','cwrap','getValue','setValue']"\
 	-s USE_GLFW=3 -s USE_WEBGL2=1 -lglfw\
 	$(INCLUDE_FLAGS)
 
@@ -50,10 +50,10 @@ build/libtvm_web_runtime.js: build/libtvm_web_runtime.bc
 
 # Lint scripts
 cpplint:
-	python3 dmlc-core/scripts/lint.py vta cpp vta/include vta/src
-	python3 dmlc-core/scripts/lint.py topi cpp topi/include;
-	python3 dmlc-core/scripts/lint.py nnvm cpp nnvm/include nnvm/src;
-	python3 dmlc-core/scripts/lint.py tvm cpp include src verilog\
+	python3 3rdparty/dmlc-core/scripts/lint.py vta cpp vta/include vta/src
+	python3 3rdparty/dmlc-core/scripts/lint.py topi cpp topi/include;
+	python3 3rdparty/dmlc-core/scripts/lint.py nnvm cpp nnvm/include nnvm/src;
+	python3 3rdparty/dmlc-core/scripts/lint.py tvm cpp include src verilog\
 	 examples/extension/src examples/graph_executor/src
 
 pylint:
@@ -63,12 +63,16 @@ pylint:
 	python3 -m pylint vta/python/vta --rcfile=$(ROOTDIR)/tests/lint/pylintrc
 
 jnilint:
-	python3 dmlc-core/scripts/lint.py tvm4j-jni cpp jvm/native/src
+	python3 3rdparty/dmlc-core/scripts/lint.py tvm4j-jni cpp jvm/native/src
 
 lint: cpplint pylint jnilint
 
 doc:
 	doxygen docs/Doxyfile
+
+javadoc:
+	# build artifact is in jvm/core/target/site/apidocs
+	cd jvm && mvn javadoc:javadoc
 
 # Cython build
 cython:

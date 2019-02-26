@@ -11,7 +11,7 @@
 #include <utility>
 #include <unordered_map>
 #include <unordered_set>
-#include "./graph.h"
+#include "graph.h"
 #include "../op/op_util.h"
 #include "../pass/ir_util.h"
 
@@ -304,8 +304,7 @@ class SchedulePostProc : public IRMutator {
         }
       }
       // Specially add replacements for scan op.
-      if (s->op.as<ScanOpNode>()) {
-        const ScanOpNode* scan = s->op.as<ScanOpNode>();
+      if (const ScanOpNode* scan = s->op.as<ScanOpNode>()) {
         for (size_t i = 0; i < scan->update.size(); ++i) {
           Tensor t = s->origin_op.output(i);
           AddReplace(scan->init[i], t);

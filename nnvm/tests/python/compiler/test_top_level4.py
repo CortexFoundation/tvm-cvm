@@ -6,52 +6,7 @@ import topi
 import nnvm.symbol as sym
 import nnvm.compiler
 from nnvm.testing.config import ctx_list
-
-
-def helper(symbol, inputs, dtype,
-           np_forward, np_backward=None,
-           need_input=True, need_head_grads=True, in_range={}):
-    ishapes = {}
-    input_syms = []
-    np_inputs = {}
-    for (name, shape, s) in inputs:
-        ishapes.update({name: shape})
-        if name in in_range:
-            np_inputs.update({name: np.random.uniform(size=shape,
-                                                      low=in_range[name][0],
-                                                      high=in_range[name][1]).astype(dtype)})
-        else:
-            np_inputs.update({name: np.random.uniform(size=shape).astype(dtype)})
-        input_syms.append(s)
-
-    for target, ctx in ctx_list():
-        graph, lib, _ = nnvm.compiler.build(symbol, target, ishapes, dtype=dtype)
-        m = graph_runtime.create(graph, lib, ctx)
-        m.run(**np_inputs)
-        y_np = np_forward(**np_inputs)
-        out = m.get_output(0, tvm.nd.empty(y_np.shape, dtype))
-        np.testing.assert_allclose(out.asnumpy(), y_np, atol=1e-5, rtol=1e-5)
-        # backward
-        if np_backward:
-            graph._set_symbol_list_attr("grad_ys", symbol)
-            graph._set_symbol_list_attr("grad_xs", input_syms)
-            graph._set_symbol_list_attr("grad_ys_out_grad", sym.Variable("head_grads", shape=y_np.shape))
-            graph = graph.apply("Gradient")
-            ishapes.update({"head_grads": y_np.shape})
-            graph, lib, _ = nnvm.compiler.build(graph, target, ishapes)
-            m = graph_runtime.create(graph, lib, ctx)
-            head_grads = np.random.uniform(size=y_np.shape).astype(dtype)
-            y_np = np_backward(head_grads=head_grads, **np_inputs)
-            b_inputs = {}
-            if need_input:
-                b_inputs.update(np_inputs)
-            if need_head_grads:
-                b_inputs.update({"head_grads":head_grads})
-            m.run(**b_inputs)
-            for i in range(len(y_np)):
-                out = m.get_output(i, tvm.nd.empty(y_np[i].shape, dtype))
-                np.testing.assert_allclose(out.asnumpy(), y_np[i], atol=1e-5, rtol=1e-5)
-
+from nnvm.testing.check_computation import check_function
 
 def verify_transpose(dshape, axes):
     x = sym.Variable("x")
@@ -69,22 +24,29 @@ def verify_transpose(dshape, axes):
         m.run(x=data)
         out_np = np.transpose(data.asnumpy(), axes=axes) + 1
         out = m.get_output(0, tvm.nd.empty(out_np.shape))
-        np.testing.assert_allclose(out.asnumpy(), out_np, atol=1e-5, rtol=1e-5)
+        tvm.testing.assert_allclose(out.asnumpy(), out_np, atol=1e-5, rtol=1e-5)
 
 def verify_reduce_explicit(dshape, data, result, fsym, oshape=None, otype='float32', **kwargs):
     """ Verify reduce operations by comparign its result with `result` """
     x = sym.Variable("x")
     y = fsym(x + 0, **kwargs)
     for target, ctx in ctx_list():
+        # TODO(yuruofei): remove when cuda reduce schedule is done
+        if target == 'cuda' and fsym == sym.mean:
+            continue
         graph, lib, _ = nnvm.compiler.build(y, target, {"x": dshape})
         m = graph_runtime.create(graph, lib, ctx)
         # set input
         m.run(x=data)
         # oshape set to None means do not test the shape-correctness
-        oshape = result.shape if oshape is None else oshape
+        oshape = result.shape if isinstance(result, np.ndarray) else (1,) if oshape is None else oshape
         out = m.get_output(0, tvm.nd.empty(oshape, dtype=otype))
-        np.testing.assert_equal(out.asnumpy().shape, result.shape)
-        np.testing.assert_allclose(out.asnumpy(), result, atol=1e-5, rtol=1e-5)
+        if isinstance(result, np.ndarray):
+            np.testing.assert_equal(out.asnumpy().shape, result.shape)
+            tvm.testing.assert_allclose(out.asnumpy(), result, atol=1e-5, rtol=1e-5)
+        else:
+            tvm_out = out.asnumpy()
+            assert abs(result - tvm_out) <= (1e-5 + 1e-5 * abs(tvm_out))
 
 def verify_reduce(dshape, fnp, fsym, oshape=None, otype='float32', **kwargs):
     """ Verify reduce operations by generating data at random and calling numpy
@@ -106,7 +68,7 @@ def verify_collapse(dshape, target_shape, fnp):
         m.run(x=data)
         out = m.get_output(0, tvm.nd.empty(target_shape))
         out_np = fnp(data)
-        np.testing.assert_allclose(out.asnumpy(), out_np, atol=1e-5, rtol=1e-5)
+        tvm.testing.assert_allclose(out.asnumpy(), out_np, atol=1e-5, rtol=1e-5)
 
 
 def test_transpose():
@@ -134,6 +96,13 @@ def test_reduce():
     verify_reduce((4, 4, 3), np.min, sym.min, keepdims=True)
     verify_reduce((4, 4, 3), np.sum, sym.sum, axis=(0, 2))
     verify_reduce((4, 4, 3), np.sum, sym.sum)
+    verify_reduce((128, 24, 128), np.mean, sym.mean, axis=(0, 1), keepdims=False)
+    verify_reduce((128, 24, 128), np.mean, sym.mean, axis=(0, 2), keepdims=False)
+    verify_reduce((128, 24, 128), np.mean, sym.mean, axis=(0, 1), keepdims=True)
+    verify_reduce((128, 24, 128), np.mean, sym.mean, axis=(0, 2), keepdims=True)
+    verify_reduce((128, 24, 128), np.mean, sym.mean, keepdims=True)
+    verify_reduce((128, 24, 128), np.mean, sym.mean, keepdims=False)
+    verify_reduce((128, 24, 128), np.mean, sym.mean, axis=(0, 1, 2), keepdims=True)
 
     data = np.array([[[1,2],[3,4]],[[3,44],[5,6]]], dtype=np.float32)
     verify_reduce_explicit([2,2,2], data, np.array([[1,1],[1,0]]), sym.argmax, otype='int32', axis=[0,2], exclude=True)
@@ -144,7 +113,7 @@ def test_reduce():
             kwargs = { 'keepdims':keepdims }
             if axis is None:
                 # FIXME: NNVM doesn't support setting `axis=None` explicitly.
-                kwargs.update({'oshape': [1,1,1] if keepdims else [] })
+                kwargs.update({'oshape': [1,1,1] if keepdims else [1] })
             else:
                 kwargs.update({'axis': axis})
                 kwargs.update({'oshape': shape[:axis]+[1]+shape[axis+1:] if keepdims else shape[:axis]+shape[axis+1:]})
@@ -180,7 +149,7 @@ def verify_flip(ishape, axis):
         m = graph_runtime.create(graph, lib, ctx)
         m.run(x=x_np)
         out = m.get_output(0, tvm.nd.empty(res.shape))
-        np.testing.assert_allclose(out.asnumpy(), res, atol=1e-5, rtol=1e-5)
+        tvm.testing.assert_allclose(out.asnumpy(), res, atol=1e-5, rtol=1e-5)
 
 
 def test_flip():
@@ -205,7 +174,7 @@ def verify_reshape(dshape, oshape):
         m.run(x=data)
         out_np = data.asnumpy().reshape(oshape) + 1
         out = m.get_output(0, tvm.nd.empty(out_np.shape))
-        np.testing.assert_allclose(out.asnumpy(), out_np, atol=1e-5, rtol=1e-5)
+        tvm.testing.assert_allclose(out.asnumpy(), out_np, atol=1e-5, rtol=1e-5)
 
 
 def test_reshape():
@@ -228,93 +197,92 @@ def test_clip():
         mask2 = np.less_equal(x, a_max).astype("float")
         return [head_grads * mask1 * mask2]
 
-
-    dtype = "float32"
-    inputs = [('x', (3, 4, 5), x)]
-    helper(y, inputs, dtype, forward, backward)
+    shape = {'x': (3, 4, 5)}
+    check_function(y, forward, backward, shape=shape)
 
 
 def test_broadcast():
     a = sym.Variable("a")
     b = sym.Variable("b")
-    inputs = [('a', (3, 4, 5), a),
-              ('b', (1, 5), b)]
-    dtype = "float32"
+    shape = {'a': (3, 4, 5), 'b': (1, 5)}
 
     def _collapse(g):
-        return g.reshape(-1, inputs[-1][1][-1]).sum(0, keepdims=True)
+        return g.reshape(-1, shape['b'][-1]).sum(0, keepdims=True)
 
     y = sym.broadcast_add(a, b)
     def _backward_add(head_grads, a, b):
         da = head_grads
         db = _collapse(head_grads)
         return da, db
-    helper(y, inputs, dtype, lambda a, b: a + b, _backward_add)
+    check_function(y, lambda a, b: a + b, _backward_add, shape=shape)
 
     y = sym.broadcast_sub(a, b)
     def _backward_sub(head_grads, a, b):
         da = head_grads
         db = -_collapse(head_grads)
         return da, db
-    helper(y, inputs, dtype, lambda a, b: a - b, _backward_sub)
+    check_function(y, lambda a, b: a - b, _backward_sub, shape=shape)
 
     y = sym.broadcast_mul(a, b)
     def _backward_mul(head_grads, a, b):
         da = head_grads * b
         db = _collapse(head_grads * a)
         return da, db
-    helper(y, inputs, dtype, lambda a, b: a * b, _backward_mul)
+    check_function(y, lambda a, b: a * b, _backward_mul, shape=shape)
 
     y = sym.broadcast_div(a, b)
     def _backward_div(head_grads, a, b):
         da = head_grads / b
         db = _collapse(- head_grads * a / b**2)
         return da, db
-    helper(y, inputs, dtype, lambda a, b: a / b, _backward_div)
+    # We avoid computing numerical derivatives too close to zero here
+    check_function(y, lambda a, b: a / b, _backward_div, shape=shape, numerical_grads=False)
+    check_function(y, lambda a, b: a / b, _backward_div, shape=shape,
+                   in_range={'b': (0.1, 20)})
 
     y = sym.broadcast_mod(a, b)
-    helper(y, inputs, 'int32',
-           lambda a, b: np.mod(a, b),
-           in_range={'a': (0.001, 100), 'b': (1, 100)})
+    check_function(y,
+                   lambda a, b: np.mod(a, b),
+                   in_range={'a': (0.001, 100), 'b': (1, 100)}, dtype='int32', shape=shape)
 
     y = sym.broadcast_max(a, b)
-    helper(y, inputs, dtype, lambda a, b: np.maximum(a, b))
+    check_function(y, lambda a, b: np.maximum(a, b), shape=shape)
 
     y = sym.broadcast_min(a, b)
-    helper(y, inputs, dtype, lambda a, b: np.minimum(a, b))
+    check_function(y, lambda a, b: np.minimum(a, b), shape=shape)
 
     y = sym.broadcast_pow(a, b)
-    helper(y, inputs, dtype,
-           lambda a, b: np.power(a, b),
-           in_range={'a': (0.001, 100), 'b': (0.001, 2)})
+    check_function(y,
+                   lambda a, b: np.power(a, b),
+                   in_range={'a': (0.001, 100), 'b': (0.001, 2)}, shape=shape)
 
     y = sym.broadcast_left_shift(a, b)
-    helper(y, inputs, 'int32', lambda a, b: a << b)
+    check_function(y, lambda a, b: a << b, dtype='int32', shape=shape)
 
     y = sym.broadcast_right_shift(a, b)
-    helper(y, inputs, 'int32', lambda a, b: a >> b)
+    check_function(y, lambda a, b: a >> b, dtype='int32', shape=shape)
 
     y = sym.broadcast_greater(a, b)
-    helper(y, inputs, dtype, lambda a, b: np.greater(a, b))
+    check_function(y, lambda a, b: np.greater(a, b), shape=shape)
 
     y = sym.broadcast_less(a, b)
-    helper(y, inputs, dtype, lambda a, b: np.less(a, b))
+    check_function(y, lambda a, b: np.less(a, b), shape=shape)
 
     y = sym.broadcast_equal(a, b)
-    helper(y, inputs, 'int32', lambda a, b: np.equal(a, b),
-           in_range={'a': (-2, 2), 'b': (-2, 2)})
+    check_function(y, lambda a, b: np.equal(a, b),
+                   in_range={'a': (-2, 2), 'b': (-2, 2)}, dtype='int32', shape=shape)
 
     y = sym.broadcast_not_equal(a, b)
-    helper(y, inputs, 'int32', lambda a, b: np.not_equal(a, b),
-           in_range={'a': (-2, 2), 'b': (-2, 2)})
+    check_function(y, lambda a, b: np.not_equal(a, b),
+                   in_range={'a': (-2, 2), 'b': (-2, 2)}, dtype='int32', shape=shape)
 
     y = sym.broadcast_greater_equal(a, b)
-    helper(y, inputs, 'int32', lambda a, b: np.greater_equal(a, b),
-           in_range={'a': (-3, 3), 'b': (-3, 3)})
+    check_function(y, lambda a, b: np.greater_equal(a, b),
+                   in_range={'a': (-3, 3), 'b': (-3, 3)}, dtype='int32', shape=shape)
 
     y = sym.broadcast_less_equal(a, b)
-    helper(y, inputs, 'int32', lambda a, b: np.less_equal(a, b),
-           in_range={'a': (-3, 3), 'b': (-3, 3)})
+    check_function(y, lambda a, b: np.less_equal(a, b),
+                   in_range={'a': (-3, 3), 'b': (-3, 3)}, dtype='int32', shape=shape)
 
 def test_greater():
     l = sym.Variable("l")
@@ -325,13 +293,10 @@ def test_greater():
         return np.greater(l, r).astype("float32")
 
     def backward(head_grads, l, r):
-        return [np.zeros_like(l)]
+        return {'l': np.zeros_like(l)}
 
-
-    dtype = "float32"
-    inputs = [('l', (3, 4, 5), l),
-              ('r', (3, 4, 5), r)]
-    helper(y, inputs, dtype, forward, backward, need_head_grads=False)
+    shape = {'l': (3, 4, 5), 'r': (3, 4, 5)}
+    check_function(y, forward, backward, shape=shape)
 
 
 def test_less():
@@ -343,13 +308,10 @@ def test_less():
         return np.less(l, r).astype("float32")
 
     def backward(head_grads, l, r):
-        return [np.zeros_like(l)]
+        return {'l': np.zeros_like(l)}
 
-
-    dtype = "float32"
-    inputs = [('l', (3, 4, 5), l),
-              ('r', (3, 4, 5), r)]
-    helper(y, inputs, dtype, forward, backward, need_head_grads=False)
+    shape = {'l': (3, 4, 5), 'r': (3, 4, 5)}
+    check_function(y, forward, backward, shape=shape)
 
 
 def test_reshape_like():
@@ -364,11 +326,8 @@ def test_reshape_like():
         return [np.reshape(head_grads, x.shape),
                 np.zeros_like(y)]
 
-
-    dtype = "float32"
-    inputs = [('x', (3, 4, 5), x),
-              ('y', (5, 4, 3), y)]
-    helper(z, inputs, dtype, forward, backward)
+    shape = {'x': (3, 4, 5), 'y': (5, 4, 3)}
+    check_function(z, forward, backward, shape=shape)
 
 
 def verify_expand_like(in_shape, out_shape, axis, exclude):
@@ -412,10 +371,8 @@ def verify_expand_like(in_shape, out_shape, axis, exclude):
                 np.zeros_like(y)]
 
 
-    dtype = "float32"
-    inputs = [('x', in_shape, x),
-              ('y', out_shape, y)]
-    helper(z, inputs, dtype, forward, backward, need_input=False)
+    shape = {'x': in_shape, 'y': out_shape}
+    check_function(z, forward, backward, shape=shape)
 
 
 def test_expand_like():
@@ -440,10 +397,8 @@ def verify_elemwise_sum(num_args):
     def backward(head_grads, **inputs):
         return [head_grads] * num_args
 
-    dtype = "float32"
-    inputs = [("input" + str(i), (3, 4, 5), s[i])
-              for i in range(num_args)]
-    helper(y, inputs, dtype, forward, backward, need_input=False)
+    shape = {s[i]: (3, 4, 5) for i in range(num_args)}
+    check_function(y, forward, backward, shape=shape)
 
 
 def test_elemwise_sum():
@@ -463,9 +418,9 @@ def test_block_grad():
         return [np.zeros_like(head_grads)]
 
 
-    dtype = "float32"
-    inputs = [('x', (3, 4, 5), x)]
-    helper(y, inputs, dtype, forward, backward, need_head_grads=False)
+    shape = {'x': (3, 4, 5)}
+    # Numerical grad checking would fail for this function
+    check_function(y, forward, backward, shape=shape, numerical_grads=False)
 
 
 def test_full():
@@ -480,7 +435,7 @@ def test_full():
         m = graph_runtime.create(graph, lib, ctx)
         m.run(data=np.random.uniform(size=shape).astype(dtype))
         out = m.get_output(0, tvm.nd.empty(shape, dtype=dtype))
-        np.testing.assert_allclose(
+        tvm.testing.assert_allclose(
             out.asnumpy(),
             np.full(shape, fill_value=value, dtype=dtype),
             atol=1e-5, rtol=1e-5)
@@ -490,7 +445,7 @@ def test_full():
         m = graph_runtime.create(graph, lib, ctx)
         m.run(data=np.random.uniform(size=shape).astype(dtype))
         out = m.get_output(0, tvm.nd.empty(shape, dtype=dtype))
-        np.testing.assert_allclose(
+        tvm.testing.assert_allclose(
             out.asnumpy(),
             np.full(shape, fill_value=1, dtype=dtype),
             atol=1e-5, rtol=1e-5)
@@ -500,7 +455,7 @@ def test_full():
         m = graph_runtime.create(graph, lib, ctx)
         m.run(data=np.random.uniform(size=shape).astype(dtype))
         out = m.get_output(0, tvm.nd.empty(shape, dtype=dtype))
-        np.testing.assert_allclose(
+        tvm.testing.assert_allclose(
             out.asnumpy(),
             np.full(shape, fill_value=0, dtype=dtype),
             atol=1e-5, rtol=1e-5)
@@ -510,7 +465,7 @@ def test_full():
         m = graph_runtime.create(graph, lib, ctx)
         m.run()
         out = m.get_output(0, tvm.nd.empty(shape, dtype=dtype))
-        np.testing.assert_allclose(
+        tvm.testing.assert_allclose(
             out.asnumpy(),
             np.full(shape, fill_value=value, dtype=dtype),
             atol=1e-5, rtol=1e-5)
@@ -520,7 +475,7 @@ def test_full():
         m = graph_runtime.create(graph, lib, ctx)
         m.run()
         out = m.get_output(0, tvm.nd.empty(shape, dtype=dtype))
-        np.testing.assert_allclose(
+        tvm.testing.assert_allclose(
             out.asnumpy(),
             np.full(shape, fill_value=1, dtype=dtype),
             atol=1e-5, rtol=1e-5)
@@ -530,7 +485,7 @@ def test_full():
         m = graph_runtime.create(graph, lib, ctx)
         m.run()
         out = m.get_output(0, tvm.nd.empty(shape, dtype=dtype))
-        np.testing.assert_allclose(
+        tvm.testing.assert_allclose(
             out.asnumpy(),
             np.full(shape, fill_value=0, dtype=dtype),
             atol=1e-5, rtol=1e-5)
@@ -579,7 +534,7 @@ def verify_multibox_prior(dshape, sizes=(1,), ratios=(1,), steps=(-1, -1),
     m.set_input("data", np.random.uniform(size=dshape).astype(dtype))
     m.run()
     out = m.get_output(0, tvm.nd.empty(np_out.shape, dtype))
-    np.testing.assert_allclose(out.asnumpy(), np_out, atol=1e-5, rtol=1e-5)
+    tvm.testing.assert_allclose(out.asnumpy(), np_out, atol=1e-5, rtol=1e-5)
 
 def test_multibox_prior():
     verify_multibox_prior((1, 3, 50, 50))
@@ -616,7 +571,7 @@ def test_multibox_transform_loc():
     m.set_input(**{"cls_prob": np_cls_prob.astype(dtype), "loc_preds": np_loc_preds.astype(dtype), "anchors": np_anchors.astype(dtype)})
     m.run()
     out = m.get_output(0, tvm.nd.empty(expected_np_out.shape, dtype))
-    np.testing.assert_allclose(out.asnumpy(), expected_np_out, atol=1e-5, rtol=1e-5)
+    tvm.testing.assert_allclose(out.asnumpy(), expected_np_out, atol=1e-5, rtol=1e-5)
 
 def test_nms():
     dshape = (1, 5, 6)
@@ -644,7 +599,7 @@ def test_nms():
     m.set_input(**{"data": np_data, "valid_count": np_valid_count})
     m.run()
     out = m.get_output(0, tvm.nd.empty(np_result.shape, "float32"))
-    np.testing.assert_allclose(out.asnumpy(), np_result, atol=1e-5, rtol=1e-5)
+    tvm.testing.assert_allclose(out.asnumpy(), np_result, atol=1e-5, rtol=1e-5)
 
 def np_slice_like(np_data, np_shape_like, axis=[]):
     begin_idx = [0 for _ in np_data.shape]
@@ -679,7 +634,7 @@ def verify_slice_like(np_data, np_shape_like, axis=[]):
         m.set_input(**{"data1": np_data, "data2": np_shape_like})
         m.run()
         out = m.get_output(0, tvm.nd.empty(np_result.shape, dtype))
-        np.testing.assert_allclose(out.asnumpy(), np_result, atol=1e-5, rtol=1e-5)
+        tvm.testing.assert_allclose(out.asnumpy(), np_result, atol=1e-5, rtol=1e-5)
 
 def test_slice_like():
     np_data = np.random.uniform(size=(3, 4, 5))
@@ -718,7 +673,7 @@ def verify_where(condition, x, y):
         m.set_input(**{"condition": condition, "x": x, "y": y})
         m.run()
         out = m.get_output(0, tvm.nd.empty(x.shape, dtype))
-        np.testing.assert_allclose(out.asnumpy(), np_out, atol=1e-5, rtol=1e-5)
+        tvm.testing.assert_allclose(out.asnumpy(), np_out, atol=1e-5, rtol=1e-5)
 
 def test_where():
     shape = (13, 8, 224, 224, 6)
@@ -731,6 +686,28 @@ def test_where():
     y = np.random.uniform(size=shape).astype("float32")
     verify_where(condition, x, y)
 
+def test_argmax():
+    dshape = (204800, 2)
+    oshape = (1, 320, 640)
+
+    dtype = "float32"
+    x = sym.Variable("x", shape=dshape, dtype=dtype)
+    x = sym.reshape(x, shape=(1, 320, 640, 2))
+    x = sym.transpose(x, axes=(0, 3, 1, 2))
+    y = sym.argmax(x, axis=1)
+    target_str = "llvm"
+    target = tvm.target.create(target_str)
+    ctx = tvm.context(target_str, 0)
+    with nnvm.compiler.build_config(opt_level=2):
+        graph, lib, _ = nnvm.compiler.build(y, target, {"x": dshape})
+    m = graph_runtime.create(graph, lib, ctx)
+    data = np.random.uniform(size=dshape).astype(dtype)
+    m.run(x=data)
+    np_reshape = np.reshape(data, (1, 320, 640, 2))
+    np_transpose = np.transpose(np_reshape, axes=(0, 3, 1, 2))
+    np_argmax = np.argmax(np_transpose, axis=1)
+    out = m.get_output(0)
+    np.testing.assert_allclose(out.asnumpy(), np_argmax, atol=1e-5, rtol=1e-5)
 
 if __name__ == "__main__":
     test_reshape()
@@ -752,4 +729,5 @@ if __name__ == "__main__":
     test_nms()
     test_slice_like()
     test_where()
+    test_argmax()
     print(nnvm.compiler.engine.dump())

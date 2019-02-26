@@ -239,8 +239,9 @@ def build(graph, target=None, shape=None, dtype="float32",
         raise ValueError("Target is not set in env or passed as argument.")
     target = tvm.target.create(target)
 
-    # if not inside an autotvm config dispatch context, load pre-tuned parameters from TopHub
-    if autotvm.task.DispatchContext.current is None:
+    # If current dispatch context is fallback context (the default root context),
+    # then load pre-tuned parameters from TopHub
+    if isinstance(autotvm.DispatchContext.current, autotvm.FallbackContext):
         tophub_context = autotvm.tophub.context(target)
     else:
         tophub_context = autotvm.util.EmptyContext()
@@ -250,8 +251,8 @@ def build(graph, target=None, shape=None, dtype="float32",
         if not isinstance(shape, dict):
             raise TypeError("require shape to be dict")
         for value in shape.values():
-            if not all(isinstance(x, int) for x in value):
-                raise TypeError("shape value must be int iterator")
+            if not all(isinstance(x, tvm._ffi.base.integer_types) for x in value):
+                raise TypeError("shape value must be Integer types iterator")
 
         cfg = BuildConfig.current
         graph = graph if isinstance(graph, _graph.Graph) else _graph.create(graph)

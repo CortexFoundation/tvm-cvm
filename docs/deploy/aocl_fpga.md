@@ -12,7 +12,7 @@ We use two python scripts for this tutorial.
 import tvm
 
 tgt_host="llvm"
-tgt="aocl -device=s5_ref -mattr=emulator"
+tgt="aocl_sw_emu"
 
 n = tvm.var("n")
 A = tvm.placeholder((n,), name='A')
@@ -38,7 +38,7 @@ import tvm
 import numpy as np
 import os
 
-tgt="aocl -device=s5_ref -mattr=emulator"
+tgt="aocl_sw_emu"
 
 fadd = tvm.module.load("myadd.so")
 fadd_dev = tvm.module.load("myadd.aocx")
@@ -52,7 +52,7 @@ b = tvm.nd.array(np.random.uniform(size=n).astype("float32"), ctx)
 c = tvm.nd.array(np.zeros(n, dtype="float32"), ctx)
 
 fadd(a, b, c)
-np.testing.assert_allclose(c.asnumpy(), a.asnumpy() + b.asnumpy())
+tvm.testing.assert_allclose(c.asnumpy(), a.asnumpy() + b.asnumpy())
 ```
 
 Setup

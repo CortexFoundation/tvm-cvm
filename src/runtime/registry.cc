@@ -10,7 +10,7 @@
 #include <mutex>
 #include <memory>
 #include <array>
-#include "./runtime_base.h"
+#include "runtime_base.h"
 
 namespace tvm {
 namespace runtime {
@@ -34,8 +34,11 @@ struct Registry::Manager {
   }
 
   static Manager* Global() {
-    static Manager inst;
-    return &inst;
+    // We deliberately leak the Manager instance, to avoid leak sanitizers
+    // complaining about the entries in Manager::fmap being leaked at program
+    // exit.
+    static Manager* inst = new Manager();
+    return inst;
   }
 };
 

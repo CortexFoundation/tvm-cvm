@@ -62,6 +62,17 @@ set(USE_VULKAN OFF)
 # Whether enable OpenGL runtime
 set(USE_OPENGL OFF)
 
+# Whether to enable SGX runtime
+#
+# Possible values for USE_SGX:
+# - /path/to/sgxsdk: path to Intel SGX SDK
+# - OFF: disable SGX
+#
+# SGX_MODE := HW|SIM
+set(USE_SGX OFF)
+set(SGX_MODE "SIM")
+set(RUST_SGX_SDK "/path/to/rust-sgx-sdk")
+
 # Whether enable RPC runtime
 set(USE_RPC ON)
 
@@ -117,3 +128,6 @@ set(USE_ROCBLAS OFF)
 
 # Whether use contrib sort
 set(USE_SORT OFF)
+
+# Build ANTLR parser for Relay text format
+set(USE_ANTLR OFF)

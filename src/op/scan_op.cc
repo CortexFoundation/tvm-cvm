@@ -6,7 +6,7 @@
 #include <tvm/operation.h>
 #include <tvm/ir.h>
 #include <tvm/ir_pass.h>
-#include "./op_util.h"
+#include "op_util.h"
 #include "../schedule/graph.h"
 
 namespace tvm {
@@ -51,7 +51,10 @@ Operation ScanOpNode::make(std::string name,
                            Array<Tensor> update,
                            Array<Tensor> state_placeholder,
                            Array<Tensor> inputs) {
-  auto n = std::make_shared<ScanOpNode>();
+  if (!attrs.defined()) {
+    attrs = Map<std::string, NodeRef>();
+  }
+  auto n = make_node<ScanOpNode>();
   CHECK_EQ(init.size(), update.size());
   CHECK_EQ(init.size(), state_placeholder.size());
 
@@ -135,7 +138,7 @@ Operation ScanOpNode::ReplaceInputs(
     const Operation& self,
     const std::unordered_map<Tensor, Tensor>& rmap) const {
   CHECK_EQ(self.operator->(), this);
-  std::shared_ptr<ScanOpNode> n = std::make_shared<ScanOpNode>(*this);
+  auto n = make_node<ScanOpNode>(*this);
   for (size_t i = 0; i < n->init.size(); ++i) {
     if (rmap.count(n->init[i])) {
       n->init.Set(i, rmap.at(n->init[i]));

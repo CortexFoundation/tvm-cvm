@@ -4,11 +4,11 @@
  * \brief SGX enclave module.
  */
 #include <dmlc/logging.h>
+#include <sgx_urts.h>
 #include <tvm/runtime/c_runtime_api.h>
 #include <tvm/runtime/device_api.h>
 #include <tvm/runtime/registry.h>
 #include <tvm/runtime/threading_backend.h>
-#include <sgx_urts.h>
 #include <algorithm>
 #include <fstream>
 #include <iostream>
@@ -18,6 +18,7 @@
 #include <unordered_map>
 #include "../common.h"
 #include "../../file_util.h"
+#include "./tvm_u.h"
 
 namespace tvm {
 namespace runtime {
@@ -109,15 +110,18 @@ class SGXModuleNode : public ModuleNode {
     int func_id = exported->second;
     return PackedFunc([this, func_id](TVMArgs args, TVMRetValue* rv) {
         sgx::EnclaveContext ctx(this);
+        TVMValue ret_value;
+        int ret_type_code;
         TVM_SGX_CHECKED_CALL(tvm_ecall_packed_func(eid_, func_id,
-              args.values, args.type_codes, args.num_args, rv));
+              args.values, args.type_codes, args.num_args, &ret_value, &ret_type_code));
+        *rv = TVMArgValue(ret_value, ret_type_code);
       });
   }
 
-  void RunWorkers(int num_tasks, void* tg) {
-    std::function<void(int)> runner = [this, tg](int _worker_id) {
+  void RunWorkers(int num_tasks) {
+    std::function<void(int)> runner = [this](int _worker_id) {
       this->GetFunction("__tvm_run_worker__",
-                        std::shared_ptr<SGXModuleNode>(nullptr))(tg);
+                        std::shared_ptr<SGXModuleNode>(nullptr))();
     };
     thread_group_.reset(new tvm::runtime::threading::ThreadGroup(
           num_tasks, runner, false /* include_main_thread */));
@@ -143,7 +147,7 @@ namespace sgx {
 
 TVM_REGISTER_GLOBAL("__sgx_thread_group_launch__")
 .set_body([](TVMArgs args, TVMRetValue* rv) {
-  EnclaveContext::GetModule()->RunWorkers(args[0], args[1]);
+  EnclaveContext::GetModule()->RunWorkers(args[0]);
 });
 
 TVM_REGISTER_GLOBAL("__sgx_thread_group_join__")
@@ -198,31 +202,25 @@ void tvm_ocall_packed_func(const char* name,
 
 // Allocates space for return values. The returned pointer is only valid between
 // successive calls to `tvm_ocall_reserve_space`.
-void* tvm_ocall_reserve_space(size_t num_bytes, size_t alignment) {
+TVM_REGISTER_GLOBAL("__sgx_reserve_space__")
+.set_body([](TVMArgs args, TVMRetValue* rv) {
+  size_t num_bytes = args[0];
+  size_t alignment = args[1];
+
   static TVMContext ctx = { kDLCPU, 0 };
   static thread_local void* buf = nullptr;
   static thread_local size_t buf_size = 0;
   static thread_local size_t buf_align = 0;
 
-  if (buf_size >= num_bytes && buf_align >= alignment) return buf;
+  if (buf_size >= num_bytes && buf_align >= alignment) *rv = nullptr;
 
   DeviceAPI::Get(ctx)->FreeDataSpace(ctx, buf);
   buf = DeviceAPI::Get(ctx)->AllocDataSpace(ctx, num_bytes, alignment, {});
   buf_size = num_bytes;
   buf_align = alignment;
 
-  return buf;
-}
-
-void tvm_ocall_set_return(TVMRetValueHandle ret,
-                           const TVMValue* value,
-                           const int* type_code,
-                           int num_ret) {
-  CHECK_EQ(num_ret, 1) << "Only one return value is currently supported.";
-  CHECK(type_code[0] != kStr) << "Return kBytes, not kStr.";
-  TVMRetValue* rv = static_cast<TVMRetValue*>(ret);
-  *rv = TVMArgValue(value[0], type_code[0]);
-}
+  *rv = buf;
+});
 
 }  // extern "C"
 }  // namespace sgx

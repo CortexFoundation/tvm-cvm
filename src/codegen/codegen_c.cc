@@ -4,7 +4,7 @@
  */
 #include <iomanip>
 #include <cctype>
-#include "./codegen_c.h"
+#include "codegen_c.h"
 #include "../pass/ir_util.h"
 #include "../arithmetic/compute_expr.h"
 
@@ -22,12 +22,43 @@ void CodeGenC::InitFuncState(LoweredFunc f) {
   handle_data_type_.clear();
   CodeGenSourceBase::ClearFuncState();
 }
-void CodeGenC::AddFunction(LoweredFunc f) {
-  // clear previous generated state.
-  this->InitFuncState(f);
+
+void CodeGenC::ReserveKeywordsAsUnique() {
   // skip the first underscore, so SSA variable starts from _1
   GetUniqueName("_");
   GetUniqueName("extern");
+  GetUniqueName("void");
+  GetUniqueName("int");
+  GetUniqueName("float");
+  GetUniqueName("double");
+  GetUniqueName("char");
+  GetUniqueName("unsigned");
+  GetUniqueName("short");
+  GetUniqueName("long");
+  GetUniqueName("if");
+  GetUniqueName("else");
+  GetUniqueName("switch");
+  GetUniqueName("case");
+  GetUniqueName("default");
+  GetUniqueName("for");
+  GetUniqueName("do");
+  GetUniqueName("while");
+  GetUniqueName("goto");
+  GetUniqueName("register");
+  GetUniqueName("continue");
+  GetUniqueName("break");
+  GetUniqueName("typedef");
+  GetUniqueName("struct");
+  GetUniqueName("enum");
+  GetUniqueName("union");
+  GetUniqueName("return");
+}
+
+void CodeGenC::AddFunction(LoweredFunc f) {
+  // clear previous generated state.
+  this->InitFuncState(f);
+  // reserve keywords
+  ReserveKeywordsAsUnique();
   // add to alloc buffer type.
   for (const auto & kv : f->handle_data_type) {
     RegisterHandleType(kv.first.get(), kv.second.type());
@@ -187,6 +218,7 @@ std::string CodeGenC::GetStructRef(
       case intrinsic::kArrNDim: os << "ndim"; break;
       case intrinsic::kArrTypeCode: os << "dtype.code"; break;
       case intrinsic::kArrTypeBits: os << "dtype.bits"; break;
+      case intrinsic::kArrByteOffset: os << "byte_offset"; break;
       case intrinsic::kArrTypeLanes: os << "dtype.lanes"; break;
       case intrinsic::kArrDeviceId: os << "ctx.device_id"; break;
       case intrinsic::kArrDeviceType: os << "ctx.device_type"; break;
@@ -207,7 +239,7 @@ std::string CodeGenC::GetStructRef(
     } else if (t.is_int()) {
       os << "v_int64";
     } else {
-      LOG(FATAL) << "donot know how to handle type" << t;
+      LOG(FATAL) << "Do not know how to handle type" << t;
     }
     os << ")";
     return os.str();
@@ -652,11 +684,10 @@ void CodeGenC::VisitStmt_(const Store* op) {
 }
 
 void CodeGenC::VisitExpr_(const Let* op, std::ostream& os) {  // NOLINT(*)
-  CHECK(print_ssa_form_)
-      << "LetExpr is only supported by print SSA form";
   std::string value = PrintExpr(op->value);
   CHECK(!var_idmap_.count(op->var.get()));
   var_idmap_[op->var.get()] = value;
+  os << PrintExpr(op->body);
 }
 
 void CodeGenC::VisitExpr_(const Ramp* op, std::ostream& os) {  // NOLINT(*)
@@ -760,10 +791,9 @@ void CodeGenC::VisitStmt_(const AttrStmt* op) {
 void CodeGenC::VisitStmt_(const AssertStmt* op) {
   std::string cond = PrintExpr(op->condition);
   PrintIndent();
-  if (op->message.as<StringImm>()) {
+  if (const auto* str = op->message.as<StringImm>()) {
     // GLOG style check
-    stream << "CHECK(" << cond << ") << \""
-           << op->message.as<StringImm>()->value << "\";\n";
+    stream << "CHECK(" << cond << ") << \"" << str->value << "\";\n";
   } else {
     stream << "assert(" << cond << ");\n";
   }
@@ -835,8 +865,10 @@ void CodeGenC::VisitStmt_(const Evaluate *op) {
     }
   }
   std::string vid = this->PrintExpr(op->value);
-  this->PrintIndent();
-  this->stream << "(void)" << vid << ";\n";
+  if (vid != "") {
+    this->PrintIndent();
+    this->stream << "(void)" << vid << ";\n";
+  }
 }
 
 void CodeGenC::VisitStmt_(const ProducerConsumer *op) {
