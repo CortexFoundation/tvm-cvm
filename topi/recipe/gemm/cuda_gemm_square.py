@@ -27,19 +27,22 @@ def tvm_callback_cuda_postproc(code):
     return code
 
 
-def test_gemm():
+def test_gemm(dtype):
     # graph
-    nn = 2048
+    nn = 1024
     n = tvm.var('n')
     n = tvm.convert(nn)
     m, l = n, n
-    A = tvm.placeholder((l, n), name='A')
-    B = tvm.placeholder((l, m), name='B')
+    A = tvm.placeholder((l, n), dtype=dtype, name='A')
+    B = tvm.placeholder((l, m), dtype=dtype, name='B')
+    #A = tvm.placeholder((l, n), name='A')
+    #B = tvm.placeholder((l, m), name='B')
     k = tvm.reduce_axis((0, l), name='k')
     C = tvm.compute(
         (m, n),
         lambda ii, jj: tvm.sum(A[k, jj] * B[k, ii], axis=k),
         name='C')
+    print ('test_gemm', A.dtype, B.dtype, C.dtype)
 
     # schedule
     s = tvm.create_schedule(C.op)
@@ -111,8 +114,8 @@ def test_gemm():
         f = tvm.build(s, [A, B, C], device)
         # launch the kernel.
         n, m, l = nn, nn, nn
-        a_np = np.random.uniform(size=(n, l)).astype(A.dtype)
-        b_np = np.random.uniform(size=(m, l)).astype(B.dtype)
+        a_np = (np.random.uniform(size=(n, l)) * 8 / 7).astype(A.dtype)
+        b_np = (np.random.uniform(size=(m, l)) * 8 / 7).astype(B.dtype)
         a = tvm.nd.array(a_np, ctx)
         b = tvm.nd.array(b_np, ctx)
         c = tvm.nd.array(np.zeros((n, m), dtype=C.dtype), ctx)
@@ -134,4 +137,7 @@ def test_gemm():
             check_device(device)
 
 if __name__ == "__main__":
-    test_gemm()
+    test_gemm('int8')
+    test_gemm('int32')
+    test_gemm('float32')
+    test_gemm('float64')

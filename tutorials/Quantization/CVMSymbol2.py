@@ -30,11 +30,19 @@ class CVMDense(mx.operator.CustomOp):
         x_int = in_data[0]
         sbits = in_data[3]
 
+        # if is_train:
         w = in_data[1]
-        b = in_data[2]
+        aux[2] = b = in_data[2]
+        aux[0], aux[1] = w_int, w_sb = quantize_to(w, self.prec_bits)
+            # aux[0], aux[1] = w_int, w_sb
+        # else:
+            # w_int = aux[0]
+            # w_sb = aux[1]
+            # b = aux[2]
 
-        w_int, w_sb = quantize_to(w, self.prec_bits)
+
         total_sb = w_sb + sbits
+        # b_int is in range int32, no need to clip
         b_int = (b / (2 ** total_sb)).floor()
 
         y = mx.nd.dot(x_int.astype(np.float32), w_int.T.astype(np.float32))
@@ -53,12 +61,22 @@ class CVMDense(mx.operator.CustomOp):
 
         w = in_data[1]
         b = in_data[2]
+        # w = aux[0] / 2 ** aux[1]
+        # b = aux[2]
         y = out_data[0]
+
         dx = mx.nd.dot(dy, w)
         dw = mx.nd.dot(dy.T, x)
         db = dy.sum(axis=0)
+
+        # self.real_params[0] -= dw
+        # self.real_params[1] -= db
+        # aux[0], aux[1] = quantize_to(self.real_params[0])
+        # aux[2] = np.clip(self.real_params[1].floor(), a_min=-2**31, a_max=2*31-1)
+
         assert dw.shape == in_grad[1].shape
         assert db.shape == in_grad[2].shape
+
         self.assign(in_grad[0], req[0], dx)
         self.assign(in_grad[1], req[1], dw)
         self.assign(in_grad[2], req[2], db)
@@ -77,6 +95,9 @@ class CVMDenseProp(mx.operator.CustomOpProp):
     def list_arguments(self):
         return ['data', 'weight', 'bias', 'sbits']
 
+    def list_auxiliary_states(self):
+         return ['weight_int', 'weight_sb', 'bias_int']
+
     def list_outputs(self):
         #  this can be omitted if you only have 1 output.
         return ['output', 'osbits']
@@ -86,15 +107,24 @@ class CVMDenseProp(mx.operator.CustomOpProp):
         weight_shape = (self.num_hidden, in_shapes[0][1])
         bias_shape = (self.num_hidden,)
         output_shape = (data_shape[0], self.num_hidden)
-        return [data_shape, weight_shape, bias_shape, (1,)], [output_shape, (1,)], []
+        return [data_shape, weight_shape, bias_shape, (1,)], \
+            [output_shape, (1,)], \
+            [weight_shape, (1,), bias_shape]
+        # return [data_shape, weight_shape, bias_shape, (1,)], \
+            # [output_shape, (1,)], \
+            # []
 
     def infer_type(self, in_type):
         dtype = in_type[0]
-        return [dtype, dtype, dtype, np.float32], [dtype, np.float32], []
+        # return [dtype, dtype, dtype, np.float32], [dtype, np.float32], []
+        return [dtype, dtype, dtype, np.float32], \
+            [dtype, np.float32], \
+            [dtype, np.float32, dtype]
 
     def create_operator(self, ctx, in_shapes, in_dtypes):
         #  create and return the CustomOp class.
         return CVMDense(self.num_hidden)
+
 def test_autograd():
     a = nd.ones((1, 1)) * 0.05
     b = nd.ones((1, 1))

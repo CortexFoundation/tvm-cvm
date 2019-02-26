@@ -351,7 +351,9 @@ _convert_map = {
     'UpSampling'    : _upsampling,
     'clip'          : _clip,
     'expand_dims'   : _expand_dims,
-    'LRN'           : _lrn
+    'LRN'           : _lrn,
+    '_equal'        : _equal,
+    '_power'        : _elemwise_pow,
 }
 
 def _convert_symbol(op_name, inputs, attrs,
@@ -383,6 +385,7 @@ def _convert_symbol(op_name, inputs, attrs,
     """
     identity_list = identity_list if identity_list else _identity_list
     convert_map = convert_map if convert_map else _convert_map
+    #print (_convert_map)
     if op_name in identity_list:
         op = _get_nnvm_op(op_name)
         sym = op(*inputs, **attrs)

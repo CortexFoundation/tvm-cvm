@@ -6,7 +6,7 @@ Deploy the Pretrained Model on Raspberry Pi
 **Author**: `Ziheng Jiang <https://ziheng.org/>`_
 
 This is an example of using NNVM to compile a ResNet model and deploy
-it on Raspberry Pi.
+it on raspberry pi.
 """
 
 import tvm
@@ -88,7 +88,7 @@ block = get_model('resnet18_v1', pretrained=True)
 ######################################################################
 # In order to test our model, here we download an image of cat and
 # transform its format.
-img_name = 'cat.png'
+img_name = 'cat.jpg'
 download('https://github.com/dmlc/mxnet.js/blob/master/data/cat.png?raw=true', img_name)
 image = Image.open(img_name).resize((224, 224))
 
@@ -120,10 +120,10 @@ with open(synset_name) as f:
 
 # We support MXNet static graph(symbol) and HybridBlock in mxnet.gluon
 net, params = nnvm.frontend.from_mxnet(block)
-print(net.attr())
+#print(net.to_json())
 # we want a probability so add a softmax operator
 net = nnvm.sym.softmax(net)
-print(net.attr())
+#net = nnvm.sym.round(net)
 
 ######################################################################
 # Here are some basic data workload configurations.
@@ -131,6 +131,8 @@ batch_size = 1
 num_classes = 1000
 image_shape = (3, 224, 224)
 data_shape = (batch_size,) + image_shape
+print(data_shape)
+out_shape = (batch_size, num_classes)
 
 ######################################################################
 # Compile The Graph
@@ -156,9 +158,9 @@ if local_demo:
 else:
     target = tvm.target.arm_cpu('rasp3b')
     # The above line is a simple form of
-    # target = tvm.target.create('llvm -device=arm_cpu -model=bcm2837 -target=armv7l-linux-gnueabihf -mattr=+neon')
+    # target = tvm.target.create('llvm -devcie=arm_cpu -model=bcm2837 -target=armv7l-linux-gnueabihf -mattr=+neon')
 
-with nnvm.compiler.build_config(opt_level=3):
+with nnvm.compiler.build_config(opt_level=2, add_pass=['AlterOpLayout']):
     graph, lib, params = nnvm.compiler.build(
         net, target, shape={"data": data_shape}, params=params)
 
@@ -190,17 +192,20 @@ else:
 remote.upload(lib_fname)
 rlib = remote.load_module('net.tar')
 
-# create the remote runtime module
+# upload the parameter (this may take a while)
 ctx = remote.cpu(0)
+rparams = {k: tvm.nd.array(v, ctx) for k, v in params.items()}
+
+# create the remote runtime module
 module = runtime.create(graph, rlib, ctx)
-# set parameter (upload params to the remote device. This may take a while)
-module.set_input(**params)
+# set parameter
+module.set_input(**rparams)
 # set input data
 module.set_input('data', tvm.nd.array(x.astype('float32')))
 # run
 module.run()
 # get output
-out = module.get_output(0)
+out = module.get_output(0, tvm.nd.empty(out_shape, ctx=ctx))
 # get top1 result
 top1 = np.argmax(out.asnumpy())
 print('TVM prediction top-1: {}'.format(synset[top1]))
