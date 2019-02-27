@@ -1,5 +1,7 @@
 import tvm
 from tvm import relay
+from tvm.relay.build_module import BuildConfig
+from tvm.relay.backend import graph_runtime_codegen as _graph_gen
 
 from functools import reduce
 import numpy as np
@@ -31,13 +33,16 @@ def quantize(data, shift_bits, target_bits=relay.const(7, dtype='int32')):
     max_v = relay.max(relay.abs(data))
     min_v = relay.min(data)
 
-    ln_max_v = relay.log(max_v.astype('float32'))
+    ln_max_v = relay.log(relay.cast(max_v, 'float32'))
+    # ln_max_v = relay.log(relay.cast(max_v, 'float32'))
     ln_2 = relay.log(relay.const(2.))
     total_bits = relay.ceil(relay.divide(ln_max_v, ln_2)) # ceil( ln(max_v) / ln(2) )
     shift_bits = relay.subtract(total_bits.astype('int32'), target_bits)
     shift_bits = relay.maximum(shift_bits, relay.const(0))
 
-    out = relay.divide(data, relay.left_shift(relay.const(1), shift_bits))
+    denominator = relay.left_shift(relay.const(1),
+            relay.cast(shift_bits, 'int32'))
+    out = relay.divide(data, denominator)
     # According to @yx's code, use divide operation instead of shift op for 
     # possible negative number round.
     # out = relay.right_shift(data, shift_bits)
@@ -72,7 +77,7 @@ def make_max_pool(data):
 
 def make_dense(data, units, prefix="dense"):
     prefix = "_dense_" + prefix
-    weight = relay.var(prefix+"_weight", dtype="int8")
+    weight = relay.var(prefix+"_weight", dtype="int32")
     # need to specify out type as int32
     out = relay.nn.dense(data.astype('int32'), weight, units)
 
@@ -105,6 +110,7 @@ def make_mnist_graph():
     out = relay.nn.relu(out)
     out, max_v, min_v, sb = make_dense(out, 10, "dense1")
 
+    print ("Free vars: ", relay.ir_pass.free_vars(out))
     out = relay.Function(relay.ir_pass.free_vars(out), out)
     return out
 
@@ -180,6 +186,12 @@ def load_parameters(graph, params_name):
                 params = params.reshape(list(reversed(list(params.shape)))).transpose()
                 # print ('dense transpose = ', params.flatten()[0:2])
 
+            if arg.name_hint.endswith("_bias"):
+                params = params.astype("int32")
+
+            if arg.name_hint.startswith("_dense_") and arg.name_hint.endswith("_weight"):
+                params = params.astype("int32")
+
             params_list[arg.name_hint] = params
             bind_dict[arg] = relay.const(params)
             count += size
@@ -194,9 +206,17 @@ def test_yxnet_mnist():
     graph = make_mnist_graph()
     _, bd = load_parameters(graph,
             "/home/wlt/warehouse/.tmp/ca3d0286d5758697cdef653c1375960a868ac08a/data/params")
+    with relay.build_config(opt_level=0):
+        func = graph
+        func = relay.ir_pass.infer_type(func)
+        func = relay.ir_pass.fuse_ops(func, 0)
+        func = relay.ir_pass.infer_type(func)
+        graph_gen = _graph_gen.GraphRuntimeCodegen(mod=None, target='llvm')
+        graph_json, lowered_funcs, params = graph_gen.codegen(func)
+        print (graph_json)
 
     data = np.load('/home/wlt/warehouse/.tmp/ba9fedfc87ccb6064fcd437fd2287f5edef1bd84/data')
-    executor = relay.create_executor('graph')
+    executor = relay.create_executor()
 
     res = executor.evaluate(graph)([data.astype(np.int8)], **bd)
     print (res.asnumpy())
@@ -212,8 +232,28 @@ def test_yxnet_dog_cat():
     res = executor.evaluate(graph)([data.astype(np.int8)], **bd)
     print (res.asnumpy())
 
-if __name__ == "__main__":
-    # test_yxnet_mnist()
+def test_naive():
+    data = relay.var("data", relay.TensorType((1, 3, 224, 224), "int8"))
+    out = data
+    prefix = "_conv_" + 'cv0'
+    weight = relay.var(prefix+"_weight", dtype="int8")
+    out = relay.nn.conv2d(data, weight, kernel_size=(3, 3),
+                          padding=(1, 1), strides=(1, 1),
+                          channels=64, out_dtype="int32")
+    out = relay.nn.leaky_relu(out, alpha = 0.1)
+    out = relay.Function(relay.ir_pass.free_vars(out), out)
+    graph = out
+    with relay.build_config(opt_level=0):
+        func = graph
+        func = relay.ir_pass.infer_type(func)
+        func = relay.ir_pass.fuse_ops(func, 0)
+        func = relay.ir_pass.infer_type(func)
+        graph_gen = _graph_gen.GraphRuntimeCodegen(mod=None, target='llvm')
+        graph_json, lowered_funcs, params = graph_gen.codegen(func)
+        print (graph_json)
 
-    test_yxnet_dog_cat()
+if __name__ == "__main__":
+    test_naive()
+
+    #  test_yxnet_dog_cat()
 
