@@ -352,8 +352,6 @@ _convert_map = {
     'clip'          : _clip,
     'expand_dims'   : _expand_dims,
     'LRN'           : _lrn,
-    '_equal'        : _equal,
-    '_power'        : _elemwise_pow,
 }
 
 def _convert_symbol(op_name, inputs, attrs,
