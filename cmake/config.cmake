@@ -61,7 +61,7 @@ set(USE_VULKAN OFF)
 
 # Whether enable OpenGL runtime
 set(USE_OPENGL OFF)
-
+set(USE_CVM ON)
 # Whether to enable SGX runtime
 #
 # Possible values for USE_SGX:
