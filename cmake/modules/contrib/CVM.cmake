@@ -1,0 +1,5 @@
+if(USE_CVM)
+  message(STATUS "Build with contrib.CVM")
+  file(GLOB CVM_CONTRIB_SRC src/contrib/cvm/*.cc)
+  list(APPEND RUNTIME_SRCS ${CVM_CONTRIB_SRC})
+endif(USE_CVM)
