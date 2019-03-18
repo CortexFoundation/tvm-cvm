@@ -21,7 +21,7 @@ class QuantFlag():
         self.allowed_layers = allowed_layers
         self.disabled_layers = disabled_layers
 
-DEFAULT_TARGET_BITS = 15
+DEFAULT_TARGET_BITS = 7
 BIAS_TARGET_BITS= (DEFAULT_TARGET_BITS+1)*4-1
 
 def quant_helper(data, **kwargs):
@@ -38,7 +38,7 @@ def nd_quant(data, shift_bits=None, offset=None, target_bits=DEFAULT_TARGET_BITS
     if shift_bits is None:
         shift_bits, offset = calib_quant_params(data, target_bits, **kwargs)
 
-    out = (data / 2 ** shift_bits).floor()
+    out = int_round(data, shift_bits)
 
     clip_range = 2 ** target_bits - 1
     if logger and out.abs().max() > clip_range:
@@ -77,7 +77,7 @@ def symbol_quant(data, shift_bits, target_bits=DEFAULT_TARGET_BITS,
     return out, shift_bits
 
 def calib_quant_params(data, target_bits, use_asymmetric=True,
-        eliminate_outlier=True):
+        eliminate_outlier=False):
     """ Used in calibration pass
     """
     if eliminate_outlier:
@@ -103,3 +103,12 @@ def calib_quant_params(data, target_bits, use_asymmetric=True,
     shift_bits = bits - target_bits
 
     return shift_bits, offset
+
+def int_round(data, shift_bits):
+    """ Use round(x) instead of floor(x), which can lead to large accuracy drop
+        in inference.
+    """
+    # return (data / 2 ** shift_bits).floor()
+    # return (data / 2 ** shift_bits).round()
+    # return (data / 2 ** shift_bits + 0.5).floor()
+    return (((data / 2 ** (shift_bits-1)) + 1).floor() / 2).floor()

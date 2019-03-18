@@ -3,9 +3,11 @@ import mxnet as mx
 import logging
 
 class FilterList(logging.Filter):
-    def __init__(self, default=False, allows=[], disables=[]):
+    def __init__(self, default=False, allows=[], disables=[],
+            log_level=logging.INFO):
         self.rules = {}
         self._internal_filter_rule = "_internal_filter_rule"
+        self.log_level = log_level
 
         self.rules[self._internal_filter_rule] = default
         for name in allows:
@@ -31,6 +33,9 @@ class FilterList(logging.Filter):
     def filter(self, record):
         splits = record.name.split(".")
         rules = self.rules
+
+        if record.levelno > self.log_level:
+            return True
 
         rv = rules[self._internal_filter_rule]
         for split in splits:
@@ -62,7 +67,7 @@ def load_dataset():
     return mx.io.ImageRecordIter(path_imgrec="./data/val_256_q90.rec",
                                 label_width=1,
                                 preprocess_threads=60,
-                                batch_size=10,
+                                batch_size=100,
                                 data_shape=(3, 224, 224),
                                 label_name="softmax_label",
                                 rand_crop=False,

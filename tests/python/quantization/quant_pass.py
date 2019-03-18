@@ -7,8 +7,14 @@ from quant_op import *
 from quant_utils import *
 from utils import *
 
-def fuse_bn_parameters(resnet_params):
+def fuse_bn_parameters(resnet_params, quant_flag):
     logger = logging.getLogger("log.fuse.conv_bn")
+    logger.setLevel(quant_flag.log_level)
+
+    if not quant_flag.is_fuse_bn:
+        logger.info("skip fuse conv_bn pass with quant_flag.is_fuse_bn=False")
+        return resnet_params
+
     logger.debug("fuse conv_bn parameters")
 
     added_params_name, val_changed_params_name, deleted_params_name = [], [], []
@@ -67,9 +73,9 @@ def fuse_bn_parameters(resnet_params):
             del resnet_params[bn_running_mean_name]
             del resnet_params[bn_running_var_name]
 
-    logger.debug("[ added_params_name       ]: ", added_params_name)
-    logger.debug("[ val_changed_params_name ]: ", val_changed_params_name)
-    logger.debug("[ deleted_params_name     ]: ", deleted_params_name)
+    logger.debug("[ added_params_name       ]: %s", added_params_name)
+    logger.debug("[ val_changed_params_name ]: %s", val_changed_params_name)
+    logger.debug("[ deleted_params_name     ]: %s", deleted_params_name)
     return resnet_params
 
 def calibrate_parameters(graph, qparams, ctx, calib_data, quant_flag):
@@ -88,13 +94,10 @@ def calibrate_parameters(graph, qparams, ctx, calib_data, quant_flag):
     outputs = [sym for sym in layers.list_outputs() if sym.endswith("_output") ]
     outputs_quant_flags = {output: True for output in outputs}
 
-    symbols = [layers[output] for output in outputs]
-    stacked_graph = gluon.SymbolBlock(symbols, [inputs])
-    load_parameters(stacked_graph, qparams, ctx=ctx)
-
+    logger.info("graph internal symbols forward")
     image_data = calib_data.data[0]
     _, input_shift_bits = quant_helper(image_data)
-    calib_res = stacked_graph.forward(image_data.as_in_context(ctx))
+    calib_res = []
 
     def collect_quant_layers():
         if len(quant_flag.disabled_layers) > 0:
@@ -103,15 +106,30 @@ def calibrate_parameters(graph, qparams, ctx, calib_data, quant_flag):
                     outputs_quant_flags[output] = False
 
     def calib_IO_data():
+        logger = logging.getLogger("log.calib.output_data")
+        logger.setLevel(quant_flag.log_level)
+
         added_params_name = []
-        for idx, res in enumerate(calib_res):
-            lname = outputs[idx]
+        for lname in outputs:
+            logger.debug("calib output data in layer:%s", lname)
+            stacked_graph = gluon.SymbolBlock(layers[lname], [inputs])
+            load_parameters(stacked_graph, qparams, ctx=ctx)
+            qres = stacked_graph.forward(image_data.as_in_context(ctx))
+
             prename = lname.replace("_fwd", "").replace("_output", "")
             output_sb_name = prename + "_output_shift_bits"
 
-            _, output_sb = quant_helper(res)
+            quant_res, output_sb = quant_helper(qres)
             qparams[output_sb_name]= output_sb.as_in_context(cpu_ctx)
 
+            calib_res.append({
+                    "header": quant_res[0].asnumpy().flatten()[0],
+                    "max": quant_res.max().asnumpy(),
+                    "min": quant_res.min().asnumpy(),
+                    "shift_bits": output_sb.asnumpy()})
+
+            del qres
+            del quant_res
             added_params_name.append(output_sb_name)
 
         logger.debug("[ added_params_name   ]: %s", added_params_name)
@@ -243,12 +261,15 @@ def calibrate_parameters(graph, qparams, ctx, calib_data, quant_flag):
                 if weight_sb_name in qparams:
                     qparams[requant_sb_name] -= qparams[weight_sb_name]
 
-                out_quant, out_sb = quant_helper(calib_res[idx])
+                # out_quant, out_sb = quant_helper(calib_res[idx])
+                log_res = calib_res[idx]
                 logger.debug("quant layer=%s, requant,%s=out,<%s,%s,%s,%s>-input,%s-weight,%s",
                         prename, qparams[requant_sb_name].asnumpy(),
-                        out_quant.asnumpy().flatten()[0],
-                        out_quant.max().asnumpy(), out_quant.min().asnumpy(),
-                        out_sb.asnumpy(), qparams[input_sb_name].asnumpy(),
+                        log_res["header"], log_res["max"], log_res["min"], 
+                        log_res["shift_bits"], qparams[input_sb_name].asnumpy(),
+                        # out_quant.asnumpy().flatten()[0],
+                        # out_quant.max().asnumpy(), out_quant.min().asnumpy(),
+                        # out_sb.asnumpy(), qparams[input_sb_name].asnumpy(),
                         qparams[weight_sb_name].asnumpy() if weight_sb_name in qparams else '0')
 
                 added_params_name.append(requant_sb_name)

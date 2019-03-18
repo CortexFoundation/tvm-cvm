@@ -1,23 +1,107 @@
 import mxnet as mx
 from mxnet.gluon import HybridBlock, nn
-from mxnet.gluon.model_zoo import vision
 
 import logging
 from quant_utils import *
 from quant_op import *
+
 
 def _conv3x3(channels, stride, in_channels, use_bias=False):
     return nn.Conv2D(channels, kernel_size=3, strides=stride, padding=1,
                      use_bias=use_bias, in_channels=in_channels)
 
 
-class ResBlockQ(HybridBlock):
+class BasicBlockV1Q(HybridBlock):
     def __init__(self, channels, stride, quant_flag, downsample=False,
             residual_sb_initializer='zeros', in_channels=0, prefix='', **kwargs):
         if quant_flag.calib_mode == CalibMode.NONE:
-            super(ResBlockQ, self).__init__(prefix=prefix, **kwargs)
+            super(BasicBlockV1Q, self).__init__(prefix=prefix, **kwargs)
         else:
-            super(ResBlockQ, self).__init__(**kwargs)
+            super(BasicBlockV1Q, self).__init__(**kwargs)
+
+        self.body = nn.HybridSequential(prefix='')
+        self.body.add(_conv3x3(channels, stride, in_channels, quant_flag.is_fuse_bn))
+        requant_helper(self.body, quant_flag)
+
+        if not quant_flag.is_fuse_bn:
+            self.body.add(nn.BatchNorm())
+
+        self.body.add(nn.Activation('relu'))
+        requant_helper(self.body, quant_flag)
+
+        self.body.add(_conv3x3(channels, 1, channels, quant_flag.is_fuse_bn))
+        requant_helper(self.body, quant_flag)
+
+        if not quant_flag.is_fuse_bn:
+            self.body.add(nn.BatchNorm())
+
+        if downsample:
+            self.downsample = nn.HybridSequential(prefix='')
+            self.downsample.add(nn.Conv2D(channels, kernel_size=1, strides=stride,
+                        use_bias=quant_flag.is_fuse_bn, in_channels=in_channels))
+            requant_helper(self.downsample, quant_flag)
+
+            if not quant_flag.is_fuse_bn:
+                self.downsample.add(nn.BatchNorm())
+        else:
+            self.downsample = None
+
+        self.quant_flag = quant_flag
+        self.logger = logging.getLogger("log.quant.op.residual.block")
+        self.logger.setLevel(quant_flag.log_level)
+
+        if self.quant_flag.calib_mode != CalibMode.NONE:
+            self.shift_bits = self.params.get('requant_shift_bits',
+                                    shape=(1,),
+                                    init=residual_sb_initializer,
+                                    allow_deferred_init=True)
+
+            self.first_sb = self.params.get('first_shift_bits',
+                                    shape=(1,),
+                                    init=residual_sb_initializer,
+                                    allow_deferred_init=True)
+
+            self.second_sb = self.params.get('second_shift_bits',
+                                    shape=(1,),
+                                    init=residual_sb_initializer,
+                                    allow_deferred_init=True)
+
+    def _alias(self):
+        return '_plus'
+
+    def hybrid_forward(self, F, x, shift_bits=None, first_sb=None, second_sb=None):
+        residual = x
+
+        x = self.body(x)
+
+        if self.downsample:
+            residual = self.downsample(residual)
+
+
+        if self.quant_flag.calib_mode != CalibMode.NONE:
+            # self.logger.info("sb = %s, %s", first_sb.asnumpy(), second_sb.asnumpy())
+            residual, _ = quant_helper(residual, shift_bits=first_sb,
+                    logger=self.logger, msg="residual first param")
+            x, _ = quant_helper(x, shift_bits=second_sb,
+                    logger=self.logger, msg="residual second param")
+
+        out = residual + x
+
+        if self.quant_flag.calib_mode != CalibMode.NONE:
+            # self.logger.info("sb = %s", shift_bits.asnumpy())
+            out, _ = quant_helper(out, shift_bits=shift_bits,
+                    logger=self.logger, msg=self.name)
+
+        return F.Activation(out, act_type='relu')
+
+
+class BottleneckV1Q(HybridBlock):
+    def __init__(self, channels, stride, quant_flag, downsample=False,
+            residual_sb_initializer='zeros', in_channels=0, prefix='', **kwargs):
+        if quant_flag.calib_mode == CalibMode.NONE:
+            super(BottleneckV1Q, self).__init__(prefix=prefix, **kwargs)
+        else:
+            super(BottleneckV1Q, self).__init__(**kwargs)
 
         self.body = nn.HybridSequential(prefix='')
         self.body.add(nn.Conv2D(channels//4, kernel_size=1, strides=stride,
@@ -101,9 +185,9 @@ class ResBlockQ(HybridBlock):
 
         return F.Activation(out, act_type='relu')
 
-class ResNetQ(HybridBlock):
+class ResNetV1Q(HybridBlock):
     def __init__(self, block, layers, channels, quant_flag, classes=1000, **kwargs):
-        super(ResNetQ, self).__init__(**kwargs)
+        super(ResNetV1Q, self).__init__(**kwargs)
         assert len(layers) == len(channels) - 1
         self.quant_flag = quant_flag
 
@@ -151,22 +235,3 @@ class ResNetQ(HybridBlock):
         x = self.output(x)
 
         return x
-
-SYMBOL_FILE = "./data/resnet152-symbol.json"
-PARAMS_FILE = "./data/resnet152-0000.params"
-
-def load_quant_graph(quant_flag):
-    layers, channels = ([3, 8, 36, 3], [64, 256, 512, 1024, 2048])
-    qsym_block = ResNetQ(ResBlockQ, layers, channels, quant_flag=quant_flag, prefix="")
-    return qsym_block
-
-def load_graph(ctx):
-    return vision.resnet152_v1(pretrained=True, ctx=ctx, prefix="")
-
-def save_graph(ctx):
-    resnet = load_graph(ctx)
-    sym = resnet(mx.symbol.Variable('data'))
-    with open(SYMBOL_FILE, 'w') as fout:
-        fout.write(sym.tojson())
-    resnet.save_params(PARAMS_FILE)
-
