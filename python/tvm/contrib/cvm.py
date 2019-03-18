@@ -73,8 +73,8 @@ def conv2d_output_shape(x_shape,
     assert len(w_shape) == 4
     return list([x_shape[0].value,
                  w_shape[0].value,
-                 x_shape[2].value / stride_h,
-                 x_shape[3].value / stride_w])
+                 x_shape[2].value // stride_h,
+                 x_shape[3].value // stride_w])
 
 
 def conv2d_forward(x,
@@ -149,4 +149,4 @@ def conv2d_forward(x,
             dilation_w,
             ins[0],
             ins[1],
-            outs[0]), name="y")
+            outs[0]), name="y", dtype='int16')

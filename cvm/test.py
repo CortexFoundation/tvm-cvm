@@ -29,15 +29,15 @@ def test_conv2d():
     print(s)
     def verify():
         ctx = tvm.cpu(0)
-        f2 = tvm.lower(s, [X, W, Y], simple_mode=True)
-        print(f2)
-        f = tvm.build(s, [X, W, Y], name="conv2d")
+        f2 = tvm.lower(s, [X, W, Y])
+        print(tvm.lower(s, [X, W, Y], simple_mode=True))
+        f = tvm.build(f2, name="conv2d")
         print (f)
         x = tvm.nd.array(np.random.uniform(-127, 127, xshape).astype(np.int8), ctx)
         w = tvm.nd.array(np.random.uniform(-127, 127, wshape).astype(np.int8), ctx)
         y = tvm.nd.array(np.random.uniform(-1, 1, yshape).astype(np.int8), ctx)
         f(x, w, y)
-        # print(y)
+#        print(y)
     
     verify()
     

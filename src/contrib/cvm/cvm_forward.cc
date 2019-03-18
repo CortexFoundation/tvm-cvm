@@ -26,6 +26,7 @@ TVM_REGISTER_GLOBAL("tvm.contrib.cvm.conv2d.forward")
   DLTensor *x = args[9];
   DLTensor *w = args[10];
   DLTensor *y = args[11];
+  printf("%d\n", y->dtype);
   TVMContext ctx = x->ctx;
 
   int K = static_cast<int>(w->shape[0]);
