@@ -38,15 +38,14 @@ def nd_quant(data, shift_bits=None, offset=None, target_bits=DEFAULT_TARGET_BITS
     if shift_bits is None:
         shift_bits, offset = calib_quant_params(data, target_bits, **kwargs)
 
-    out = int_round(data, shift_bits)
+    out = shift_round(data, shift_bits)
 
     clip_range = 2 ** target_bits - 1
     if logger and out.abs().max() > clip_range:
-        logger.error("quant %s out of range int%d with data=<%s,%s,%s>, sb=%s",
+        logger.warn("quant %s out of range int%d with data=<%s,%s,%s>, sb=%s",
                 msg,
                 target_bits+1,
                 out.asnumpy().flatten()[0],
-                # out.asnumpy().flatten()[0:49].max(),
                 out.max().asnumpy(),
                 out.min().asnumpy(),
                 shift_bits.asnumpy())
@@ -55,7 +54,6 @@ def nd_quant(data, shift_bits=None, offset=None, target_bits=DEFAULT_TARGET_BITS
                 msg,
                 target_bits+1,
                 out.asnumpy().flatten()[0],
-                # out.asnumpy().flatten()[0:49].max(),
                 out.max().asnumpy(),
                 out.min().asnumpy(),
                 shift_bits.asnumpy())
@@ -104,7 +102,7 @@ def calib_quant_params(data, target_bits, use_asymmetric=True,
 
     return shift_bits, offset
 
-def int_round(data, shift_bits):
+def shift_round(data, shift_bits):
     """ Use round(x) instead of floor(x), which can lead to large accuracy drop
         in inference.
     """
@@ -112,3 +110,10 @@ def int_round(data, shift_bits):
     # return (data / 2 ** shift_bits).round()
     # return (data / 2 ** shift_bits + 0.5).floor()
     return (((data / 2 ** (shift_bits-1)) + 1).floor() / 2).floor()
+
+def div_round(a, b):
+    if isinstance(a, nd.NDArray):
+        max_v = a.abs().max().asnumpy()[0]
+        assert max_v * 2 / 2 == max_v
+
+    return ((a * 2) / b + 1) / 2

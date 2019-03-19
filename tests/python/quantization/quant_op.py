@@ -1,5 +1,7 @@
+import mxnet as mx
 from mxnet.gluon import HybridBlock, nn
 from mxnet import ndarray as nd
+from mxnet import sym
 
 import logging
 
@@ -46,11 +48,6 @@ def requant_helper(graph, quant_flag):
 
     previous_lname = graph[-1].name
 
-    # allow_flag = any(allow_layer in previous_lname for allow_layer in quant_flag.allowed_layers)
-    # if len(quant_flag.allowed_layers) > 0 and (not allow_flag):
-        # logger.debug("disable requant for layer [ %s ] not in allowed_layers", previous_lname)
-        # return
-
     disable_flag = any(dis_layer in previous_lname for dis_layer in quant_flag.disabled_layers)
     if len(quant_flag.disabled_layers) > 0 and disable_flag:
         logger.debug("disable requant for layer [ %s ] in disabled_layers", previous_lname)
@@ -64,7 +61,7 @@ class Pass(HybridBlock):
     def __init__(self, quant_flag, **kwargs):
         super(Pass, self).__init__(**kwargs)
 
-        self.logger = logging.getLogger("log.quant.op.requant")
+        self.logger = logging.getLogger("log.quant.op.pass")
         self.logger.setLevel(quant_flag.log_level)
 
     def hybrid_forward(self, F, x):
@@ -76,6 +73,49 @@ class Pass(HybridBlock):
                     out.asnumpy().flatten()[0:49].max(),
                     out.max().asnumpy(),
                     out.min().asnumpy())
+        return out
+
+    def _alias(self):
+        return '_pass'
+
+class GlobalAvgPool2D(nn.GlobalAvgPool2D):
+    def __init__(self, quant_flag, weight_initializer='zeros', **kwargs):
+        # if quant_flag.calib_mode == CalibMode.NONE:
+        super(GlobalAvgPool2D, self).__init__(**kwargs)
+
+        self.quant_flag = quant_flag
+        self.logger = logging.getLogger("log.quant.op.pool.avg.global")
+        self.logger.setLevel(quant_flag.log_level)
+
+        if quant_flag.calib_mode != CalibMode.NONE:
+            self.scale = self.params.get('weight',
+                                    shape=(1,),
+                                    init=weight_initializer,
+                                    allow_deferred_init=True)
+
+    def hybrid_forward(self, F, x, scale=None):
+        if self.quant_flag.calib_mode == CalibMode.NONE:
+            return super(GlobalAvgPool2D, self).hybrid_forward(F, x)
+
+        # quant global avg pool
+        # assert len(x.shape) == 4
+        # out = x.astype(dtype='int32') # int32 placeholder for int8 sum op
+
+        out = x.sum(axis=(2, 3))
+        # self.logger.debug("After sum: shape=%s, data=<%s,%s,%s>",
+                # out.shape,
+                # out.asnumpy().flatten()[0],
+                # out.max().asnumpy(), out.min().asnumpy())
+
+        out = out * scale
+        # out = div_round(out, (x.shape[2]*x.shape[3]))
+        # self.logger.debug("After mean: shape=%s, data=<%s,%s,%s>, div=%s",
+                # out.shape,
+                # out.asnumpy().flatten()[0],
+                # out.max().asnumpy(), out.min().asnumpy(),
+                # (x.shape[2]*x.shape[3]))
+
+        out = out.reshape((x.shape[0], x.shape[1], 1, 1)) # .astype(dtype='float32')
         return out
 
 # def conv2d_quant(channels, kernel_size, stride, padding, use_bias, in_channels):

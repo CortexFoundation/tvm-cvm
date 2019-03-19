@@ -2,12 +2,43 @@ import mxnet as mx
 
 import logging
 
+class ColoredFormatter(logging.Formatter):
+    def __init__(self, fmt=None, datefmt=None, style='%'):
+        super(ColoredFormatter, self).__init__(fmt, datefmt, style)
+
+        self.log_colors = {
+            "DEBUG": "\033[38;5;111m",
+            "INFO": "\033[38;5;47m",
+            "WARNING": "\033[38;5;178m",
+            "ERROR": "\033[38;5;196m",
+            "CRITICAL": "\033[30;48;5;196m",
+            "DEFAULT": "\033[38;5;15m",
+            "RESET": "\033[0m"
+        }
+
+    def format(self, record):
+        log_color = self.get_color(record.levelname)
+        message = super(ColoredFormatter, self).format(record)
+        message = log_color + message + self.log_colors["RESET"]
+        return message
+
+    def get_color(self, level_name):
+        lname = level_name if level_name in self.log_colors else "DEFAULT"
+        return self.log_colors[lname]
+
+
 class FilterList(logging.Filter):
+    """ Filter with logging module
+
+        Filter rules as below:
+            level no > keywords > {allow|disable log name} > by default filter
+    """
     def __init__(self, default=False, allows=[], disables=[],
-            log_level=logging.INFO):
+            keywords=[], log_level=logging.INFO):
         self.rules = {}
         self._internal_filter_rule = "_internal_filter_rule"
         self.log_level = log_level
+        self.keywords = keywords
 
         self.rules[self._internal_filter_rule] = default
         for name in allows:
@@ -31,20 +62,24 @@ class FilterList(logging.Filter):
             rules[self._internal_filter_rule] = False
 
     def filter(self, record):
-        splits = record.name.split(".")
         rules = self.rules
-
-        if record.levelno > self.log_level:
-            return True
-
         rv = rules[self._internal_filter_rule]
+
+        if record.levelno >= self.log_level:
+            return not rv
+
+        for keyword in self.keywords:
+            if keyword in record.getMessage():
+                return not rv
+
+        splits = record.name.split(".")
         for split in splits:
-            if split not in rules:
-                return rv
-            else:
+            if split in rules:
                 rules = rules[split]
                 if self._internal_filter_rule in rules:
                     rv = rules[self._internal_filter_rule]
+            else:
+                return rv
 
         return rv
 
@@ -58,7 +93,7 @@ def load_parameters(graph, params, prefix=None, ctx=None):
         param_name = param_name[len(prefix):] if prefix else param_name
         params_dict[name].set_data(params[param_name])
 
-def load_dataset():
+def load_dataset(batch_size=10):
     rgb_mean = [123.68, 116.779, 103.939]
     rgb_std = [58.393, 57.12, 57.375]
     mean_args = {'mean_r': rgb_mean[0], 'mean_g': rgb_mean[1], 'mean_b': rgb_mean[2]}
@@ -67,7 +102,7 @@ def load_dataset():
     return mx.io.ImageRecordIter(path_imgrec="./data/val_256_q90.rec",
                                 label_width=1,
                                 preprocess_threads=60,
-                                batch_size=100,
+                                batch_size=batch_size,
                                 data_shape=(3, 224, 224),
                                 label_name="softmax_label",
                                 rand_crop=False,

@@ -86,7 +86,7 @@ def calibrate_parameters(graph, qparams, ctx, calib_data, quant_flag):
         logger.info("skip calibration pass with quant_flag.calib_mode=NONE")
         return qparams
 
-    inputs = mx.sym.var('data')
+    inputs = mx.sym.var('data', shape=(1, 3, 224, 224))
     cpu_ctx = mx.cpu()
 
     layers = graph(inputs).get_internals()
@@ -97,7 +97,7 @@ def calibrate_parameters(graph, qparams, ctx, calib_data, quant_flag):
     logger.info("graph internal symbols forward")
     image_data = calib_data.data[0]
     _, input_shift_bits = quant_helper(image_data)
-    calib_res = []
+    calib_res = {}
 
     def collect_quant_layers():
         if len(quant_flag.disabled_layers) > 0:
@@ -122,11 +122,13 @@ def calibrate_parameters(graph, qparams, ctx, calib_data, quant_flag):
             quant_res, output_sb = quant_helper(qres)
             qparams[output_sb_name]= output_sb.as_in_context(cpu_ctx)
 
-            calib_res.append({
+            calib_res[lname] = {
                     "header": quant_res[0].asnumpy().flatten()[0],
                     "max": quant_res.max().asnumpy(),
                     "min": quant_res.min().asnumpy(),
-                    "shift_bits": output_sb.asnumpy()})
+                    "shape": quant_res.shape,
+                    "shift_bits": output_sb.asnumpy(),
+            }
 
             del qres
             del quant_res
@@ -184,13 +186,46 @@ def calibrate_parameters(graph, qparams, ctx, calib_data, quant_flag):
                         qparams[f_plus_sb_name].asnumpy(), qparams[s_plus_sb_name].asnumpy())
                 added_params_name.append([f_plus_sb_name, s_plus_sb_name])
             else:
-                # unary op not need to rewrite
                 sb_name = inputs_name[0].replace("_fwd", "").replace("_output", "")
                 if sb_name == "data":
                     input_sb = input_shift_bits
                 else:
                     input_sb = qparams[sb_name+"_output_shift_bits"]
-                pass
+
+                if "pool" in prename:
+                    attrs = layers[lname].list_attr()
+                    pool_type = attrs["pool_type"]
+                    pool_size = attrs["kernel"]
+                    global_pool = attrs["global_pool"]
+
+                    unchangable_pool_type = ["max", "sum"]
+                    unsupported_pool_type = ["sum", "lp"]
+                    rewritable_pool_type = ["avg"]
+
+                    print (attrs)
+
+                    if pool_type in unchangable_pool_type:
+                        pass
+                    elif pool_type in unsupported_pool_type:
+                        logger.critical("Unsupported pooling op for quantization: %s",
+                                lname)
+                        assert False
+                    elif pool_type in rewritable_pool_type:
+                        # avg pool_type
+                        shape = calib_res[inputs_name[0]]["shape"]
+                        if len(pool_size.split(',')) != 2 or global_pool != "True":
+                            logger.critical("Only support GlobalAvgPool2D instead of attrs %s",
+                                attrs)
+                            assert False
+
+                        weight_name = prename + "_weight"
+                        assert weight_name not in qparams
+                        qparams[weight_name] = nd.array([1. / (shape[2] * shape[3])])
+                        logger.debug("average pool op add weight params: %s",
+                                qparams[weight_name].asnumpy())
+                    else:
+                        logger.critical("Unrecognized pooling op type: %s", lname)
+                        assert False
 
             qparams[input_sb_name] = input_sb
             if not outputs_quant_flags[lname]:
@@ -249,7 +284,7 @@ def calibrate_parameters(graph, qparams, ctx, calib_data, quant_flag):
         logger.setLevel(quant_flag.log_level)
 
         added_params_name, deleted_params_name = [], []
-        for idx, lname in enumerate(outputs):
+        for lname in outputs:
             prename = lname.replace("_fwd", "").replace("_output", "")
             input_sb_name = prename + "_input_shift_bits"
             output_sb_name = prename + "_output_shift_bits"
@@ -262,10 +297,10 @@ def calibrate_parameters(graph, qparams, ctx, calib_data, quant_flag):
                     qparams[requant_sb_name] -= qparams[weight_sb_name]
 
                 # out_quant, out_sb = quant_helper(calib_res[idx])
-                log_res = calib_res[idx]
+                log_res = calib_res[lname]
                 logger.debug("quant layer=%s, requant,%s=out,<%s,%s,%s,%s>-input,%s-weight,%s",
                         prename, qparams[requant_sb_name].asnumpy(),
-                        log_res["header"], log_res["max"], log_res["min"], 
+                        log_res["header"], log_res["max"], log_res["min"],
                         log_res["shift_bits"], qparams[input_sb_name].asnumpy(),
                         # out_quant.asnumpy().flatten()[0],
                         # out_quant.max().asnumpy(), out_quant.min().asnumpy(),
@@ -330,6 +365,6 @@ def calibrate_parameters(graph, qparams, ctx, calib_data, quant_flag):
     logger.info(">>>> resume params name")
     reduce_params()
 
-    logger.info(">>>> calibration params: %s", qparams.keys())
+    logger.debug(">>>> calibration params: %s", qparams.keys())
 
     return qparams

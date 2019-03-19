@@ -211,10 +211,10 @@ class ResNetV1Q(HybridBlock):
                 self.features.add(self._make_layer(block, num_layer, channels[i+1],
                                                    stride, i+1, in_channels=channels[i]))
 
-            self.features.add(Pass(quant_flag))
-            self.features.add(nn.GlobalAvgPool2D())
+            # self.features.add(nn.GlobalAvgPool2D())
+            nn.GlobalAvgPool2D
+            self.features.add(GlobalAvgPool2D(quant_flag))
             requant_helper(self.features, quant_flag)
-            self.features.add(Pass(quant_flag))
 
             self.output = nn.HybridSequential(prefix='')
             self.output.add(nn.Dense(classes, in_units=channels[-1]))
