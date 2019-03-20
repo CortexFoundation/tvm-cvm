@@ -92,44 +92,42 @@ def load_mxnet_resnet(quant_flag, batch_size=10,
                 " | Difference: %.2f%% | Total Sample: %5d",
                 i, 100.*acc/total, 100.*qacc/total, 100.*diff/total, total)
 
+    qsym_block.save_params(quant_params_file)
+
 def test_quant_model(quant_flag):
-    if not os.path.exists(quant_symbol_file):
-        graph = resnet.load_quant_graph(quant_flag)
-        sym = graph(mx.sym.var('data'))
-        with open(quant_symbol_file, 'w') as fout:
-            fout.write(sym.tojson())
+    graph = resnet.load_quant_graph(quant_flag)
+    sym = graph(mx.sym.var('data'))
+    with open(quant_symbol_file, 'w') as fout:
+        fout.write(sym.tojson())
+
+    ctx = mx.gpu(0)
+    inputs = mx.sym.var("data")
 
     sym = mx.sym.load(quant_symbol_file)
-    layers = sym.get_internals()
-    outputs = layers.list_outputs()
-    for output in outputs:
-        if not output.endswith("_output"):
-            continue
-        print (output)
-        out_shape = layers[output].infer_shape(data=(1,3,224,224))
-        print (output, out_shape)
-    # graph = nnvm.graph.create(sym)
-    # print (graph.ir())
 
     data_iter = load_dataset(10)
     calib_data = data_iter.next()
 
-    ctx = mx.gpu(0)
-    graph = nn.SymbolBlock(sym, [mx.sym.var("data")])
-    print (graph.collect_params().keys())
-    graph.initialize(ctx=ctx)
-    load_parameters(graph, nd.load(quant_params_file), ctx=ctx)
+    graph = nn.SymbolBlock(sym, [inputs])
+    # print ('graph params:', sorted(list(graph.collect_params().keys())))
+    # print ('params:', sorted(list(params.keys())))
+    # params_dict = load_parameters(graph, params, ctx=ctx)
+
+    graph.load_parameters(quant_params_file, ctx=ctx)
 
     logger = logging.getLogger("log.main")
+    qacc, total = 0, 0
     for i in range(10):
         qimage_data, _ = quant_helper(calib_data.data[0])
+
+        # params['data'] = qimage_data
+        # graph = sym.bind(ctx, params)
         qres = graph.forward(qimage_data.as_in_context(ctx))
 
         for idx in range(qres.shape[0]):
             qres_label = qres[idx].asnumpy().argmax()
             image_label = calib_data.label[0][idx].asnumpy()
 
-            diff += 0 if res_label == qres_label else 1
             qacc += 1 if qres_label == image_label else 0
             total += 1
 
@@ -138,9 +136,8 @@ def test_quant_model(quant_flag):
         except:
             exit()
 
-        logger.info("Iteration: %5d | Accuracy: %.2f%% | Quant Acc: %.2f%%" +
-                " | Difference: %.2f%% | Total Sample: %5d",
-                i, 100.*acc/total, 100.*qacc/total, 100.*diff/total, total)
+        logger.info("Iteration: %5d | Quant Acc: %.2f%% | Total Sample: %5d",
+                i, 100.*qacc/total, total)
 
 
 if __name__ == "__main__":
@@ -162,8 +159,9 @@ if __name__ == "__main__":
             log_level=logging.DEBUG,
             disabled_layers=["relu", "pool0", "activation"])
 
-    # test_quant_model(quant_flag)
+    # load_mxnet_resnet(quant_flag, batch_size=10, iter_num=1,
+            # need_requant=False)
 
-    load_mxnet_resnet(quant_flag, batch_size=10, iter_num=10,
-            need_requant=True)
+    test_quant_model(quant_flag)
+
 

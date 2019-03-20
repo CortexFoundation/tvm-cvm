@@ -29,7 +29,7 @@ class ReQuant(HybridBlock):
         self.logger.setLevel(quant_flag.log_level)
 
     def hybrid_forward(self, F, x, shift_bits):
-        out, _ = quant_helper(x, shift_bits=shift_bits,
+        out, _ = quant_helper(x, shift_bits=shift_bits, F=F,
                 logger=self.logger, msg=self.prefix_name[:-1])
         return out
 
@@ -97,28 +97,23 @@ class GlobalAvgPool2D(nn.GlobalAvgPool2D):
         if self.quant_flag.calib_mode == CalibMode.NONE:
             return super(GlobalAvgPool2D, self).hybrid_forward(F, x)
 
-        # quant global avg pool
-        # assert len(x.shape) == 4
-        # out = x.astype(dtype='int32') # int32 placeholder for int8 sum op
-        # out = x.sum(axis=(2, 3))
-        # out = div_round(out, (x.shape[2]*x.shape[3]))
-        # out = out.reshape((x.shape[0], x.shape[1], 1, 1)).astype(dtype='float32')
-
         out = x.sum(axis=(2, 3))
         # self.logger.debug("After sum: shape=%s, data=<%s,%s,%s>",
                 # out.shape,
                 # out.asnumpy().flatten()[0],
                 # out.max().asnumpy(), out.min().asnumpy())
 
-        out = out * scale
+        if isinstance(x, nd.NDArray):
+            out = out * scale
+        else:
+            out = F.broadcast_mul(out, scale)
         # self.logger.debug("After mean: shape=%s, data=<%s,%s,%s>, div=%s",
                 # out.shape,
                 # out.asnumpy().flatten()[0],
                 # out.max().asnumpy(), out.min().asnumpy(),
                 # (x.shape[2]*x.shape[3]))
 
-        if isinstance(x, nd.NDArray):
-            out = out.reshape((x.shape[0], x.shape[1], 1, 1))
+        out = F.reshape(out, (0, 0, 1, 1))
         return out
 
 # def conv2d_quant(channels, kernel_size, stride, padding, use_bias, in_channels):

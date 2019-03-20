@@ -91,10 +91,12 @@ def load_parameters(graph, params, prefix=None, ctx=None):
         [uniq_name.append(sname) for sname in split_name if sname not in uniq_name]
         param_name = "_".join(uniq_name)
         param_name = param_name[len(prefix):] if prefix else param_name
-        assert param_name in params, \
+        assert param_name in params or name in params, \
             "param name(%s) with origin(%s) not exits"%(param_name, name)
-        data = params[param_name]
+        data = params[name] if name in params else params[param_name]
         params_dict[name].set_data(data)
+
+    return params_dict
 
 def load_dataset(batch_size=10):
     rgb_mean = [123.68, 116.779, 103.939]

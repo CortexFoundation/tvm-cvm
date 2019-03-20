@@ -80,16 +80,16 @@ class BasicBlockV1Q(HybridBlock):
 
         if self.quant_flag.calib_mode != CalibMode.NONE:
             # self.logger.info("sb = %s, %s", first_sb.asnumpy(), second_sb.asnumpy())
-            residual, _ = quant_helper(residual, shift_bits=first_sb,
+            residual, _ = quant_helper(residual, shift_bits=first_sb, F=F,
                     logger=self.logger, msg="residual first param")
-            x, _ = quant_helper(x, shift_bits=second_sb,
+            x, _ = quant_helper(x, shift_bits=second_sb, F=F,
                     logger=self.logger, msg="residual second param")
 
         out = residual + x
 
         if self.quant_flag.calib_mode != CalibMode.NONE:
             # self.logger.info("sb = %s", shift_bits.asnumpy())
-            out, _ = quant_helper(out, shift_bits=shift_bits,
+            out, _ = quant_helper(out, shift_bits=shift_bits, F=F,
                     logger=self.logger, msg=self.name)
 
         return F.Activation(out, act_type='relu')
@@ -172,15 +172,15 @@ class BottleneckV1Q(HybridBlock):
 
 
         if self.quant_flag.calib_mode != CalibMode.NONE:
-            residual, _ = quant_helper(residual, shift_bits=first_sb,
+            residual, _ = quant_helper(residual, shift_bits=first_sb, F=F,
                     logger=self.logger, msg="residual first param")
-            x, _ = quant_helper(x, shift_bits=second_sb,
+            x, _ = quant_helper(x, shift_bits=second_sb, F=F,
                     logger=self.logger, msg="residual second param")
 
         out = residual + x
 
         if self.quant_flag.calib_mode != CalibMode.NONE:
-            out, _ = quant_helper(out, shift_bits=shift_bits,
+            out, _ = quant_helper(out, shift_bits=shift_bits, F=F,
                     logger=self.logger, msg=self.name)
 
         return F.Activation(out, act_type='relu')

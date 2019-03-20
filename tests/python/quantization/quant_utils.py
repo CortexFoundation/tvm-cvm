@@ -1,6 +1,6 @@
 import logging
 from enum import Enum
-from mxnet import symbol
+from mxnet import symbol, sym
 from mxnet import ndarray as nd
 
 class CalibMode(Enum):
@@ -24,61 +24,40 @@ class QuantFlag():
 DEFAULT_TARGET_BITS = 7
 BIAS_TARGET_BITS= (DEFAULT_TARGET_BITS+1)*4-1
 
-def quant_helper(data, **kwargs):
-    if isinstance(data, nd.NDArray):
-        return nd_quant(data, **kwargs)
-
-    assert isinstance(data, symbol.Symbol)
-    return symbol_quant(data, **kwargs)
-
-def nd_quant(data, shift_bits=None, offset=None, target_bits=DEFAULT_TARGET_BITS,
-        logger=None, msg="", **kwargs):
-    assert isinstance(data, nd.NDArray)
-
+def quant_helper(data, shift_bits=None, target_bits=DEFAULT_TARGET_BITS,
+        logger=None, msg="", F=nd, **kwargs):
     if shift_bits is None:
-        shift_bits, offset = calib_quant_params(data, target_bits, **kwargs)
+        shift_bits, _ = calib_quant_params(data, target_bits, **kwargs)
 
-    out = shift_round(data, shift_bits)
-
+    out = shift_round(F, data, shift_bits)
     clip_range = 2 ** target_bits - 1
-    if logger and out.abs().max() > clip_range:
-        logger.warn("quant %s out of range int%d with data=<%s,%s,%s>, sb=%s",
-                msg,
-                target_bits+1,
-                out.asnumpy().flatten()[0],
-                out.max().asnumpy(),
-                out.min().asnumpy(),
-                shift_bits.asnumpy())
-    elif logger:
-        logger.debug("quant %s into int%d with data=<%s,%s,%s>, sb=%s",
-                msg,
-                target_bits+1,
-                out.asnumpy().flatten()[0],
-                out.max().asnumpy(),
-                out.min().asnumpy(),
-                shift_bits.asnumpy())
+    if isinstance(data, nd.NDArray):
+        if logger and out.abs().max() > clip_range:
+            logger.warn("quant %s out of range int%d with data=<%s,%s,%s>, sb=%s",
+                    msg,
+                    target_bits+1,
+                    out.asnumpy().flatten()[0],
+                    out.max().asnumpy(),
+                    out.min().asnumpy(),
+                    shift_bits.asnumpy())
+        elif logger:
+            logger.debug("quant %s into int%d with data=<%s,%s,%s>, sb=%s",
+                    msg,
+                    target_bits+1,
+                    out.asnumpy().flatten()[0],
+                    out.max().asnumpy(),
+                    out.min().asnumpy(),
+                    shift_bits.asnumpy())
 
     out = out.clip(a_min=-clip_range, a_max=clip_range)
-    return out, shift_bits
-
-def symbol_quant(data, shift_bits, target_bits=DEFAULT_TARGET_BITS,
-        logger=None, **kwargs):
-    assert isinstance(data, symbol.Symbol)
-
-    F = symbol
-    power = F.pow(2, shift_bits-1)
-    out = F.floor(data / power)
-    out = F.floor(out / 2)
-
-    clip_range = 2 ** target_bits - 1
-    out = F.clip(out, a_min=-clip_range, a_max=clip_range)
-
     return out, shift_bits
 
 def calib_quant_params(data, target_bits, use_asymmetric=True,
         eliminate_outlier=False):
     """ Used in calibration pass
     """
+    assert isinstance(data, nd.NDArray)
+
     if eliminate_outlier:
         mean = data.mean()
         var = ((data - mean) * (data - mean)).mean()
@@ -103,18 +82,15 @@ def calib_quant_params(data, target_bits, use_asymmetric=True,
 
     return shift_bits, offset
 
-def shift_round(data, shift_bits):
+def shift_round(F, data, shift_bits):
     """ Use round(x) instead of floor(x), which can lead to large accuracy drop
         in inference.
     """
-    # return (data / 2 ** shift_bits).floor()
-    # return (data / 2 ** shift_bits).round()
-    # return (data / 2 ** shift_bits + 0.5).floor()
-    return (((data / 2 ** (shift_bits-1)) + 1).floor() / 2).floor()
+    if isinstance(data, nd.NDArray):
+        power = F.power(2, shift_bits-1)
+    else:
+        power = F.pow(2, shift_bits-1)
 
-def div_round(a, b):
-    if isinstance(a, nd.NDArray):
-        max_v = a.abs().max().asnumpy()[0]
-        assert max_v * 2 / 2 == max_v
-
-    return ((a * 2) / b + 1) / 2
+    out = F.floor(F.broadcast_div(data, power) + 1)
+    out = F.floor(out / 2)
+    return out
