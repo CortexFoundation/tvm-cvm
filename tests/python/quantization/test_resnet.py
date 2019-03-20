@@ -94,6 +94,10 @@ def load_mxnet_resnet(quant_flag, batch_size=10,
 
     qsym_block.save_params(quant_params_file)
 
+def test_nnvm_load():
+    sym = mx.sym.load(quant_symbol_file)
+    graph = nnvm.graph.create(sym)
+
 def test_quant_model(quant_flag):
     graph = resnet.load_quant_graph(quant_flag)
     sym = graph(mx.sym.var('data'))
@@ -159,9 +163,9 @@ if __name__ == "__main__":
             log_level=logging.DEBUG,
             disabled_layers=["relu", "pool0", "activation"])
 
-    # load_mxnet_resnet(quant_flag, batch_size=10, iter_num=1,
-            # need_requant=False)
+    load_mxnet_resnet(quant_flag, batch_size=10, iter_num=1,
+            need_requant=False)
 
-    test_quant_model(quant_flag)
+    # test_quant_model(quant_flag)
 
 
