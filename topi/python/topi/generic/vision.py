@@ -18,23 +18,6 @@ def _default_schedule(outs, auto_inline):
     return s
 
 @tvm.target.generic_func
-def schedule_shortcut(outs):
-    """Schedule for shortcut
-
-    Parameters
-    ----------
-    outs: Array of Tensor
-      The computation graph description of shortcut
-      in the format of an array of tensors.
-
-    Returns
-    -------
-    s: Schedule
-      The computation schedule for the op.
-    """
-    return _default_schedule(outs, False)
-
-@tvm.target.generic_func
 def schedule_reorg(outs):
     """Schedule for reorg
 
@@ -54,13 +37,13 @@ def schedule_reorg(outs):
     return cpp.generic.default_schedule(cpp_target, outs, False)
 
 @tvm.target.generic_func
-def schedule_region(outs):
-    """Schedule for region
+def schedule_get_valid_counts(outs):
+    """Schedule for get_valid_counts
 
     Parameters
     ----------
     outs: Array of Tensor
-      The computation graph description of region
+      The computation graph description of nms
       in the format of an array of tensors.
 
     Returns
@@ -68,9 +51,7 @@ def schedule_region(outs):
     s: Schedule
       The computation schedule for the op.
     """
-    target = tvm.target.current_target(allow_none=False)
-    cpp_target = cpp.TEST_create_target(target.target_name)
-    return cpp.generic.default_schedule(cpp_target, outs, False)
+    return _default_schedule(outs, False)
 
 @tvm.target.generic_func
 def schedule_nms(outs):
@@ -149,6 +130,23 @@ def schedule_roi_align(outs):
     ----------
     outs: Array of Tensor
       The computation graph description of roi_align
+      in the format of an array of tensors.
+
+    Returns
+    -------
+    s: Schedule
+      The computation schedule for the op.
+    """
+    return _default_schedule(outs, False)
+
+@tvm.target.generic_func
+def schedule_roi_pool(outs):
+    """Schedule for roi_align
+
+    Parameters
+    ----------
+    outs: Array of Tensor
+      The computation graph description of roi_pool
       in the format of an array of tensors.
 
     Returns

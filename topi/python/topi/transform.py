@@ -191,6 +191,25 @@ def concatenate(a_tuple, axis=0):
     return cpp.concatenate(a_tuple, axis)
 
 
+def stack(a, axis):
+    """Repeats the whole array multiple times.
+
+    Parameters
+    ----------
+    a : tvm.Tensor
+        The tensor to be stacked.
+
+    axis : int, optional
+        The axis in the result array along which the input arrays are stacked.
+
+
+    Returns
+    -------
+    ret : tvm.Tensor
+    """
+    return cpp.stack(a, axis)
+
+
 def split(ary, indices_or_sections, axis=0):
     """Split an array into multiple sub-arrays.
 
@@ -318,3 +337,78 @@ def arange(start, stop=None, step=1, dtype="float32"):
         stop = start
         start = 0
     return cpp.arange(start, stop, step, dtype)
+
+
+def repeat(a, repeats, axis):
+    """Repeats elements of an array.
+
+    Parameters
+    ----------
+    a : tvm.Tensor
+        The tensor to be repeated.
+
+    repeats: int, required
+        Number of repetitions for each element
+
+    axis: int, optional
+        The axis along which to repeat values
+
+    Returns
+    -------
+    ret : tvm.Tensor
+    """
+    return cpp.repeat(a, repeats, axis)
+
+
+def tile(a, reps):
+    """Repeats the whole array multiple times.
+
+    Parameters
+    ----------
+    a : tvm.Tensor
+        The tensor to be tiled.
+
+    reps: tuple of ints, required
+        The number of times for repeating the tensor
+
+    Returns
+    -------
+    ret : tvm.Tensor
+    """
+    return cpp.tile(a, reps)
+
+
+def layout_transform(array, src_layout, dst_layout):
+    """Transform the layout according to src_layout and dst_layout
+
+    Parameters
+    ----------
+    array : tvm.Tensor
+        The source array.
+
+    src_layout : str
+        the source layout.
+
+    dst_layout : str
+        the destination layout.
+    """
+    return cpp.layout_transform(array, src_layout, dst_layout)
+
+
+def shape(array, dtype="int32"):
+    """Get the shape of input array
+
+    Parameters
+    ----------
+    array : tvm.Tensor
+        The source tenosr.
+
+    dtype : str, optional
+        The target data type.
+
+    Returns
+    -------
+    result : tvm.Tensor
+        The resulting tensor.
+    """
+    return cpp.shape(array, dtype)

@@ -9,7 +9,7 @@ from ..build_module import build as _tvm_build_module
 from .. import nd as _nd, target as _target, autotvm
 from ..contrib import graph_runtime as _graph_rt
 from . import ir_pass
-from . import expr
+from . import expr as _expr
 from .backend import interpreter as _interpreter
 from .backend import graph_runtime_codegen as _graph_gen
 
@@ -21,6 +21,8 @@ OPT_PASS_LEVEL = {
     "CombineParallelConv2D": 3,
     "FoldScaleAxis": 3,
     "AlterOpLayout": 3,
+    "CanonicalizeOps": 3,
+    "EliminateCommonSubexpr": 3,
 }
 
 
@@ -125,8 +127,8 @@ def _bind_params_by_name(func, params):
         arg = name_dict[k]
         if arg is None:
             raise ValueError("Multiple args in the function have name %s" % k)
-        bind_dict[arg] = expr.const(v)
-    return expr.bind(func, bind_dict)
+        bind_dict[arg] = _expr.const(v)
+    return _expr.bind(func, bind_dict)
 
 
 def optimize(func, target=None, params=None):
@@ -161,6 +163,16 @@ def optimize(func, target=None, params=None):
         func = ir_pass.infer_type(func)
         func = ir_pass.simplify_inference(func)
 
+    if cfg.pass_enabled("EliminateCommonSubexpr"):
+        def fskip(expr):
+            if isinstance(expr, _expr.Call) and expr.op.name == 'cast' and \
+               expr.attrs.dtype == 'int32':
+                return True
+            return False
+
+        func = ir_pass.infer_type(func)
+        func = ir_pass.eliminate_common_subexpr(func, fskip)
+
     if cfg.pass_enabled("CombineParallelConv2D"):
         func = ir_pass.infer_type(func)
         func = ir_pass.combine_parallel_conv2d(func)
@@ -177,13 +189,15 @@ def optimize(func, target=None, params=None):
         func = ir_pass.forward_fold_scale_axis(func)
         func = ir_pass.fold_constant(func)
 
+    if cfg.pass_enabled("CanonicalizeOps"):
+        func = ir_pass.infer_type(func)
+        func = ir_pass.canonicalize_ops(func)
+
     # FIXME(zhiics) Skip AlterOpLayout pass for heterogeneous compilation for
     # now. We probably need to pass target to this pass as well. Fix it in
     # a followup PR.
     if cfg.pass_enabled("AlterOpLayout"):
         if isinstance(target, _target.Target):
-            func = ir_pass.infer_type(func)
-            func = ir_pass.canonicalize_ops(func)
             func = ir_pass.infer_type(func)
             with target:
                 func = ir_pass.alter_op_layout(func)

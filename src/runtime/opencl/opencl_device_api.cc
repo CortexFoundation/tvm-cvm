@@ -110,6 +110,10 @@ void* OpenCLWorkspace::AllocDataSpace(
 }
 
 void OpenCLWorkspace::FreeDataSpace(TVMContext ctx, void* ptr) {
+  // We have to make sure that the memory object is not in the command queue
+  // for some OpenCL platforms.
+  OPENCL_CALL(clFinish(this->GetQueue(ctx)));
+
   cl_mem mptr = static_cast<cl_mem>(ptr);
   OPENCL_CALL(clReleaseMemObject(mptr));
 }
@@ -233,6 +237,7 @@ void OpenCLWorkspace::Init(const std::string& type_key, const std::string& devic
   std::lock_guard<std::mutex> lock(this->mu);
   if (initialized_) return;
   if (context != nullptr) return;
+  this->type_key = type_key;
   // matched platforms
   std::vector<cl_platform_id> platform_ids = cl::GetPlatformIDs();
   if (platform_ids.size() == 0) {
@@ -250,7 +255,6 @@ void OpenCLWorkspace::Init(const std::string& type_key, const std::string& devic
       devices_matched = cl::GetDeviceIDs(platform_id, "cpu");
     }
     if (devices_matched.size() > 0) {
-      this->type_key = type_key;
       this->platform_id = platform_id;
       this->platform_name = cl::GetPlatformInfo(platform_id, CL_PLATFORM_NAME);
       this->device_type = device_type;

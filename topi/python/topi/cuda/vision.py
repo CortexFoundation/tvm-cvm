@@ -61,24 +61,6 @@ def schedule_reorg(outs):
     cpp_target = cpp.TEST_create_target(target.target_name)
     return cpp.cuda.schedule_injective(cpp_target, outs)
 
-@generic.schedule_region.register(["cuda", "gpu"])
-def schedule_region(outs):
-    """Schedule for region operator.
-    Parameters
-    ----------
-    outs: Array of Tensor
-        The computation graph description of region
-        in the format of an array of tensors.
-
-    Returns
-    -------
-    s: Schedule
-        The computation schedule for region.
-    """
-    target = tvm.target.current_target(allow_none=False)
-    cpp_target = cpp.TEST_create_target(target.target_name)
-    return cpp.cuda.schedule_region(cpp_target, outs)
-
 @generic.schedule_nms.register(["cuda", "gpu"])
 def schedule_nms(outs):
     """Schedule for non-maximum suppression
@@ -152,6 +134,10 @@ def schedule_multibox_detection(outs):
 def schedule_roi_align(outs):
     return schedule_pool(outs, 'NCHW')
 
+@generic.schedule_roi_pool.register(["cuda", "gpu"])
+def schedule_roi_pool(outs):
+    return schedule_pool(outs, 'NCHW')
+
 @generic.schedule_proposal.register(["cuda", "gpu"])
 def schedule_proposal(outs):
     """Schedule for proposal operator.
@@ -180,3 +166,20 @@ def schedule_proposal(outs):
         scheduled_ops.append(op)
     traverse(outs[0].op)
     return s
+
+@generic.schedule_get_valid_counts.register(["cuda", "gpu"])
+def schedule_get_valid_counts(outs):
+    """Schedule for get_valid_counts operator.
+
+    Parameters
+    ----------
+    outs: Array of Tensor
+        The computation graph description of get_valid_counts
+        in the format of an array of tensors.
+
+    Returns
+    -------
+    s: Schedule
+      The computation schedule for the op.
+    """
+    return _default_schedule(outs)

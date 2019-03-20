@@ -7,11 +7,12 @@
 #include <tvm/arithmetic.h>
 #include <tvm/ir.h>
 #include <tvm/ir_mutator.h>
-#include <tvm/ir_operator.h>
 #include <tvm/ir_pass.h>
+#include <tvm/expr_operator.h>
 #include <ir/Expr.h>
 #include <unordered_set>
 #include <string>
+#include <utility>
 #include "op_util.h"
 #include "hybrid_op.h"
 

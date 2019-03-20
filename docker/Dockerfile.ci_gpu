@@ -1,5 +1,5 @@
 # CI docker GPU env
-# tag: v0.41
+# tag: v0.50
 FROM nvidia/cuda:8.0-cudnn7-devel
 
 # Base scripts
@@ -24,7 +24,7 @@ COPY install/ubuntu_install_sphinx.sh /install/ubuntu_install_sphinx.sh
 RUN bash /install/ubuntu_install_sphinx.sh
 
 # Fix recommonmark to latest version
-RUN git clone https://github.com/rtfd/recommonmark
+RUN git clone --depth=1 https://github.com/rtfd/recommonmark
 RUN cd recommonmark; python3 setup.py install
 
 # Enable doxygen for c++ doc build
@@ -81,6 +81,10 @@ RUN bash /install/ubuntu_install_redis.sh
 
 COPY install/ubuntu_install_antlr.sh /install/ubuntu_install_antlr.sh
 RUN bash /install/ubuntu_install_antlr.sh
+
+# NNPACK deps
+COPY install/ubuntu_install_nnpack.sh /install/ubuntu_install_nnpack.sh
+RUN bash /install/ubuntu_install_nnpack.sh
 
 # Environment variables
 ENV PATH=/usr/local/nvidia/bin:${PATH}

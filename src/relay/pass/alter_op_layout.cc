@@ -13,6 +13,8 @@
 #include <vector>
 #include <functional>
 #include <string>
+#include <utility>
+#include <unordered_map>
 
 #include "alter_op_layout.h"
 
@@ -26,7 +28,7 @@ Expr TransformLayout(Expr raw, Layout src_layout, Layout dst_layout) {
   if (src_layout.Equals(dst_layout)) { return raw; }
   CHECK(src_layout.defined() && dst_layout.defined())
     << "Cannot insert layout transform because there are undefined layouts";
-  CHECK(src_layout.Convertible(dst_layout))
+  CHECK(BijectiveLayoutNode::make(src_layout, dst_layout).defined())
     << "Cannot insert layout transform because there are inconvertible layouts: "
     << src_layout << " v.s. " << dst_layout;
   static auto &transform_op = Op::Get("layout_transform");

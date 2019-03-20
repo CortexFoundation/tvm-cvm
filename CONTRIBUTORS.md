@@ -19,11 +19,13 @@ We do encourage everyone to work anything they are interested in.
 - [Yizhi Liu](https://github.com/yzhliu) (PMC): @yzhliu - jvm, topi, relay
 - [Masahiro Masuda](https://github.com/masahi): @masahi - topi, relay
 - [Thierry Moreau](https://github.com/tmoreau89) (PMC): @tmoreau89 - vta
+- [Kazutaka Morita](https://github.com/kazum): @kazum - frontends, opencl
 - [Jared Roesch](https://github.com/jroesch): @jroesch - relay
 - [Siva](https://github.com/srkreddy1238): @srkreddy1238 - frontends, golang
 - [Haichen Shen](https://github.com/icemelon9) (PMC): @icemelon9 - relay, topi
 - [Zhixun Tan](https://github.com/phisiart): @phisiart - opengl, web
 - [Leyuan Wang](https://github.com/Laurawly): @Laurawly: - topi
+- [Yao Wang](https://github.com/kevinthesun): @kevinthesun: - topi, vision
 - [Eddie Yan](https://github.com/eqy): @eqy - runtime, autotvm, rpc, topi
 - [Lianmin Zheng](https://github.com/merrymercy) (PMC): @merrymercy - autotvm, topi, relay
 
@@ -32,7 +34,9 @@ We do encourage everyone to work anything they are interested in.
 - [Aditya Atluri](https://github.com/adityaatluri): @adityaatluri
 - [Tianqi Chen](https://github.com/tqchen): @tqchen
 - [Liangfu Chen](https://github.com/liangfu): @liangfu
+- [Wei Chen](https://github.com/wweic): @wweic
 - [Zhi Chen](https://github.com/zhiics): @zhiics
+- [Sergei Grechanik](https://github.com/sgrechanik-h): @sgrechanik-h
 - [Nick Hynes](https://github.com/nhynes): @nhynes
 - [Yuwei Hu](https://github.com/Huyuwei): @Huyuwei
 - [Yizhi Liu](https://github.com/yzhliu) : @yzhliu
@@ -52,6 +56,7 @@ We do encourage everyone to work anything they are interested in.
 - [Siju Samuel](https://github.com/siju-samuel): @siju-samuel
 - [Junru Shao](https://github.com/junrushao1994): @junrushao1994
 - [Haichen Shen](https://github.com/icemelon9): @icemelon9
+- [Xingjian Shi](https://github.com/sxjscience): @sxjscience
 - [Andrew Tulloch](https://github.com/ajtulloch): @ajtulloch
 - [Alex Weaver](https://github.com/alex-weaver): @alex-weaver
 - [Yao Wang](https://github.com/kevinthesun): @kevinthesun

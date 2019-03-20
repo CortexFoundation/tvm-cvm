@@ -3,6 +3,7 @@
  * \file upsampling.cc
  * \brief upsampling operator
  */
+#include <tvm/data_layout.h>
 #include <tvm/relay/op.h>
 #include <tvm/relay/attrs/nn.h>
 #include <tvm/relay/op_attr_types.h>
@@ -11,12 +12,36 @@
 #include <topi/nn/upsampling.h>
 #include <vector>
 #include "../op_common.h"
-#include "../layout.h"
 
 namespace tvm {
 namespace relay {
 
 TVM_REGISTER_NODE_TYPE(UpSamplingAttrs);
+
+template <typename T>
+Array<Array<Layout> > UpsamplingInferCorrectLayout(
+    const Attrs& attrs,
+    const Array<Layout>& new_in_layouts,
+    const Array<Layout>& old_in_layouts,
+    const Array<Array<IndexExpr>> &old_in_shapes) {
+  // NOTE: Discard "const" qualifier here.
+  T *params = const_cast<T*>(attrs.as<T>());
+
+  if (new_in_layouts.defined()) {
+    CHECK_EQ(new_in_layouts.size(), 1);
+
+    Layout raw_layout(params->layout);
+    Layout input = new_in_layouts[0];
+    if (input.IndexOf(LayoutAxis::Get('W')) == raw_layout.IndexOf(LayoutAxis::Get('W')) &&
+      input.IndexOf(LayoutAxis::Get('H')) == raw_layout.IndexOf(LayoutAxis::Get('H')) &&
+        !input.Contains(LayoutAxis::Get('w')) && !input.Contains(LayoutAxis::Get('h'))) {
+      params->layout = input.name();  // modify self to follow the input layout
+    }
+  }
+
+  Layout inferred_layout(params->layout);
+  return Array<Array<Layout> >{{inferred_layout}, {inferred_layout}};
+}
 
 bool UpSamplingRel(const Array<Type>& types,
                    int num_inputs,
@@ -31,18 +56,20 @@ bool UpSamplingRel(const Array<Type>& types,
   const UpSamplingAttrs* param = attrs.as<UpSamplingAttrs>();
   CHECK(param != nullptr);
   const Layout in_layout(param->layout);
-  CHECK(in_layout.Convertible(kNCHW))
+
+  auto layout_converter = BijectiveLayoutNode::make(in_layout, kNCHW);
+  CHECK(layout_converter.defined())
     << "UpSampling only support input layouts that are convertible from NCHW."
     << " But got " << in_layout;
 
-  auto oshape = ConvertLayout(data->shape, in_layout, kNCHW);
+  auto oshape = layout_converter.ForwardShape(data->shape);
 
-  oshape[2] = oshape[2] * param->scale;
-  oshape[3] = oshape[3] * param->scale;
+  oshape.Set(2, oshape[2] * param->scale);
+  oshape.Set(3, oshape[3] * param->scale);
 
   // assign output type
   reporter->Assign(types[1],
-                   TensorTypeNode::make(ConvertLayout(oshape, kNCHW, in_layout),
+                   TensorTypeNode::make(layout_converter.BackwardShape(oshape),
                                         data->dtype));
   return true;
 }
@@ -89,6 +116,8 @@ RELAY_REGISTER_OP("nn.upsampling")
 .add_argument("data", "Tensor", "The input tensor.")
 .set_support_level(2)
 .add_type_rel("UpSampling", UpSamplingRel)
+.set_attr<FInferCorrectLayout>("FInferCorrectLayout",
+  UpsamplingInferCorrectLayout<UpSamplingAttrs>)
 .set_attr<TOpPattern>("TOpPattern", kInjective)
 .set_attr<FTVMCompute>(
   "FTVMCompute", [](const Attrs& attrs,
@@ -99,14 +128,16 @@ RELAY_REGISTER_OP("nn.upsampling")
     CHECK(uattrs != nullptr);
     auto out_tt = out_type.as<TensorTypeNode>();
     CHECK(out_tt) << "expected a tensor type: " << out_type;
-    CHECK(uattrs->layout == "NCHW" || uattrs->layout == "NHWC")
+    const auto layout = uattrs->layout;
+    const auto base_layout = layout.substr(0, 4);
+    CHECK(base_layout == "NCHW" || layout == "NHWC")
       << "unknown layout: " << uattrs->layout;
 
     Array<HalideIR::Expr> oshape;
-    if (uattrs->layout == "NCHW") {
+    if (base_layout == "NCHW") {
       oshape.push_back(out_tt->shape[2]);
       oshape.push_back(out_tt->shape[3]);
-    } else if (uattrs->layout == "NHWC") {
+    } else if (layout == "NHWC") {
       oshape.push_back(out_tt->shape[1]);
       oshape.push_back(out_tt->shape[2]);
     }

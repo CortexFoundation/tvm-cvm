@@ -10,11 +10,12 @@
 #include <tvm/node/container.h>
 #include <string>
 #include <vector>
+#include <utility>
 #include <type_traits>
 
 #include "base.h"
 #include "expr.h"
-#include "ir_operator.h"
+#include "expr_operator.h"
 #include "arithmetic.h"
 
 namespace tvm {

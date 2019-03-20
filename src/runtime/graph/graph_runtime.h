@@ -14,6 +14,8 @@
 #include <tvm/runtime/ndarray.h>
 #include <tvm/runtime/packed_func.h>
 
+#include <memory>
+#include <utility>
 #include <vector>
 #include <string>
 
@@ -316,6 +318,8 @@ class GraphRuntime : public ModuleNode {
         } else if (key == "attrs") {
           reader->Read(&attrs_);
           bitmask |= 16;
+        } else if (key == "metadata") {
+          break;
         } else {
           LOG(FATAL) << "key " << key << " is not supported";
         }

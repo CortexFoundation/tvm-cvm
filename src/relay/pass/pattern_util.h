@@ -8,13 +8,13 @@
 #ifndef TVM_RELAY_PASS_PATTERN_UTIL_H_
 #define TVM_RELAY_PASS_PATTERN_UTIL_H_
 
+#include <tvm/data_layout.h>
 #include <tvm/relay/op.h>
 #include <tvm/relay/expr.h>
 #include <tvm/relay/attrs/nn.h>
 #include <tvm/relay/attrs/transform.h>
 #include <tvm/relay/attrs/nn.h>
 #include <string>
-#include "../op/layout.h"
 
 
 namespace tvm {
@@ -155,9 +155,8 @@ inline bool IsDepthwiseConv2D(const Call& call,
                               const Conv2DAttrs* param,
                               const Layout& kernel_layout) {
   static const Layout kOIHW("OIHW");
-  auto wshape = ConvertLayout(
-      call->args[1]->type_as<TensorTypeNode>()->shape,
-      kernel_layout, kOIHW);
+  const auto bilayout = BijectiveLayoutNode::make(kernel_layout, kOIHW);
+  auto wshape = bilayout.ForwardShape(call->args[1]->type_as<TensorTypeNode>()->shape);
   return is_const_int(wshape[0], param->groups) &&
       is_const_int(wshape[1], 1);
 }
@@ -190,6 +189,21 @@ inline Constant MakeConstantScalar(DataType dtype, T value) {
     *static_cast<DType*>(arr->data) = value;
   })
   return ConstantNode::make(arr);
+}
+
+/*!
+ * \brief Check if two expressions are equal scalars.
+ * \param a The expression to be checked.
+ * \param b The expression to be checked
+ * \return Whether two expressions are equal scalars.
+ */
+inline bool IsEqualScalar(const Expr& a, const Expr& b) {
+  const auto* constant_a = a.as<ConstantNode>();
+  const auto* constant_b = b.as<ConstantNode>();
+  if (!constant_a || !constant_b || !constant_a->is_scalar() || !constant_b->is_scalar()) {
+    return false;
+  }
+  return AlphaEqual(a, b);
 }
 
 inline Expr GetField(Expr t, size_t i) {
@@ -285,12 +299,12 @@ inline Expr Divide(Expr lhs, Expr rhs) {
   return CallNode::make(op, {lhs, rhs}, Attrs(), {});
 }
 
-inline Expr ZeroLike(Expr e) {
+inline Expr ZerosLike(Expr e) {
   static const Op& op = Op::Get("zeros_like");
   return CallNode::make(op, {e});
 }
 
-inline Expr OneLike(Expr e) {
+inline Expr OnesLike(Expr e) {
   static const Op& op = Op::Get("ones_like");
   return CallNode::make(op, {e});
 }

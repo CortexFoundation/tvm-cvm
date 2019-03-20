@@ -112,6 +112,11 @@ def attach_simulated_quantize(data, kind, sign=True, rounding="round"):
     kind: QAnnotateKind
         the kind of annotation field.
     """
+    quantize_op = _op.get("relay.op.annotation.simulated_quantize")
+    if isinstance(data, _expr.Call) and data.op == quantize_op:
+        if data.attrs.kind == kind and data.attrs.sign == sign and data.attrs.rounding == rounding:
+            return data
+
     dom_scale = _expr.var("dom_scale")
     clip_min = _expr.var("clip_min")
     clip_max = _expr.var("clip_max")
@@ -124,7 +129,6 @@ def conv2d_nchwc_rewrite(ref_call, new_args, ctx):
     warnings.warn("NCHWc layout Conv2D detected, please use a lower "
                   "optimization level before applying the quantization "
                   "pass as quantization will have no effect here...")
-    return None
 
 
 @register_annotate_function("nn.conv2d")
@@ -193,6 +197,9 @@ def add_rewrite(ref_call, new_args, ctx):
         else:
             # quantize rhs to INPUT field if it is not Constant
             rhs_expr = attach_simulated_quantize(rhs_expr, QAnnotateKind.INPUT)
+    if lhs_kind == QAnnotateKind.ACTIVATION and rhs_kind == QAnnotateKind.ACTIVATION:
+        # quantize rhs to INPUT field if both lhs and rhs are ACTIVATION
+        rhs_expr = attach_simulated_quantize(rhs_expr, QAnnotateKind.INPUT)
 
     expr = _forward_op(ref_call, [lhs_expr, rhs_expr])
     return QAnnotateExpr(expr, QAnnotateKind.ACTIVATION)

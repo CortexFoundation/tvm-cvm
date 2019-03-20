@@ -27,10 +27,10 @@
 #include <topi/nn/upsampling.h>
 #include <topi/nn/l2_normalize.h>
 #include <topi/nn/local_response_norm.h>
+#include <topi/nn/batch_matmul.h>
 
 #include <topi/vision/reorg.h>
 #include <topi/image/resize.h>
-#include <topi/vision/yolo/region.h>
 #include <topi/generic/default.h>
 #include <topi/generic/extern.h>
 #include <topi/generic/injective.h>
@@ -41,7 +41,6 @@
 #include <topi/cuda/pooling.h>
 #include <topi/cuda/reduction.h>
 #include <topi/cuda/softmax.h>
-#include <topi/cuda/vision.h>
 #include <topi/cuda/normalization.h>
 
 #include <topi/x86/bnn.h>
@@ -49,7 +48,6 @@
 #include <topi/x86/injective.h>
 
 #include <topi/rocm/dense.h>
-#include <topi/rocm/vision.h>
 #include <topi/rocm/normalization.h>
 
 namespace topi {
@@ -114,6 +112,8 @@ TOPI_REGISTER_BCAST_OP("topi.maximum", topi::maximum);
 TOPI_REGISTER_BCAST_OP("topi.minimum", topi::minimum);
 TOPI_REGISTER_BCAST_OP("topi.power", topi::power);
 TOPI_REGISTER_BCAST_OP("topi.left_shift", topi::left_shift);
+TOPI_REGISTER_BCAST_OP("topi.logical_and", topi::logical_and);
+TOPI_REGISTER_BCAST_OP("topi.logical_or", topi::logical_or);
 TOPI_REGISTER_BCAST_OP("topi.right_shift", topi::right_shift);
 TOPI_REGISTER_BCAST_OP("topi.greater", topi::greater);
 TOPI_REGISTER_BCAST_OP("topi.less", topi::less);
@@ -171,6 +171,11 @@ TVM_REGISTER_GLOBAL("topi.cast")
 TVM_REGISTER_GLOBAL("topi.elemwise_sum")
 .set_body([](TVMArgs args, TVMRetValue *rv) {
   *rv = elemwise_sum(args[0]);
+  });
+
+TVM_REGISTER_GLOBAL("topi.sign")
+.set_body([](TVMArgs args, TVMRetValue *rv) {
+  *rv = sign(args[0]);
   });
 
 TVM_REGISTER_GLOBAL("topi.full")
@@ -266,6 +271,16 @@ TVM_REGISTER_GLOBAL("topi.concatenate")
   *rv = concatenate(args[0], args[1]);
   });
 
+TVM_REGISTER_GLOBAL("topi.stack")
+.set_body([](TVMArgs args, TVMRetValue *rv) {
+  *rv = stack(args[0], args[1]);
+});
+
+TVM_REGISTER_GLOBAL("topi.shape")
+.set_body([](TVMArgs args, TVMRetValue *rv) {
+  *rv = shape(args[0], args[1]);
+});
+
 TVM_REGISTER_GLOBAL("topi.split")
 .set_body([](TVMArgs args, TVMRetValue *rv) {
   if (args[1].type_code() == kDLInt || args[1].type_code() == kDLUInt) {
@@ -273,7 +288,12 @@ TVM_REGISTER_GLOBAL("topi.split")
   } else {
     *rv = split(args[0], args[1], args[2]);
   }
-  });
+});
+
+TVM_REGISTER_GLOBAL("topi.layout_transform")
+.set_body([](TVMArgs args, TVMRetValue *rv) {
+  *rv = layout_transform(args[0], args[1], args[2]);
+});
 
 TVM_REGISTER_GLOBAL("topi.take")
 .set_body([](TVMArgs args, TVMRetValue *rv) {
@@ -293,6 +313,16 @@ TVM_REGISTER_GLOBAL("topi.where")
 TVM_REGISTER_GLOBAL("topi.arange")
 .set_body([](TVMArgs args, TVMRetValue *rv) {
   *rv = arange(args[0], args[1], args[2], args[3]);
+});
+
+TVM_REGISTER_GLOBAL("topi.repeat")
+.set_body([](TVMArgs args, TVMRetValue *rv) {
+  *rv = repeat(args[0], args[1], args[2]);
+});
+
+TVM_REGISTER_GLOBAL("topi.tile")
+.set_body([](TVMArgs args, TVMRetValue *rv) {
+  *rv = tile(args[0], args[1]);
 });
 
 TVM_REGISTER_GLOBAL("topi.gather_nd")
@@ -347,6 +377,12 @@ TVM_REGISTER_GLOBAL("topi.nn.binary_dense")
 TVM_REGISTER_GLOBAL("topi.nn.dense")
 .set_body([](TVMArgs args, TVMRetValue *rv) {
   *rv = nn::dense(args[0], args[1], args[2]);
+  });
+
+/* Ops from nn/batch_matmul.h */
+TVM_REGISTER_GLOBAL("topi.nn.batch_matmul")
+.set_body([](TVMArgs args, TVMRetValue *rv) {
+  *rv = nn::batch_matmul(args[0], args[1]);
   });
 
 /* Ops from nn/dilate.h */
@@ -416,11 +452,6 @@ TVM_REGISTER_GLOBAL("topi.vision.reorg")
   *rv = vision::reorg(args[0], args[1]);
   });
 
-TVM_REGISTER_GLOBAL("topi.vision.yolo.region")
-.set_body([](TVMArgs args, TVMRetValue *rv) {
-  *rv = vision::yolo::region(args[0], args[1], args[2], args[3], args[4], args[5]);
-  });
-
 /* Ops from image/resize.h */
 TVM_REGISTER_GLOBAL("topi.image.bilinear_sample_nchw")
 .set_body([](TVMArgs args, TVMRetValue *rv) {
@@ -488,11 +519,6 @@ TVM_REGISTER_GLOBAL("topi.rocm.schedule_dense")
   *rv = topi::rocm::schedule_dense(args[0], args[1]);
   });
 
-TVM_REGISTER_GLOBAL("topi.rocm.schedule_region")
-.set_body([](TVMArgs args, TVMRetValue *rv) {
-  *rv = topi::rocm::schedule_region(args[0], args[1]);
-  });
-
 TVM_REGISTER_GLOBAL("topi.rocm.schedule_lrn")
 .set_body([](TVMArgs args, TVMRetValue *rv) {
   *rv = topi::rocm::schedule_lrn(args[0], args[1]);
@@ -542,11 +568,6 @@ TVM_REGISTER_GLOBAL("topi.cuda.schedule_reduce")
 TVM_REGISTER_GLOBAL("topi.cuda.schedule_softmax")
 .set_body([](TVMArgs args, TVMRetValue *rv) {
   *rv = topi::cuda::schedule_softmax(args[0], args[1]);
-  });
-
-TVM_REGISTER_GLOBAL("topi.cuda.schedule_region")
-.set_body([](TVMArgs args, TVMRetValue *rv) {
-  *rv = topi::cuda::schedule_region(args[0], args[1]);
   });
 
 TVM_REGISTER_GLOBAL("topi.cuda.schedule_lrn")
@@ -601,6 +622,9 @@ TVM_REGISTER_GENERIC_FUNC(schedule_dense)
 .set_default(WrapSchedule(topi::generic::default_schedule))
 .register_func({ "cuda", "gpu" }, WrapSchedule(topi::cuda::schedule_dense))
 .register_func({ "rocm" }, WrapSchedule(topi::rocm::schedule_dense));
+
+TVM_REGISTER_GENERIC_FUNC(schedule_batch_matmul)
+.set_default(WrapSchedule(topi::generic::default_schedule));
 
 TVM_REGISTER_GENERIC_FUNC(schedule_pool)
 .set_default(WrapSchedule(topi::generic::default_schedule))

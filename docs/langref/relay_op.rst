@@ -81,6 +81,7 @@ This level enables additional math and transform operators.
    tvm.relay.squeeze
    tvm.relay.floor
    tvm.relay.ceil
+   tvm.relay.sign
    tvm.relay.trunc
    tvm.relay.clip
    tvm.relay.round
@@ -96,6 +97,10 @@ This level enables additional math and transform operators.
    tvm.relay.cast
    tvm.relay.split
    tvm.relay.arange
+   tvm.relay.stack
+   tvm.relay.repeat
+   tvm.relay.tile
+   tvm.relay.reverse
 
 
 **Level 4: Broadcast and Reductions**
@@ -111,6 +116,9 @@ This level enables additional math and transform operators.
    tvm.relay.greater_equal
    tvm.relay.less
    tvm.relay.less_equal
+   tvm.relay.logical_and
+   tvm.relay.logical_or
+   tvm.relay.logical_not
    tvm.relay.maximum
    tvm.relay.minimum
    tvm.relay.power
@@ -135,6 +143,7 @@ This level enables additional math and transform operators.
    tvm.relay.vision.multibox_prior
    tvm.relay.vision.multibox_transform_loc
    tvm.relay.vision.nms
+   tvm.relay.vision.yolo_reorg
 
 
 **Level 10: Temporary Operators**
@@ -147,10 +156,12 @@ This level support backpropagation of broadcast operators. It is temporary.
    tvm.relay.broadcast_to_like
    tvm.relay.collapse_sum_like
    tvm.relay.slice_like
+   tvm.relay.shape_of
    tvm.relay.layout_transform
    tvm.relay.device_copy
    tvm.relay.annotation.on_device
    tvm.relay.reverse_reshape
+   tvm.relay.nn.batch_matmul
 
 
 Level 1 Definitions
@@ -203,6 +214,7 @@ Level 3 Definitions
 .. autofunction:: tvm.relay.squeeze
 .. autofunction:: tvm.relay.floor
 .. autofunction:: tvm.relay.ceil
+.. autofunction:: tvm.relay.sign
 .. autofunction:: tvm.relay.trunc
 .. autofunction:: tvm.relay.clip
 .. autofunction:: tvm.relay.round
@@ -218,6 +230,10 @@ Level 3 Definitions
 .. autofunction:: tvm.relay.cast
 .. autofunction:: tvm.relay.split
 .. autofunction:: tvm.relay.arange
+.. autofunction:: tvm.relay.stack
+.. autofunction:: tvm.relay.repeat
+.. autofunction:: tvm.relay.tile
+.. autofunction:: tvm.relay.reverse
 
 
 Level 4 Definitions
@@ -230,6 +246,9 @@ Level 4 Definitions
 .. autofunction:: tvm.relay.greater_equal
 .. autofunction:: tvm.relay.less
 .. autofunction:: tvm.relay.less_equal
+.. autofunction:: tvm.relay.logical_and
+.. autofunction:: tvm.relay.logical_or
+.. autofunction:: tvm.relay.logical_not
 .. autofunction:: tvm.relay.maximum
 .. autofunction:: tvm.relay.minimum
 .. autofunction:: tvm.relay.power
@@ -251,6 +270,7 @@ Level 5 Definitions
 .. autofunction:: tvm.relay.vision.multibox_prior
 .. autofunction:: tvm.relay.vision.multibox_transform_loc
 .. autofunction:: tvm.relay.vision.nms
+.. autofunction:: tvm.relay.vision.yolo_reorg
 
 
 Level 10 Definitions
@@ -258,7 +278,9 @@ Level 10 Definitions
 .. autofunction:: tvm.relay.broadcast_to_like
 .. autofunction:: tvm.relay.collapse_sum_like
 .. autofunction:: tvm.relay.slice_like
+.. autofunction:: tvm.relay.shape_of
 .. autofunction:: tvm.relay.layout_transform
 .. autofunction:: tvm.relay.device_copy
 .. autofunction:: tvm.relay.annotation.on_device
 .. autofunction:: tvm.relay.reverse_reshape
+.. autofunction:: tvm.relay.nn.batch_matmul
