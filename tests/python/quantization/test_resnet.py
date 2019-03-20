@@ -7,7 +7,11 @@ from mxnet import ndarray as nd
 from mxnet.gluon import HybridBlock, nn
 from mxnet.contrib import quantization as mquant
 
+import tvm
+from tvm.contrib import graph_runtime, util
 import nnvm
+
+import numpy as np
 import logging
 import os
 
@@ -94,10 +98,6 @@ def load_mxnet_resnet(quant_flag, batch_size=10,
 
     qsym_block.save_params(quant_params_file)
 
-def test_nnvm_load():
-    sym = mx.sym.load(quant_symbol_file)
-    graph = nnvm.graph.create(sym)
-
 def test_quant_model(quant_flag):
     graph = resnet.load_quant_graph(quant_flag)
     sym = graph(mx.sym.var('data'))
@@ -143,6 +143,56 @@ def test_quant_model(quant_flag):
         logger.info("Iteration: %5d | Quant Acc: %.2f%% | Total Sample: %5d",
                 i, 100.*qacc/total, total)
 
+def test_nnvm_load():
+    logger = logging.getLogger("log.nnvm")
+
+    batch_size = 10
+    in_shape = (batch_size, 3, 224, 224)
+    data_iter = load_dataset(batch_size)
+    calib_data = data_iter.next()
+
+    params = nd.load(quant_params_file)
+
+    sym = mx.sym.load(quant_symbol_file)
+    nnvm_sym, params = nnvm.frontend.from_mxnet(sym, arg_params=params, aux_params={})
+    nnvm_graph = nnvm.graph.create(nnvm_sym)
+    with open("nnvm.log", "w") as fout:
+        fout.write(nnvm_graph.ir())
+
+    with nnvm.compiler.build_config(opt_level=2):
+        deploy_graph, lib, params = nnvm.compiler.build(
+            nnvm_graph, target="cuda", shape={"data": in_shape},
+            params=params, dtype="float32")
+
+        with open("deploy.log", "w") as fout:
+            fout.write(deploy_graph.ir())
+
+    module = graph_runtime.create(deploy_graph, lib, tvm.gpu(1))
+    param_bytes = nnvm.compiler.save_param_dict(params)
+    module.load_params(param_bytes)
+    out_shape = (1000,)
+    qacc, total = 0, 0
+    for i in range(10):
+        qimage_data, _ = quant_helper(calib_data.data[0])
+
+        module.run(data=qimage_data.asnumpy())
+        qres = module.get_output(0).asnumpy()
+
+        for idx in range(qres.shape[0]):
+            qres_label = qres[idx].argmax()
+            image_label = calib_data.label[0][idx].asnumpy()
+
+            qacc += 1 if qres_label == image_label else 0
+            total += 1
+
+        try:
+            calib_data = data_iter.next()
+        except:
+            exit()
+
+        logger.info("Iteration: %5d | Quant Acc: %.2f%% | Total Sample: %5d",
+                i, 100.*qacc/total, total)
+
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.NOTSET)
@@ -163,9 +213,10 @@ if __name__ == "__main__":
             log_level=logging.DEBUG,
             disabled_layers=["relu", "pool0", "activation"])
 
-    load_mxnet_resnet(quant_flag, batch_size=10, iter_num=1,
-            need_requant=False)
+    # load_mxnet_resnet(quant_flag, batch_size=10, iter_num=1,
+            # need_requant=False)
 
     # test_quant_model(quant_flag)
+    test_nnvm_load()
 
 
