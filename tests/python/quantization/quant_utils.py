@@ -66,8 +66,9 @@ def symbol_quant(data, shift_bits, target_bits=DEFAULT_TARGET_BITS,
     assert isinstance(data, symbol.Symbol)
 
     F = symbol
-    power = F.pow(2, shift_bits)
+    power = F.pow(2, shift_bits-1)
     out = F.floor(data / power)
+    out = F.floor(out / 2)
 
     clip_range = 2 ** target_bits - 1
     out = F.clip(out, a_min=-clip_range, a_max=clip_range)

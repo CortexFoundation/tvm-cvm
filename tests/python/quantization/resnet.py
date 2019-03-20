@@ -212,7 +212,6 @@ class ResNetV1Q(HybridBlock):
                                                    stride, i+1, in_channels=channels[i]))
 
             # self.features.add(nn.GlobalAvgPool2D())
-            nn.GlobalAvgPool2D
             self.features.add(GlobalAvgPool2D(quant_flag))
             requant_helper(self.features, quant_flag)
 

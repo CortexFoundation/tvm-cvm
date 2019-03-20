@@ -100,6 +100,9 @@ class GlobalAvgPool2D(nn.GlobalAvgPool2D):
         # quant global avg pool
         # assert len(x.shape) == 4
         # out = x.astype(dtype='int32') # int32 placeholder for int8 sum op
+        # out = x.sum(axis=(2, 3))
+        # out = div_round(out, (x.shape[2]*x.shape[3]))
+        # out = out.reshape((x.shape[0], x.shape[1], 1, 1)).astype(dtype='float32')
 
         out = x.sum(axis=(2, 3))
         # self.logger.debug("After sum: shape=%s, data=<%s,%s,%s>",
@@ -108,14 +111,14 @@ class GlobalAvgPool2D(nn.GlobalAvgPool2D):
                 # out.max().asnumpy(), out.min().asnumpy())
 
         out = out * scale
-        # out = div_round(out, (x.shape[2]*x.shape[3]))
         # self.logger.debug("After mean: shape=%s, data=<%s,%s,%s>, div=%s",
                 # out.shape,
                 # out.asnumpy().flatten()[0],
                 # out.max().asnumpy(), out.min().asnumpy(),
                 # (x.shape[2]*x.shape[3]))
 
-        out = out.reshape((x.shape[0], x.shape[1], 1, 1)) # .astype(dtype='float32')
+        if isinstance(x, nd.NDArray):
+            out = out.reshape((x.shape[0], x.shape[1], 1, 1))
         return out
 
 # def conv2d_quant(channels, kernel_size, stride, padding, use_bias, in_channels):

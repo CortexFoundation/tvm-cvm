@@ -78,7 +78,7 @@ def fuse_bn_parameters(resnet_params, quant_flag):
     logger.debug("[ deleted_params_name     ]: %s", deleted_params_name)
     return resnet_params
 
-def calibrate_parameters(graph, qparams, ctx, calib_data, quant_flag):
+def calibrate_parameters(graph, qparams, ctx, calib_data, quant_flag, name_scope=""):
     logger = logging.getLogger("log.calib")
     logger.setLevel(quant_flag.log_level)
 
@@ -86,24 +86,24 @@ def calibrate_parameters(graph, qparams, ctx, calib_data, quant_flag):
         logger.info("skip calibration pass with quant_flag.calib_mode=NONE")
         return qparams
 
-    inputs = mx.sym.var('data', shape=(1, 3, 224, 224))
+    inputs = mx.sym.var('data')
     cpu_ctx = mx.cpu()
+    len_scope = len(name_scope)
 
     layers = graph(inputs).get_internals()
     # TODO: !!!IMPORTANT!!!, outputs must be logic sequential
     outputs = [sym for sym in layers.list_outputs() if sym.endswith("_output") ]
     outputs_quant_flags = {output: True for output in outputs}
 
-    logger.info("graph internal symbols forward")
     image_data = calib_data.data[0]
     _, input_shift_bits = quant_helper(image_data)
     calib_res = {}
 
     def collect_quant_layers():
         if len(quant_flag.disabled_layers) > 0:
-            for output in outputs:
-                if any(dis_layer in output for dis_layer in quant_flag.disabled_layers):
-                    outputs_quant_flags[output] = False
+            for lname in outputs:
+                if any(dis_layer in lname for dis_layer in quant_flag.disabled_layers):
+                    outputs_quant_flags[lname] = False
 
     def calib_IO_data():
         logger = logging.getLogger("log.calib.output_data")
@@ -113,10 +113,10 @@ def calibrate_parameters(graph, qparams, ctx, calib_data, quant_flag):
         for lname in outputs:
             logger.debug("calib output data in layer:%s", lname)
             stacked_graph = gluon.SymbolBlock(layers[lname], [inputs])
-            load_parameters(stacked_graph, qparams, ctx=ctx)
+            load_parameters(stacked_graph, qparams, prefix=name_scope, ctx=ctx)
             qres = stacked_graph.forward(image_data.as_in_context(ctx))
 
-            prename = lname.replace("_fwd", "").replace("_output", "")
+            prename = lname[len_scope:].replace("_fwd", "").replace("_output", "")
             output_sb_name = prename + "_output_shift_bits"
 
             quant_res, output_sb = quant_helper(qres)
@@ -143,14 +143,18 @@ def calibrate_parameters(graph, qparams, ctx, calib_data, quant_flag):
 
         added_params_name, val_changed_params_name = [], []
         for lname in outputs:
-            prename = lname.replace("_fwd", "").replace("_output", "")
+            prename = lname[len_scope:].replace("_fwd", "").replace("_output", "")
             input_sb_name = prename + "_input_shift_bits"
             output_sb_name = prename + "_output_shift_bits"
 
-            inputs_name = layers[lname].get_children().list_outputs()
-            inputs_name = [name for name in inputs_name
-                if name.endswith("_output") or name=="data"]
-            inputs_num = len(inputs_name)
+            inputs_name, inputs_sb = layers[lname].get_children().list_outputs(), []
+            for name in inputs_name:
+                if name.endswith("_output"):
+                    pname = name[len_scope:].replace("_fwd", "").replace("_output", "")
+                    inputs_sb.append(qparams[pname+"_output_shift_bits"])
+                elif name == "data":
+                    inputs_sb.append(input_shift_bits)
+            inputs_num = len(inputs_sb)
 
             assert inputs_num > 0, "Unsupported rewrite op %s with no input"%(lname)
             if inputs_num > 2:
@@ -163,34 +167,26 @@ def calibrate_parameters(graph, qparams, ctx, calib_data, quant_flag):
 
                 assert outputs_quant_flags[lname], "binary-op %s must be quantize"%(lname)
 
-                # residual block internal use _plus operator 
-                # quantize with move inputs to same output_shift_bits
-                f_sb_name = inputs_name[0].replace("_fwd", "").replace("_output", "")
-                f_sb_name += "_output_shift_bits"
+                f_sb = inputs_sb[0]
                 f_plus_sb_name = prename + "_first_shift_bits"
                 qparams[f_plus_sb_name] = nd.zeros((1,))
 
-                s_sb_name = inputs_name[1].replace("_fwd", "").replace("_output", "")
-                s_sb_name += "_output_shift_bits"
+                s_sb = inputs_sb[1]
                 s_plus_sb_name = prename + "_second_shift_bits"
                 qparams[s_plus_sb_name] = nd.zeros((1,))
 
-                if any(qparams[f_sb_name] > qparams[s_sb_name]):
-                    qparams[s_plus_sb_name] = qparams[f_sb_name] - qparams[s_sb_name]
-                    input_sb = qparams[f_sb_name]
+                if any(f_sb > s_sb):
+                    qparams[s_plus_sb_name] = f_sb - s_sb
+                    input_sb = f_sb
                 else:
-                    qparams[f_plus_sb_name] = qparams[s_sb_name] - qparams[f_sb_name]
-                    input_sb = qparams[s_sb_name]
+                    qparams[f_plus_sb_name] = s_sb - f_sb
+                    input_sb = s_sb
 
                 logger.debug("binary-op _plus inputs shift bits: %s, %s",
                         qparams[f_plus_sb_name].asnumpy(), qparams[s_plus_sb_name].asnumpy())
                 added_params_name.append([f_plus_sb_name, s_plus_sb_name])
             else:
-                sb_name = inputs_name[0].replace("_fwd", "").replace("_output", "")
-                if sb_name == "data":
-                    input_sb = input_shift_bits
-                else:
-                    input_sb = qparams[sb_name+"_output_shift_bits"]
+                input_sb = inputs_sb[0]
 
                 if "pool" in prename:
                     attrs = layers[lname].list_attr()
@@ -201,8 +197,6 @@ def calibrate_parameters(graph, qparams, ctx, calib_data, quant_flag):
                     unchangable_pool_type = ["max", "sum"]
                     unsupported_pool_type = ["sum", "lp"]
                     rewritable_pool_type = ["avg"]
-
-                    print (attrs)
 
                     if pool_type in unchangable_pool_type:
                         pass
@@ -243,13 +237,13 @@ def calibrate_parameters(graph, qparams, ctx, calib_data, quant_flag):
 
         added_params_name, deleted_params_name = [], []
         # quantize weight params
-        for output in outputs:
-            prename = output.replace("_fwd", "").replace("_output", "")
+        for lname in outputs:
+            prename = lname[len_scope:].replace("_fwd", "").replace("_output", "")
             weight_name = prename + "_weight"
             quant_name = prename + "_weight_quant"
             sb_name = prename + "_weight_shift_bits"
 
-            if (weight_name in qparams) and outputs_quant_flags[output]:
+            if (weight_name in qparams) and outputs_quant_flags[lname]:
                 qparams[quant_name], qparams[sb_name] = quant_helper(qparams[weight_name])
 
                 del qparams[weight_name]
@@ -257,16 +251,15 @@ def calibrate_parameters(graph, qparams, ctx, calib_data, quant_flag):
                 added_params_name.extend([quant_name, sb_name])
 
         # quantize bias params
-        for output in outputs:
-            prename = output.replace("_fwd", "").replace("_output", "")
+        for lname in outputs:
+            prename = lname[len_scope:].replace("_fwd", "").replace("_output", "")
             bias_name = prename + "_bias"
             bias_quant_name = prename + "_bias_quant"
-            # TODO: bias_sb_name for debug
             bias_sb_name = prename + "_bias_shift_bits"
             weight_sb_name = prename + "_weight_shift_bits"
             input_sb_name = prename + "_input_shift_bits"
 
-            if (bias_name in qparams) and outputs_quant_flags[output]:
+            if (bias_name in qparams) and outputs_quant_flags[lname]:
                 shift_bits = qparams[weight_sb_name] + qparams[input_sb_name]
                 qparams[bias_quant_name], qparams[bias_sb_name] = quant_helper(
                         qparams[bias_name], shift_bits=shift_bits,
@@ -285,7 +278,7 @@ def calibrate_parameters(graph, qparams, ctx, calib_data, quant_flag):
 
         added_params_name, deleted_params_name = [], []
         for lname in outputs:
-            prename = lname.replace("_fwd", "").replace("_output", "")
+            prename = lname[len_scope:].replace("_fwd", "").replace("_output", "")
             input_sb_name = prename + "_input_shift_bits"
             output_sb_name = prename + "_output_shift_bits"
             weight_sb_name = prename + "_weight_shift_bits"
@@ -328,7 +321,7 @@ def calibrate_parameters(graph, qparams, ctx, calib_data, quant_flag):
                 added_params_name.append(pname[:-6])
 
         for lname in outputs:
-            prename = lname.replace("_fwd", "").replace("_output", "")
+            prename = lname[len_scope:].replace("_fwd", "").replace("_output", "")
             input_sb_name = prename + "_input_shift_bits"
             output_sb_name = prename + "_output_shift_bits"
             weight_sb_name = prename + "_weight_shift_bits"
