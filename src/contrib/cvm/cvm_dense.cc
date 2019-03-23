@@ -48,7 +48,7 @@ TVM_REGISTER_GLOBAL("tvm.contrib.cvm.dense.forward")
         for(int ow = 0; ow < weight_w; ow++){
             int32_t sum = 0;
             for(int k = 0; k < data_w; k++){
-                sum += data[oh * data_w + k] * weight[k * weight_w + ow];
+                sum += static_cast<int32_t>(data[oh * data_w + k]) * weight[k * weight_w + ow];
             }
             out[oh * weight_w + ow] = sum;
         }
