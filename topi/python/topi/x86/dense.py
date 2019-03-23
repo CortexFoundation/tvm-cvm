@@ -12,7 +12,12 @@ from ..util import traverse_inline, get_const_tuple
 @autotvm.register_topi_compute(nn.dense, "cpu", "direct")
 def _declaration_dense(cfg, data, weight, bias=None):
     batch, _ = get_const_tuple(data.shape)
-
+    
+    target = tvm.target.current_target()
+   
+    if "cvm" in target.libs:
+        # check type here.
+        pass
     # For small batch sizes, don't pack weight into cache-friendly layout
     # because of overhead in packing and limited reuse from batch dimension
     # TODO(icemelon9): use a more systematic way to determine which schedule to use
