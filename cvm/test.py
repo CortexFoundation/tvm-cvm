@@ -35,12 +35,12 @@ def test_conv2d():
         print (f)
         x = tvm.nd.array(np.random.uniform(-127, 127, xshape).astype(np.int8), ctx)
         w = tvm.nd.array(np.random.uniform(-127, 127, wshape).astype(np.int8), ctx)
-        y = tvm.nd.array(np.random.uniform(-1, 1, yshape).astype(np.int8), ctx)
+        y = tvm.nd.array(np.random.uniform(-1, 1, yshape).astype(np.int32), ctx)
         f(x, w, y)
 #        print(y)
-    
+
     verify()
-    
+
 if __name__ == "__main__":
     test_conv2d()
 
