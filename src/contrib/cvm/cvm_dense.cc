@@ -12,19 +12,6 @@ namespace contrib {
 
 using namespace runtime;
 
-void matmul(int8_t *data, int data_h, int data_w,
-        int8_t *weight, int weight_h, int weight_w,
-        int32_t* out){
-    for(int oh = 0; oh < data_h; oh++){
-        for(int ow = 0; ow < weight_w; ow++){
-            int32_t sum = 0;
-            for(int k = 0; k < data_w; k++){
-                sum += data[oh * data_w + k] * weight[k * weight_w + ow];
-            }
-            out[oh * weight_w + ow] = sum;
-        }
-    }
-}
 /*
  * args = {
  * data, 2D int8
@@ -57,6 +44,15 @@ TVM_REGISTER_GLOBAL("tvm.contrib.cvm.dense.forward")
 
     CHECK_EQ(data_w, weight_h) << "data width should equal weight height";
 
+    for(int oh = 0; oh < data_h; oh++){
+        for(int ow = 0; ow < weight_w; ow++){
+            int32_t sum = 0;
+            for(int k = 0; k < data_w; k++){
+                sum += data[oh * data_w + k] * weight[k * weight_w + ow];
+            }
+            out[oh * weight_w + ow] = sum;
+        }
+    }
 
     if(bias_l > 0){
         for(int i = 0; i < data_h; i++){

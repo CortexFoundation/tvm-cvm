@@ -50,4 +50,5 @@ def test_dense(use_bias=True):
 
 if __name__ == "__main__":
     test_dense(use_bias=False)
+    test_dense(use_bias=True)
 

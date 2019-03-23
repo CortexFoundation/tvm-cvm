@@ -176,7 +176,6 @@ def dense(data,
 
     oshape = list([data.shape[0], weight.shape[1]])
     if bias is not None:
-        print("bias is not none")
         return _api.extern(
             oshape, [data, weight, bias],
             lambda ins, outs: _intrin.call_packed(
@@ -186,7 +185,6 @@ def dense(data,
                 ins[2],
                 outs[0]), name="y", dtype='int32')
     else:
-        print("bias is none")
         return _api.extern(
                 oshape, [data, weight],
                 lambda ins, outs: _intrin.call_packed(
