@@ -31,7 +31,9 @@ class FilterList(logging.Filter):
     """ Filter with logging module
 
         Filter rules as below:
-            level no > keywords > {allow|disable log name} > by default filter
+            {allow|disable log name} > level no > keywords >
+            {inheritance from parent log name} > by default filter
+        TODO:
     """
     def __init__(self, default=False, allows=[], disables=[],
             keywords=[], log_level=logging.INFO):
@@ -65,13 +67,6 @@ class FilterList(logging.Filter):
         rules = self.rules
         rv = rules[self._internal_filter_rule]
 
-        if record.levelno >= self.log_level:
-            return not rv
-
-        for keyword in self.keywords:
-            if keyword in record.getMessage():
-                return not rv
-
         splits = record.name.split(".")
         for split in splits:
             if split in rules:
@@ -79,6 +74,13 @@ class FilterList(logging.Filter):
                 if self._internal_filter_rule in rules:
                     rv = rules[self._internal_filter_rule]
             else:
+                if record.levelno >= self.log_level:
+                    return True
+
+                for keyword in self.keywords:
+                    if keyword in record.getMessage():
+                        return True
+
                 return rv
 
         return rv

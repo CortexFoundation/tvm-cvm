@@ -444,6 +444,7 @@ def _topo_sort(symbol):
     while queue:
         sym = queue.pop(0)
         name = sym.attr('name')
+
         childs = sym.get_children()
         if childs is None:
             dep_cnts[name] = 0

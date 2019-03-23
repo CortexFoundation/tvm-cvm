@@ -88,9 +88,25 @@ def shift_round(F, data, shift_bits):
     """
     if isinstance(data, nd.NDArray):
         power = F.power(2, shift_bits-1)
-    else:
-        power = F.pow(2, shift_bits-1)
+        out = F.floor(F.broadcast_div(data, power) + 1)
+        out = F.floor(out / 2)
+        return out
 
-    out = F.floor(F.broadcast_div(data, power) + 1)
-    out = F.floor(out / 2)
+    assert isinstance(data, sym.Symbol)
+
+    def left_shift():
+        power = F.pow(2, -shift_bits)
+        out = F.floor(F.broadcast_mul(data, power))
+        return out
+
+    def right_shift():
+        power = F.pow(2, shift_bits-1)
+        out = F.floor(F.broadcast_div(data, power) + 1)
+        out = F.floor(out / 2)
+        return out
+
+    sym.contrib.cond
+
+    out = F.contrib.cond(shift_bits < 1, left_shift, right_shift)
+
     return out

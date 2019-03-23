@@ -24,12 +24,43 @@ import quant_pass as qpass
 # import resnet152 as resnet
 import resnet50 as resnet
 
-quant_symbol_file = resnet.SYMBOL_FILE + ".quant"
-quant_params_file = resnet.PARAMS_FILE + ".quant"
+from sym_pass import *
 
-def load_mxnet_resnet(quant_flag, batch_size=10,
+def get_dump_fname(suffix="quant"):
+    return '%s.%s'%(resnet.SYMBOL_FILE, suffix), \
+        '%s.%s'%(resnet.PARAMS_FILE, suffix)
+
+def mxnet_sym_quant_resnet(quant_flag):
+    logger = logging.getLogger("log.quant.main.mxnet")
+    if not os.path.exists(resnet.SYMBOL_FILE):
+        logger.info("save resnet symbol&params")
+        resnet.save_graph(mx.gpu())
+
+    load_symbol_file, load_params_file = get_dump_fname("gluon.quant")
+
+    inputs = mx.sym.var('data')
+    ctx = mx.gpu(1)
+
+    mxnet_symbol = mx.sym.load(load_symbol_file)
+    params = nd.load(load_params_file)
+
+    sym, params = fold_cond(mxnet_symbol, params, {}, quant_flag)
+
+    sym, params = sym_post_quant(sym, params, {}, quant_flag)
+
+    save_symbol_file, save_params_file = get_dump_fname("post.quant")
+    nd.save(save_params_file, params)
+    print (params.keys())
+    with open(save_symbol_file, 'w') as fout:
+        fout.write(sym.tojson())
+
+def gluon_quant_resnet(quant_flag, batch_size=10,
         iter_num=10, need_requant=False):
-    logger = logging.getLogger("log.main")
+    logger = logging.getLogger("log.quant.main.gluon")
+    logger.info("=== Model Quantazation ===")
+
+    pass_name = "gluon.quant"
+    quant_symbol_file, quant_params_file = get_dump_fname(pass_name)
 
     if not os.path.exists(resnet.SYMBOL_FILE):
         logger.info("save resnet symbol&params")
@@ -96,20 +127,24 @@ def load_mxnet_resnet(quant_flag, batch_size=10,
                 " | Difference: %.2f%% | Total Sample: %5d",
                 i, 100.*acc/total, 100.*qacc/total, 100.*diff/total, total)
 
-    qsym_block.save_params(quant_params_file)
-
-def test_quant_model(quant_flag):
-    graph = resnet.load_quant_graph(quant_flag)
-    sym = graph(mx.sym.var('data'))
+    # save module
+    qsym_block.collect_params().save(quant_params_file)
     with open(quant_symbol_file, 'w') as fout:
+        sym = qsym_block(inputs)
         fout.write(sym.tojson())
 
-    ctx = mx.gpu(0)
+def test_quant_model(batch_size=10, iter_num=10):
+    logger = logging.getLogger("log.test.mxnet")
+    logger.info("=== Log Test Mxnet ===")
+
+    load_symbol_file, load_params_file = get_dump_fname("post.quant")
+
+    ctx = mx.gpu(1)
     inputs = mx.sym.var("data")
 
-    sym = mx.sym.load(quant_symbol_file)
+    sym = mx.sym.load(load_symbol_file)
 
-    data_iter = load_dataset(10)
+    data_iter = load_dataset(batch_size)
     calib_data = data_iter.next()
 
     graph = nn.SymbolBlock(sym, [inputs])
@@ -117,11 +152,10 @@ def test_quant_model(quant_flag):
     # print ('params:', sorted(list(params.keys())))
     # params_dict = load_parameters(graph, params, ctx=ctx)
 
-    graph.load_parameters(quant_params_file, ctx=ctx)
+    graph.load_parameters(load_params_file, ctx=ctx)
 
-    logger = logging.getLogger("log.main")
     qacc, total = 0, 0
-    for i in range(10):
+    for i in range(iter_num):
         qimage_data, _ = quant_helper(calib_data.data[0])
 
         # params['data'] = qimage_data
@@ -143,26 +177,31 @@ def test_quant_model(quant_flag):
         logger.info("Iteration: %5d | Quant Acc: %.2f%% | Total Sample: %5d",
                 i, 100.*qacc/total, total)
 
-def test_nnvm_load():
-    logger = logging.getLogger("log.nnvm")
+def test_nnvm_load(batch_size=10, iter_num=10):
+    logger = logging.getLogger("log.test.nnvm")
+    logger.info("=== Log Test NNVM ===")
 
-    batch_size = 10
+    load_symbol_fname, load_params_fname = get_dump_fname("post.quant")
+
     in_shape = (batch_size, 3, 224, 224)
     data_iter = load_dataset(batch_size)
     calib_data = data_iter.next()
 
-    params = nd.load(quant_params_file)
+    params = nd.load(load_params_fname)
+    use_dtype = "int8"
+    for key, value in list(params.items()):
+        params[key] = value.astype(use_dtype)
 
-    sym = mx.sym.load(quant_symbol_file)
+    sym = mx.sym.load(load_symbol_fname)
     nnvm_sym, params = nnvm.frontend.from_mxnet(sym, arg_params=params, aux_params={})
     nnvm_graph = nnvm.graph.create(nnvm_sym)
     with open("nnvm.log", "w") as fout:
         fout.write(nnvm_graph.ir())
 
-    with nnvm.compiler.build_config(opt_level=2):
+    with nnvm.compiler.build_config(opt_level=0): #, add_pass=["PrecomputePrune"]):
         deploy_graph, lib, params = nnvm.compiler.build(
             nnvm_graph, target="cuda", shape={"data": in_shape},
-            params=params, dtype="float32")
+            params=params, dtype=use_dtype)
 
         with open("deploy.log", "w") as fout:
             fout.write(deploy_graph.ir())
@@ -172,7 +211,7 @@ def test_nnvm_load():
     module.load_params(param_bytes)
     out_shape = (1000,)
     qacc, total = 0, 0
-    for i in range(10):
+    for i in range(iter_num):
         qimage_data, _ = quant_helper(calib_data.data[0])
 
         module.run(data=qimage_data.asnumpy())
@@ -200,11 +239,14 @@ if __name__ == "__main__":
             fmt="[ %(asctime)s %(name)s.%(levelname)s ] %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S")
 
+    allows=["log.quant.op.pool", "log.calib", "log.main", "log.test"]
+    disables = ["log.quant.op.requant.helper", "autotvm"]
+
     log_filter = FilterList(
-                allows=["log.quant.op.pool", "log.calib", "log.main"],
-                disables=["log.quant.op.requant.helper"],
+                allows=allows, disables=disables,
                 # keywords=["layer=pool", "calib_pool"],
-                log_level=logging.INFO)
+                log_level=logging.INFO,
+                default=False)
     for handler in logging.root.handlers:
         handler.addFilter(log_filter)
         handler.setFormatter(formatter)
@@ -213,10 +255,12 @@ if __name__ == "__main__":
             log_level=logging.DEBUG,
             disabled_layers=["relu", "pool0", "activation"])
 
-    # load_mxnet_resnet(quant_flag, batch_size=10, iter_num=1,
-            # need_requant=False)
+    # gluon_quant_resnet(quant_flag, batch_size=10, iter_num=1,
+            # need_requant=True)
 
-    # test_quant_model(quant_flag)
-    test_nnvm_load()
+    mxnet_sym_quant_resnet(quant_flag)
+    #  test_quant_model(batch_size=10, iter_num=10)
+    # test_nnvm_load(batch_size=10, iter_num=10)
+
 
 
