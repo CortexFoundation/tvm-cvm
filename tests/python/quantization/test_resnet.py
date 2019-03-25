@@ -41,7 +41,7 @@ def mxnet_realize(quant_flag):
     mxnet_symbol = mx.sym.load(load_symbol_file)
     params = nd.load(load_params_file)
 
-    sym, params = quant_realize(mxnet_symbol, params, {}, quant_flag)
+    #  sym, params = quant_realize(mxnet_symbol, params, {}, quant_flag)
 
     save_symbol_file, save_params_file = get_dump_fname("post.quant")
     nd.save(save_params_file, params)
@@ -95,7 +95,7 @@ def gluon_quant_resnet(quant_flag, batch_size=10,
 
     logger.info("load quant/original model")
     qsym_block = nn.SymbolBlock(sym, [inputs])
-    qsym_block.load_parameters(quant_params_file, ctx=ctx)
+    qsym_block.load_parameters(quant_params_file, ctx=ctx, ignore_extra=True)
 
     sym_block = resnet.load_graph(ctx)
 
@@ -179,23 +179,27 @@ def test_nnvm_load(batch_size=10, iter_num=10):
     logger = logging.getLogger("log.test.nnvm")
     logger.info("=== Log Test NNVM ===")
 
-    load_symbol_fname, load_params_fname = get_dump_fname("post.quant")
+    load_symbol_fname, load_params_fname = get_dump_fname("gluon.quant")
 
     in_shape = (batch_size, 3, 224, 224)
     data_iter = load_dataset(batch_size)
     calib_data = data_iter.next()
 
     params = nd.load(load_params_fname)
-    use_dtype = "int32"
-    for key, value in list(params.items()):
-        params[key] = value.astype(use_dtype)
 
     sym = mx.sym.load(load_symbol_fname)
-    nnvm_sym, params = nnvm.frontend.from_mxnet(sym, arg_params=params, aux_params={})
-    nnvm_graph = nnvm.graph.create(nnvm_sym)
-    with open("nnvm.log", "w") as fout:
-        fout.write(nnvm_graph.ir())
+    nnvm_sym, _ = nnvm.frontend.from_mxnet(sym)
 
+    nnvm_sym, params = quant_realize(nnvm_sym, params, {}, quant_flag)
+
+    nnvm_graph = nnvm.graph.create(nnvm_sym)
+    save_symbol_file, _ = get_dump_fname("nnvm.realize")
+    with open(save_symbol_file, "w") as fout:
+       fout.write(nnvm_graph.ir())
+
+    use_dtype = "int32"
+    for key, value in list(params.items()):
+        params[key] = tvm.nd.array(value.asnumpy().astype(use_dtype))
     with nnvm.compiler.build_config(opt_level=0): #, add_pass=["PrecomputePrune"]):
         deploy_graph, lib, params = nnvm.compiler.build(
             nnvm_graph, target="cuda", shape={"data": in_shape},
@@ -256,8 +260,7 @@ if __name__ == "__main__":
     #  gluon_quant_resnet(quant_flag, batch_size=10, iter_num=10,
             #  need_requant=False)
 
-    mxnet_realize(quant_flag)
+    # mxnet_realize(quant_flag)
     test_nnvm_load(batch_size=10, iter_num=10)
-
 
 

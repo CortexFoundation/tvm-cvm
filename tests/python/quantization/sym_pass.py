@@ -1,6 +1,7 @@
 import logging
 import json
 import math
+import numpy as np
 
 import quant_pass as qpass
 
@@ -8,23 +9,45 @@ import mxnet as mx
 from mxnet.symbol import _internal
 from mxnet import symbol as _sym
 
+import nnvm as nnvm
+import tvm
+
 INT32_MIN, INT32_MAX = -2147483647, 2147483647
 INT8_MIN, INT8_MAX = -127, 127
 
 class _GraphHelper(object):
-    def __init__(self, graph={}):
+    def __init__(self, graph={}, gtype=_sym.Symbol):
         self.graph = graph
+        self.gtype = gtype
 
-    def get_node(self, name):
-        if isinstance(name, _sym.Symbol):
+    def _get_name(self, name):
+        if isinstance(name, self.gtype):
             name = name.attr('name')
 
         assert isinstance(name, str)
+        return name
+
+    def get_node(self, sym, default=None):
+        name = self._get_name(sym)
 
         if name not in self.graph:
-            assert False, "op:%s haven't been processed in graph"%name
+            if default is None:
+                assert False, "op:%s haven't been processed in graph"%name
+            else:
+                assert isinstance(default, self.gtype)
+                self.graph[name] = default
 
         return self.graph[name]
+
+    def set_node(self, sym, default):
+        name = self._get_name(sym)
+
+        assert name not in self.graph
+
+        self.graph[name] = default
+        return default
+
+
 
 def _topo_sort(symbol):
     """Sort all symbols in the mxnet graph in topological order.
@@ -82,6 +105,13 @@ def _get_mxnet_op(op_name):
         op = getattr(_sym, op_name)
 
     if not op:
+        raise RuntimeError("Unable to map op_name {} to mxnet.sym".format(op_name))
+    return op
+
+def _get_nnvm_op(op_name):
+    op = getattr(nnvm.sym, op_name)
+
+    if not op:
         raise RuntimeError("Unable to map op_name {} to nnvm.sym".format(op_name))
     return op
 
@@ -136,16 +166,16 @@ def fold_cond(symbol, params, graph, quant_flag):
             shift_bits = params[sb_param_name]
             assert shift_bits.shape == (1,)
 
-            logger.debug("name=%s attr=%s sb=%s", name, attr, shift_bits.asnumpy())
-
             if not quant_flag.use_scalar:
                 assert "_shift_bits" in sb_param_name
                 scale_name = sb_param_name.replace("_shift_bits", "_scale")
                 scale_sym = mx.sym.var(scale_name, shape=(1,))
 
                 one_name, two_name = "const_var_one", "const_var_two"
-                const_var_one = mx.sym.var(one_name, shape=(1,))
-                const_var_two = mx.sym.var(two_name, shape=(1,))
+                const_var_one = gh.get_node(one_name,
+                        mx.sym.var(one_name, shape=(1,)))
+                const_var_two = gh.get_node(two_name,
+                        mx.sym.var(two_name, shape=(1,)))
 
                 if shift_bits < 1:
                     scale = 2 ** (-shift_bits)
@@ -179,7 +209,6 @@ def fold_cond(symbol, params, graph, quant_flag):
             deleted_params_name.append(sb_param_name)
 
         graph[name] = node
-
     logger.debug("[ added_params_name       ]: %s", added_params_name)
     logger.debug("[ deleted_params_name     ]: %s", deleted_params_name)
 
@@ -308,6 +337,16 @@ def quant_realize(symbol, params, graph, quant_flag):
         2) Remove unused params in graph
         2) Check&cast params type from Float32 to Int8|Int32
         3) Check supported op in cvm engine
+
+    Parameters:
+    ===========
+    symbol: nnvm.Symbol
+    params: mxnet.ndarray.NDArray
+
+    Returns:
+    ========
+    symbol: nnvm.Symbol
+    params: tvm.nd.Array
     """
     logger = logging.getLogger("log.quant.post")
 
@@ -318,6 +357,7 @@ def quant_realize(symbol, params, graph, quant_flag):
         return graph[name]
 
     # symbol
+    added_params_name, deleted_params_name = [], set()
     for sym in _topo_sort(symbol):
         name = sym.attr('name')
         attr = sym.list_attr()
@@ -338,7 +378,7 @@ def quant_realize(symbol, params, graph, quant_flag):
         if childs is not None:
             childs = [get_node(child) for child in childs]
             # update childs inputs
-            op = _get_mxnet_op(op_name)
+            op = _get_nnvm_op(op_name)
             node = op(*childs, **attr)
         elif op_name != 'null':
             assert False, "Unrecognized op without input"
@@ -351,8 +391,45 @@ def quant_realize(symbol, params, graph, quant_flag):
             childs_name = [c.attr('name') for c in childs]
             assert len(childs) == 1
             node = childs[0]
+        elif op_name == "broadcast_div":
+            msg = '%s(op=%s, inputs=%s)'%(name, op_name, [c.attr('name') for c in childs])
+            assert (len(childs) == 2)
+
+            input_sym = childs[0]
+            div_sym = childs[1]
+            assert div_sym.attr('op_name') == 'null' # params or constant
+            div_sym_name = div_sym.attr('name')
+
+            assert div_sym_name in params, msg
+
+            div = params[div_sym_name]
+            shift_bits = mx.ndarray.log2(div).astype('float32')
+            assert all(div >= 0)
+            assert shift_bits.astype('int8').astype('float32') == shift_bits, msg
+
+            logger.debug("broadcast_div to right_shift: %s -> (%s, %s)",
+                    msg, div.asnumpy(), shift_bits.asnumpy())
+
+            sb_sym_name = div_sym_name.replace('_scale', '') + '_shift_bits'
+            sb_sym = nnvm.sym.Variable(sb_sym_name) #, shape=(1,))
+
+            # node = nnvm.sym.broadcast_right_shift(input_sym, sb_sym)
+            # params[sb_sym_name] = shift_bits
+
+            node = nnvm.sym.broadcast_div(input_sym, sb_sym)
+            params[sb_sym_name] = div
+
+            print (params[div_sym_name].asnumpy(), params[sb_sym_name].asnumpy())
+
+            added_params_name.append(sb_sym_name)
+            #  deleted_params_name.add(div_sym_name)
 
         graph[name] = node
+
+    for name in deleted_params_name:
+        del params[name]
+    logger.debug("[ added_params_name       ]: %s", added_params_name)
+    logger.debug("[ deleted_params_name     ]: %s", deleted_params_name)
 
     nodes = []
     for sym in symbol:
@@ -360,7 +437,7 @@ def quant_realize(symbol, params, graph, quant_flag):
         nodes.append(node)
     ret_sym = nodes[0]
     if len(nodes) > 1:
-        ret_sym = mx.sym.Group(nodes)
+        ret_sym = nnvm.sym.Group(nodes)
 
     ops = set()
     for sym in _topo_sort(ret_sym):
@@ -374,7 +451,7 @@ def quant_realize(symbol, params, graph, quant_flag):
         ops.add(op_name)
 
     # params
-    args = ret_sym.list_arguments()
+    args = ret_sym.list_input_names()
     ret_params, params_dtype = {}, {}
     for key, value in params.items():
         if key in args:
@@ -388,7 +465,10 @@ def quant_realize(symbol, params, graph, quant_flag):
 
             assert all(flat.astype('int32').astype('float32') == flat), msg
             params_dtype[key] = dtype
-            ret_params[key] = value.astype("int32")
+            ret_params[key] = tvm.nd.array(value.astype(dtype).asnumpy())
+        else:
+            #  logger.debug("Unused keys: %s, %s", key, value.asnumpy().flatten()[:49])
+            pass
 
     for arg in args:
         if arg == 'data':
