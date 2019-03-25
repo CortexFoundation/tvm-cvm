@@ -72,7 +72,7 @@ def _declaration_conv(cfg, data, kernel, strides, padding, dilation, layout, out
     if "cvm" in target.libs:
         # Check out_dtype here.
         # maybe customized conv2d is useless.
-        return cvm.conv2d_forward(data, kernel, strides, padding, dilation, layout)            
+        return cvm.conv2d_forward(data, kernel, strides)            
 
     if layout == 'NCHW':
         _create_tuning_space(cfg, data, kernel, strides, padding, dilation, layout)

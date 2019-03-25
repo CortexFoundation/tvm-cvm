@@ -2,6 +2,7 @@
 """x86 dense operators"""
 from __future__ import absolute_import as _abs
 import tvm
+from tvm.contrib import cvm
 from tvm import autotvm
 from tvm.autotvm.task.space import SplitEntity
 
@@ -17,7 +18,7 @@ def _declaration_dense(cfg, data, weight, bias=None):
    
     if "cvm" in target.libs:
         # check type here.
-        pass
+        return cvm.dense(data, weight)
     # For small batch sizes, don't pack weight into cache-friendly layout
     # because of overhead in packing and limited reuse from batch dimension
     # TODO(icemelon9): use a more systematic way to determine which schedule to use
