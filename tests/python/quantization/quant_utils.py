@@ -13,13 +13,15 @@ class QuantFlag():
     def __init__(self, is_fuse_bn=True, calib_mode=CalibMode.NONE,
             allowed_layers=[], disabled_layers=[],
             log_level=logging.INFO,
-            use_asymmetric=True, eliminate_outlier=True):
+            use_scalar=False):
         self.is_fuse_bn = is_fuse_bn
         assert isinstance(calib_mode, CalibMode)
         self.calib_mode = calib_mode
         self.log_level = log_level
         self.allowed_layers = allowed_layers
         self.disabled_layers = disabled_layers
+
+        self.use_scalar = use_scalar
 
 DEFAULT_TARGET_BITS = 7
 BIAS_TARGET_BITS= (DEFAULT_TARGET_BITS+1)*4-1
@@ -104,8 +106,6 @@ def shift_round(F, data, shift_bits):
         out = F.floor(F.broadcast_div(data, power) + 1)
         out = F.floor(out / 2)
         return out
-
-    sym.contrib.cond
 
     out = F.contrib.cond(shift_bits < 1, left_shift, right_shift)
 

@@ -85,20 +85,23 @@ class FilterList(logging.Filter):
 
         return rv
 
-def load_parameters(graph, params, prefix=None, ctx=None):
+def load_parameters(graph, params, prefix="", ctx=None):
     params_dict = graph.collect_params()
     params_dict.initialize(ctx=ctx)
+
+    ret_params = {}
     for name in params_dict:
         split_name, uniq_name = name.split("_"), []
         [uniq_name.append(sname) for sname in split_name if sname not in uniq_name]
         param_name = "_".join(uniq_name)
-        param_name = param_name[len(prefix):] if prefix else param_name
+        param_name = param_name[len(prefix):]
         assert param_name in params or name in params, \
             "param name(%s) with origin(%s) not exits"%(param_name, name)
         data = params[name] if name in params else params[param_name]
         params_dict[name].set_data(data)
+        ret_params[name] = data
 
-    return params_dict
+    return ret_params
 
 def load_dataset(batch_size=10):
     rgb_mean = [123.68, 116.779, 103.939]

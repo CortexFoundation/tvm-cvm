@@ -1,5 +1,6 @@
 import logging
 import json
+import math
 
 import quant_pass as qpass
 
@@ -9,6 +10,21 @@ from mxnet import symbol as _sym
 
 INT32_MIN, INT32_MAX = -2147483647, 2147483647
 INT8_MIN, INT8_MAX = -127, 127
+
+class _GraphHelper(object):
+    def __init__(self, graph={}):
+        self.graph = graph
+
+    def get_node(self, name):
+        if isinstance(name, _sym.Symbol):
+            name = name.attr('name')
+
+        assert isinstance(name, str)
+
+        if name not in self.graph:
+            assert False, "op:%s haven't been processed in graph"%name
+
+        return self.graph[name]
 
 def _topo_sort(symbol):
     """Sort all symbols in the mxnet graph in topological order.
@@ -70,33 +86,13 @@ def _get_mxnet_op(op_name):
     return op
 
 def fold_cond(symbol, params, graph, quant_flag):
-    def get_node(name):
-        if isinstance(sym, mx.sym.Symbol):
-            name = name.attr('name')
+    logger = logging.getLogger("log.quant.fold.condition")
+    logger.setLevel(quant_flag.log_level)
+    logger.info("fold _cond op in graph")
 
-        if name not in graph:
-            assert False, "Op:%s haven't been processed"%name
+    gh = _GraphHelper(graph)
 
-        #  output_index = json.loads(sym.tojson())['heads'][0][1]
-        return graph[name]
-
-    def left_shift(inputs, scale_sym, shift_bits):
-        scale = 2 ** (-shift_bits)
-        #  out = mx.sym.broadcast_mul(inputs, scale_sym)
-        out = inputs / int(scale.asnumpy()[0])
-        out = mx.sym.floor(out)
-        return out, scale
-
-    def right_shift(inputs, scale_sym, shift_bits):
-        scale = 2 ** (shift_bits-1)
-
-        #  out = mx.sym.broadcast_div(inputs, scale_sym)
-        out = inputs / int(scale.asnumpy()[0])
-        out = mx.sym.floor(out + 1)
-        out = mx.sym.floor(out / 2)
-
-        return out, scale
-
+    added_params_name, deleted_params_name = set(), []
     for sym in _topo_sort(symbol):
         name = sym.attr('name')
         attr = sym.list_attr()
@@ -105,7 +101,7 @@ def fold_cond(symbol, params, graph, quant_flag):
 
         # update inputs layer symbol
         if childs is not None:
-            childs = [get_node(child) for child in childs]
+            childs = [gh.get_node(child) for child in childs]
             # update childs inputs
             op = _get_mxnet_op(op_name)
             node = op(*childs, **attr)
@@ -138,21 +134,58 @@ def fold_cond(symbol, params, graph, quant_flag):
             input_sym = childs[others[0]]
 
             shift_bits = params[sb_param_name]
-            scale_name = sb_param_name.replace('_shift_bits', '_scale')
-            scale_sym = mx.sym.var(scale_name, shape=(1,))
-            if any(shift_bits < 1):
-                node, scale = left_shift(input_sym, scale_sym, shift_bits)
-            else:
-                node, scale = right_shift(input_sym, scale_sym, shift_bits)
+            assert shift_bits.shape == (1,)
 
-            params[scale_name] = scale
+            logger.debug("name=%s attr=%s sb=%s", name, attr, shift_bits.asnumpy())
+
+            if not quant_flag.use_scalar:
+                assert "_shift_bits" in sb_param_name
+                scale_name = sb_param_name.replace("_shift_bits", "_scale")
+                scale_sym = mx.sym.var(scale_name, shape=(1,))
+
+                one_name, two_name = "const_var_one", "const_var_two"
+                const_var_one = mx.sym.var(one_name, shape=(1,))
+                const_var_two = mx.sym.var(two_name, shape=(1,))
+
+                if shift_bits < 1:
+                    scale = 2 ** (-shift_bits)
+                    node = mx.sym.broadcast_mul(input_sym, scale_sym)
+                else:
+                    scale = 2 ** (shift_bits - 1)
+                    node = mx.sym.broadcast_div(input_sym, scale_sym)
+                    node = mx.sym.broadcast_add(node, const_var_one)
+                    node = mx.sym.floor(node)
+                    node = mx.sym.broadcast_div(node, const_var_two)
+
+                params[one_name] = mx.ndarray.array([1])
+                params[two_name] = mx.ndarray.array([2])
+                params[scale_name] = scale
+
+                added_params_name.update([scale_name, one_name, two_name])
+
+            else:
+                shift_bits = shift_bits.asnumpy()[0]
+                if shift_bits < 1:
+                    scale = 2 ** (-shift_bits)
+                    node = mx.sym.floor(input_sym * scale)
+                else:
+                    scale = 2 ** (shift_bits-1)
+                    node = mx.sym.floor(input_sym / scale)
+                    node = mx.sym.floor((node+1) / 2)
+
+            node = mx.sym.floor(node)
+
             del params[sb_param_name]
+            deleted_params_name.append(sb_param_name)
 
         graph[name] = node
 
+    logger.debug("[ added_params_name       ]: %s", added_params_name)
+    logger.debug("[ deleted_params_name     ]: %s", deleted_params_name)
+
     nodes = []
     for sym in symbol:
-        node = get_node(sym)
+        node = gh.get_node(sym)
         nodes.append(node)
 
     ret_sym = nodes[0]
@@ -160,7 +193,6 @@ def fold_cond(symbol, params, graph, quant_flag):
         ret_sym = mx.sym.Group(nodes)
 
     return ret_sym, params
-
 
 def fuse_conv_bn(symbol, params, graph, quant_flag):
     logger = logging.getLogger("log.fuse.conv_bn")
@@ -268,7 +300,15 @@ IdentitySymbols = {
     '_plus_scalar': [],
 }
 
-def sym_post_quant(symbol, params, graph, quant_flag):
+def quant_realize(symbol, params, graph, quant_flag):
+    """Transform Sim-Quant(Float32 Simulate Int8) to Int8-Inference Graph
+        Works:
+        1) Remove floor layer in Int8 graph
+        *) Cast _*_scalar op to Int32
+        2) Remove unused params in graph
+        2) Check&cast params type from Float32 to Int8|Int32
+        3) Check supported op in cvm engine
+    """
     logger = logging.getLogger("log.quant.post")
 
     def get_node(sym):
@@ -283,6 +323,16 @@ def sym_post_quant(symbol, params, graph, quant_flag):
         attr = sym.list_attr()
         op_name = sym.attr('op_name')
         childs = sym.get_children()
+
+        if 'scalar' in attr:
+            scalar = float(attr['scalar'])
+
+            msg = "name:%s, op_name:%s, scalar:%s"%(name, op_name, attr)
+            assert scalar >= INT32_MIN and scalar <= INT32_MAX, msg
+            assert float(int(scalar)) == scalar, msg
+
+            #  attr['scalar'] = max(min(int(scalar), INT8_MAX), INT8_MIN)
+            attr['scalar'] = int(scalar)
 
         # update inputs layer symbol
         if childs is not None:
@@ -331,12 +381,14 @@ def sym_post_quant(symbol, params, graph, quant_flag):
             msg = "key:%s value:%s"%(key, value)
             flat = value.asnumpy().flatten()
 
+            assert all(flat >= INT32_MIN) and all(flat <= INT32_MAX), msg
+
             dtype = 'int8' if all(flat >= INT8_MIN) and all(flat <= INT8_MAX) \
                     else 'int32'
 
             assert all(flat.astype('int32').astype('float32') == flat), msg
             params_dtype[key] = dtype
-            ret_params[key] = value.astype(dtype)
+            ret_params[key] = value.astype("int32")
 
     for arg in args:
         if arg == 'data':
