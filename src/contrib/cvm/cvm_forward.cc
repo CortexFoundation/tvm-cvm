@@ -1,5 +1,5 @@
 /*!
- *  Copyright (c) 2017 by Contributors
+ *  in_channelsopyright (c) 2017 by in_channelsontributors
  * \file Use external cudnn utils function
  */
 #include <tvm/runtime/registry.h>
@@ -14,49 +14,40 @@ using namespace runtime;
 
 TVM_REGISTER_GLOBAL("tvm.contrib.cvm.conv2d.forward")
 .set_body([](TVMArgs args, TVMRetValue *ret) {
-  int mode = args[0];
-  int format = args[1];
-  int algo = args[2];
-  int pad_h = args[3];
-  int pad_w = args[4];
-  int stride_h = args[5];
-  int stride_w = args[6];
-  int dilation_h = args[7];
-  int dilation_w = args[8];
-  DLTensor *x = args[9];
-  DLTensor *w = args[10];
-  DLTensor *y = args[11];
-  printf("%d\n", y->dtype);
-  TVMContext ctx = x->ctx;
+  int stride_h = args[0];
+  int stride_w = args[1];
+  DLTensor *x = args[2];
+  DLTensor *w = args[3];
+  DLTensor *y = args[4];
 
-  int K = static_cast<int>(w->shape[0]);
-  int R = static_cast<int>(w->shape[2]);
-  int S = static_cast<int>(w->shape[3]);
+  int8_t* x_data = (int8_t*)x->data;
+  int8_t* w_data = (int8_t*)w->data;
+  int32_t* y_data = (int32_t*)y->data;
 
-  int N = static_cast<int>(x->shape[0]);
-  int C = static_cast<int>(x->shape[1]);
-  int H = static_cast<int>(x->shape[2]);
-  int W = static_cast<int>(x->shape[3]);
+  int out_channels = static_cast<int>(w->shape[0]);
+  int filter_h = static_cast<int>(w->shape[2]);
+  int filter_w = static_cast<int>(w->shape[3]);
 
-//  CHECK(TypeMatch(x->dtype, kDLInt, 8) || TypeMatch(x->dtype, kDLInt, 16));
-  size_t workspace_size = N * K * H * W;
-  DeviceAPI* cpu_api = DeviceAPI::Get(ctx);
-  int64_t in_shape[4] = {N, K, H, W};
-  for (int n = 0; n < N; ++n) {
-    for (int k = 0; k < K; ++k) {
-      for (int p = 0; p < H; ++p) {
-        for (int q = 0; q < W; ++q) {
-          int y_acc = 0;
-          for (int c = 0; c < C; ++c) {
-            for (int r = 0; r < R; ++r) {
-              for (int s = 0; s < S; ++s) {
-                y_acc +=
-                    ((char*)x->data)[(n * C + c) * H * W + (p + r * stride_h) * W + (q + s * stride_w)] *
-                    ((char*)w->data)[(k * C + c) * R * S + r * S + s];
+  int n_batch = static_cast<int>(x->shape[0]);
+  int in_channels = static_cast<int>(x->shape[1]);
+  int x_h = static_cast<int>(x->shape[2]);
+  int x_w = static_cast<int>(x->shape[3]);
+
+  for (int n = 0; n < n_batch; ++n) {
+    for (int k = 0; k < out_channels; ++k) {
+      for (int p = 0; p < x_h; ++p) {
+        for (int q = 0; q < x_w; ++q) {
+          int32_t y_sum = 0;
+          for (int c = 0; c < in_channels; ++c) {
+            for (int r = 0; r < filter_h; ++r) {
+              for (int s = 0; s < filter_w; ++s) {
+                y_sum +=
+                    x_data[(n * in_channels + c) * x_h * x_w + (p + r * stride_h) * x_w + (q + s * stride_w)] *
+                    w_data[(k * in_channels + c) * filter_h * filter_w + r * filter_w + s];
               }
             }
           }
-          ((char*)y->data)[(n * K + k) * H * W + p * W + q] = static_cast<char>(y_acc & 0x7f);
+          y_data[(n * out_channels + k) * x_h * x_w + p * x_w + q] = y_sum;
         }
       }
     }

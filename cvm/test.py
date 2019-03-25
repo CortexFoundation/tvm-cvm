@@ -37,7 +37,7 @@ def test_conv2d():
         w = tvm.nd.array(np.random.uniform(-127, 127, wshape).astype(np.int8), ctx)
         y = tvm.nd.array(np.random.uniform(-1, 1, yshape).astype(np.int32), ctx)
         f(x, w, y)
-#        print(y)
+        print(y)
 
     verify()
 
