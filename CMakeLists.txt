@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.2)
 project(tvm C CXX)
+set( CMAKE_EXPORT_COMPILE_COMMANDS ON )
 
 # Utility functions
 include(cmake/util/Util.cmake)
@@ -234,7 +235,7 @@ if(GTEST_LIB)
     add_executable(${__execname} ${__srcpath})
     list(APPEND TEST_EXECS ${__execname})
     target_link_libraries(${__execname}
-      tvm ${GTEST_LIB} pthread)
+      tvm ${GTEST_LIB} pthread dl)
     set_target_properties(${__execname} PROPERTIES EXCLUDE_FROM_ALL 1)
     set_target_properties(${__execname} PROPERTIES EXCLUDE_FROM_DEFAULT_BUILD 1)
   endforeach()

@@ -245,11 +245,11 @@ def _contrib_multibox_detection(inputs, attrs):
         if attrs.get('variances') is not None else (0.1, 0.1, 0.2, 0.2)
     nms_topk = attrs.get('nms_topk') or -1
     new_attrs0 = {'clip': clip, 'threshold': float(threshold), 'variances': variances}
-    new_attrs1 = {'nms_threshold': float(nms_threshold), 'force_suppress': force_suppress,
-                  'nms_topk': int(nms_topk)}
+    new_attrs1 = {'return_indices': False, 'iou_threshold': float(nms_threshold),
+                  'force_suppress': force_suppress, 'top_k': int(nms_topk)}
     data, valid_count = _get_nnvm_op('multibox_transform_loc')(inputs[0], inputs[1],
                                                                inputs[2], **new_attrs0)
-    return _get_nnvm_op('nms')(data, valid_count, **new_attrs1)
+    return _get_nnvm_op('non_max_suppression')(data, valid_count, **new_attrs1)
 
 def _elemwise_sum(inputs, _):
     new_attrs = {'num_args':len(inputs)}
@@ -324,7 +324,7 @@ _identity_list = ['__add_scalar__', '__add_symbol__', '__div_scalar__',
                   'flatten', 'log', 'log_softmax', 'max', 'min', 'negative',
                   'ones_like', 'relu', 'sigmoid', 'slice_like', 'softmax',
                   'sum', 'tanh', 'transpose', 'zeros_like', 'gather_nd',
-                  'reshape_like', 'where']
+                  'reshape_like', 'where', 'floor']
 
 _convert_map = {
     '_copy'         : _rename('copy'),
@@ -334,6 +334,7 @@ _convert_map = {
     '_plus_scalar'  : _rename('__add_scalar__'),
     '_rdiv_scalar'  : _rename('__rdiv_scalar__'),
     '_rminus_scalar': _rename('__rsub_scalar__'),
+    '_rpower_scalar': _rename('__rpow_scalar__'),
     '_contrib_MultiBoxPrior' : _rename('multibox_prior'),
     '_contrib_MultiBoxDetection' : _contrib_multibox_detection,
     '_minimum'      : _minimum,
@@ -373,7 +374,7 @@ _convert_map = {
     'UpSampling'    : _upsampling,
     'clip'          : _clip,
     'expand_dims'   : _expand_dims,
-    'LRN'           : _lrn
+    'LRN'           : _lrn,
 }
 
 def _convert_symbol(op_name, inputs, attrs,
@@ -405,6 +406,7 @@ def _convert_symbol(op_name, inputs, attrs,
     """
     identity_list = identity_list if identity_list else _identity_list
     convert_map = convert_map if convert_map else _convert_map
+    #print (_convert_map)
     if op_name in identity_list:
         op = _get_nnvm_op(op_name)
         sym = op(*inputs, **attrs)
@@ -442,6 +444,7 @@ def _topo_sort(symbol):
     while queue:
         sym = queue.pop(0)
         name = sym.attr('name')
+
         childs = sym.get_children()
         if childs is None:
             dep_cnts[name] = 0

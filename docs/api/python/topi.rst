@@ -11,6 +11,7 @@ List of operators
    topi.negative
    topi.floor
    topi.ceil
+   topi.sign
    topi.trunc
    topi.round
    topi.abs
@@ -73,6 +74,9 @@ List of operators
    topi.logical_not
    topi.arange
    topi.stack
+   topi.repeat
+   topi.tile
+   topi.shape
    topi.layout_transform
    topi.image.resize
 
@@ -93,6 +97,7 @@ topi
 .. autofunction:: topi.identity
 .. autofunction:: topi.floor
 .. autofunction:: topi.ceil
+.. autofunction:: topi.sign
 .. autofunction:: topi.trunc
 .. autofunction:: topi.round
 .. autofunction:: topi.abs
@@ -132,6 +137,9 @@ topi
 .. autofunction:: topi.less
 .. autofunction:: topi.arange
 .. autofunction:: topi.stack
+.. autofunction:: topi.repeat
+.. autofunction:: topi.tile
+.. autofunction:: topi.shape
 .. autofunction:: topi.layout_transform
 
 topi.nn

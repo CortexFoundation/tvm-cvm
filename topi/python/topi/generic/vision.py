@@ -37,6 +37,23 @@ def schedule_reorg(outs):
     return cpp.generic.default_schedule(cpp_target, outs, False)
 
 @tvm.target.generic_func
+def schedule_get_valid_counts(outs):
+    """Schedule for get_valid_counts
+
+    Parameters
+    ----------
+    outs: Array of Tensor
+      The computation graph description of nms
+      in the format of an array of tensors.
+
+    Returns
+    -------
+    s: Schedule
+      The computation schedule for the op.
+    """
+    return _default_schedule(outs, False)
+
+@tvm.target.generic_func
 def schedule_nms(outs):
     """Schedule for non-maximum suppression
 
@@ -113,6 +130,23 @@ def schedule_roi_align(outs):
     ----------
     outs: Array of Tensor
       The computation graph description of roi_align
+      in the format of an array of tensors.
+
+    Returns
+    -------
+    s: Schedule
+      The computation schedule for the op.
+    """
+    return _default_schedule(outs, False)
+
+@tvm.target.generic_func
+def schedule_roi_pool(outs):
+    """Schedule for roi_align
+
+    Parameters
+    ----------
+    outs: Array of Tensor
+      The computation graph description of roi_pool
       in the format of an array of tensors.
 
     Returns

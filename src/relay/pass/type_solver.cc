@@ -4,6 +4,7 @@
  * \brief Type solver implementations.
  */
 #include <string>
+#include <memory>
 #include "type_solver.h"
 #include "../ir/type_functor.h"
 
@@ -476,8 +477,8 @@ bool TypeSolver::Solve() {
       rnode->resolved = false;
       this->ReportError(
           RELAY_ERROR(
-            "an internal invariant was violdated while" \
-            "typechecking your program" <<
+            "an internal invariant was violdated while " \
+            "typechecking your program " <<
             err.what()), rnode->location);
     }
 

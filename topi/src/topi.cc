@@ -173,6 +173,11 @@ TVM_REGISTER_GLOBAL("topi.elemwise_sum")
   *rv = elemwise_sum(args[0]);
   });
 
+TVM_REGISTER_GLOBAL("topi.sign")
+.set_body([](TVMArgs args, TVMRetValue *rv) {
+  *rv = sign(args[0]);
+  });
+
 TVM_REGISTER_GLOBAL("topi.full")
 .set_body([](TVMArgs args, TVMRetValue *rv) {
   *rv = full(args[0], args[1], args[2]);
@@ -271,6 +276,11 @@ TVM_REGISTER_GLOBAL("topi.stack")
   *rv = stack(args[0], args[1]);
 });
 
+TVM_REGISTER_GLOBAL("topi.shape")
+.set_body([](TVMArgs args, TVMRetValue *rv) {
+  *rv = shape(args[0], args[1]);
+});
+
 TVM_REGISTER_GLOBAL("topi.split")
 .set_body([](TVMArgs args, TVMRetValue *rv) {
   if (args[1].type_code() == kDLInt || args[1].type_code() == kDLUInt) {
@@ -278,7 +288,7 @@ TVM_REGISTER_GLOBAL("topi.split")
   } else {
     *rv = split(args[0], args[1], args[2]);
   }
-  });
+});
 
 TVM_REGISTER_GLOBAL("topi.layout_transform")
 .set_body([](TVMArgs args, TVMRetValue *rv) {
@@ -303,6 +313,16 @@ TVM_REGISTER_GLOBAL("topi.where")
 TVM_REGISTER_GLOBAL("topi.arange")
 .set_body([](TVMArgs args, TVMRetValue *rv) {
   *rv = arange(args[0], args[1], args[2], args[3]);
+});
+
+TVM_REGISTER_GLOBAL("topi.repeat")
+.set_body([](TVMArgs args, TVMRetValue *rv) {
+  *rv = repeat(args[0], args[1], args[2]);
+});
+
+TVM_REGISTER_GLOBAL("topi.tile")
+.set_body([](TVMArgs args, TVMRetValue *rv) {
+  *rv = tile(args[0], args[1]);
 });
 
 TVM_REGISTER_GLOBAL("topi.gather_nd")
