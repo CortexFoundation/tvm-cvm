@@ -108,7 +108,11 @@ inline Tensor clip(const Tensor& x,
   return compute(x->shape, [&](const Array<Var>& i) {
     auto min_val = tvm::cast(x->dtype, a_min);
     auto max_val = tvm::cast(x->dtype, a_max);
-    return tvm::max(tvm::min(x(i), max_val), min_val);  // NOLINT(*)
+    if (x(i).type().is_int()) {
+      return tvm::cast(tvm::Int(8), tvm::max(tvm::min(x(i), max_val), min_val));  // NOLINT(*)
+    } else {
+      return tvm::max(tvm::min(x(i), max_val), min_val);
+    }
   }, name, tag);
 }
 

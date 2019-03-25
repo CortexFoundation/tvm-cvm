@@ -19,6 +19,7 @@ def test_conv2d():
     if not tvm.get_global_func("tvm.contrib.cvm.conv2d.forward", True):
         print("skip because cvm is not enabled...")
         return
+    print(tvm.get_global_func("tvm.contrib.cvm.conv2d.forward"))
     wshape = cvm.conv2d_w_shape(in_channel, out_channel, filter_h, filter_w)
 
     X = tvm.placeholder(xshape, dtype='int8', name='X')

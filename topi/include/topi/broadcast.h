@@ -47,6 +47,7 @@ inline tvm::Tensor broadcast_to(const tvm::Tensor& t,
       tag);
 }
 
+
 #define TOPI_DEFINE_BCAST_OP(Name, ComputeRule)                   \
   inline tvm::Expr Name(const tvm::Expr& a,                       \
                         const tvm::Expr& b) {                     \
@@ -132,7 +133,7 @@ TOPI_DEFINE_OP_OVERLOAD(operator||, logical_or);
  *
  * \return The result.
  */
-TOPI_DEFINE_BCAST_OP(add, { return a + b; });
+TOPI_DEFINE_BCAST_OP(add, { return a.type().is_int() ? tvm::cast(tvm::Int(32), a) + tvm::cast(tvm::Int(32), b) : a + b; });
 TOPI_DEFINE_OP_OVERLOAD(operator+, add);
 
 /*!
@@ -146,7 +147,7 @@ TOPI_DEFINE_OP_OVERLOAD(operator+, add);
  *
  * \return The result.
  */
-TOPI_DEFINE_BCAST_OP(subtract, { return a - b; });
+TOPI_DEFINE_BCAST_OP(subtract, { return a.type().is_int() ? tvm::cast(tvm::Int(32), a) - tvm::cast(tvm::Int(32), b) : a - b; });
 TOPI_DEFINE_OP_OVERLOAD(operator-, subtract);
 
 /*!
@@ -160,7 +161,7 @@ TOPI_DEFINE_OP_OVERLOAD(operator-, subtract);
  *
  * \return The result.
  */
-TOPI_DEFINE_BCAST_OP(multiply, { return a * b; });
+TOPI_DEFINE_BCAST_OP(multiply, { return a.type().is_int() ? tvm::cast(tvm::Int(32), a) * tvm::cast(tvm::Int(32), b) : a * b; });
 TOPI_DEFINE_OP_OVERLOAD(operator*, multiply);
 
 /*!
@@ -174,7 +175,7 @@ TOPI_DEFINE_OP_OVERLOAD(operator*, multiply);
  *
  * \return The result.
  */
-TOPI_DEFINE_BCAST_OP(divide, { return a / b; });
+TOPI_DEFINE_BCAST_OP(divide, { return a.type().is_int() ? tvm::cast(tvm::Int(32), a) / tvm::cast(tvm::Int(32), b) : a / b; });
 TOPI_DEFINE_OP_OVERLOAD(operator/, divide);
 
 /*!
@@ -188,7 +189,7 @@ TOPI_DEFINE_OP_OVERLOAD(operator/, divide);
  *
  * \return The result.
  */
-TOPI_DEFINE_BCAST_OP(mod, { return a % b; });
+TOPI_DEFINE_BCAST_OP(mod, { return a.type().is_int() ? tvm::cast(tvm::Int(32), a) % tvm::cast(tvm::Int(32), b) : a % b; });
 TOPI_DEFINE_OP_OVERLOAD(operator%, mod);
 
 /*!
@@ -228,7 +229,7 @@ TOPI_DEFINE_BCAST_OP(minimum, { return tvm::min(a, b); });
  *
  * \return The result.
  */
-TOPI_DEFINE_BCAST_OP(power, { return tvm::pow(a, b); });
+TOPI_DEFINE_BCAST_OP(power, { return (a.type().is_int() && b.type().is_int()) ? tvm::pow(tvm::cast(tvm::Int(32), a), tvm::cast(tvm::Int(32), b)) : tvm::pow(a, b); });
 
 /*!
  * \fn left_shift
@@ -241,7 +242,7 @@ TOPI_DEFINE_BCAST_OP(power, { return tvm::pow(a, b); });
  *
  * \return The result.
  */
-TOPI_DEFINE_BCAST_OP(left_shift, { return a << b; });
+TOPI_DEFINE_BCAST_OP(left_shift, { return (a.type().is_int() && b.type().is_int()) ? (tvm::cast(tvm::Int(32), a) << tvm::cast(tvm::Int(32), b)) : (a << b); });
 TOPI_DEFINE_OP_OVERLOAD(operator<<, left_shift);
 
 /*!
@@ -255,7 +256,7 @@ TOPI_DEFINE_OP_OVERLOAD(operator<<, left_shift);
  *
  * \return The result.
  */
-TOPI_DEFINE_BCAST_OP(right_shift, { return a >> b; });
+TOPI_DEFINE_BCAST_OP(right_shift, { return (a.type().is_int() && b.type().is_int()) ? (tvm::cast(tvm::Int(32), a) >> tvm::cast(tvm::Int(32), b)) : (a >> b); });
 TOPI_DEFINE_OP_OVERLOAD(operator>>, right_shift);
 
 /*!

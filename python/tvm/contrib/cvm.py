@@ -77,16 +77,7 @@ def conv2d_output_shape(x_shape,
                  x_shape[3].value // stride_w])
 
 
-def conv2d_forward(x,
-                   w,
-                   stride_h=1,
-                   stride_w=1,
-                   pad_h=0,
-                   pad_w=0,
-                   dilation_h=1,
-                   dilation_w=1,
-                   conv_mode=1,
-                   tensor_format=0):
+def conv2d_forward(x, w, strides, padding, dilation, layout):
 
     """Create an extern op that compute 2D convolution with CVM
 
@@ -96,28 +87,10 @@ def conv2d_forward(x,
         input feature map
     w: Tensor
         convolution weight
-    stride_h: int
-        height stride
-    stride_w: int
-        width stride
-    pad_h: int
-        height pad
-    pad_w: int
-        weight pad
-    dilation_h: int
-        height dilation
-    dilation_w: int
-        width dilation
-    conv_mode: int
-        0: CUDNN_CONVOLUTION
-        1: CUDNN_CROSS_CORRELATION
-    tensor_format: int
-        0: CVM_TENSOR_NCHW
-        1: CVM_TENSOR_NHWC
-        2: CVM_TENSOR_NCHW_VECT_C
-    algo: int
-        Forward algorithm, get index from ```algo_to_index``` function
-        if algo == -1, the best algo will be chosen by CUDNN
+    strides: (int, int) width and height stride
+    padding: (int, int) width and height pad
+    dilation: (int, int) width and height dilation
+    layout: string, 'NCHW' or 'NWCN' or 'NHWC'    
 
     Returns
     -------

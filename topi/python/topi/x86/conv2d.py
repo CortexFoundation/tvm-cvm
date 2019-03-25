@@ -3,6 +3,8 @@
 
 import tvm
 from tvm import autotvm
+from tvm.contrib import cvm
+
 from tvm.autotvm.task.topi_integration import deserialize_args
 from tvm.autotvm.task import get_config
 from .. import generic, tag
@@ -65,6 +67,13 @@ def _declaration_conv(cfg, data, kernel, strides, padding, dilation, layout, out
     padding = padding if isinstance(padding, (tuple, list)) else (padding, padding)
     strides = strides if isinstance(strides, (tuple, list)) else (strides, strides)
     dilation = dilation if isinstance(dilation, (tuple, list)) else (dilation, dilation)
+    target = tvm.target.current_target()
+    
+    if "cvm" in target.libs:
+        # Check out_dtype here.
+        # maybe customized conv2d is useless.
+        return cvm.conv2d_forward(data, kernel, strides, padding, dilation, layout)            
+
     if layout == 'NCHW':
         _create_tuning_space(cfg, data, kernel, strides, padding, dilation, layout)
         if cfg.is_fallback:
