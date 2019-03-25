@@ -411,18 +411,17 @@ def quant_realize(symbol, params, graph, quant_flag):
                     msg, div.asnumpy(), shift_bits.asnumpy())
 
             sb_sym_name = div_sym_name.replace('_scale', '') + '_shift_bits'
-            sb_sym = nnvm.sym.Variable(sb_sym_name) #, shape=(1,))
+            if sb_sym_name in graph:
+                sb_sym = graph[sb_sym_name]
+            else:
+                sb_sym = nnvm.sym.Variable(sb_sym_name, shape=(1,))
+                graph[sb_sym_name] = sb_sym
 
-            # node = nnvm.sym.broadcast_right_shift(input_sym, sb_sym)
-            # params[sb_sym_name] = shift_bits
+                params[sb_sym_name] = shift_bits
+                added_params_name.append(sb_sym_name)
 
-            node = nnvm.sym.broadcast_div(input_sym, sb_sym)
-            params[sb_sym_name] = div
-
-            print (params[div_sym_name].asnumpy(), params[sb_sym_name].asnumpy())
-
-            added_params_name.append(sb_sym_name)
-            #  deleted_params_name.add(div_sym_name)
+            node = nnvm.sym.broadcast_right_shift(input_sym, sb_sym)
+            deleted_params_name.add(div_sym_name)
 
         graph[name] = node
 
@@ -443,7 +442,6 @@ def quant_realize(symbol, params, graph, quant_flag):
     for sym in _topo_sort(ret_sym):
         op_name = sym.attr('op_name')
         childs = sym.get_children()
-
         v = []
         if childs is not None:
             v = [(c.attr('name'), c.attr('op_name')) for c in childs]
@@ -466,9 +464,6 @@ def quant_realize(symbol, params, graph, quant_flag):
             assert all(flat.astype('int32').astype('float32') == flat), msg
             params_dtype[key] = dtype
             ret_params[key] = tvm.nd.array(value.astype(dtype).asnumpy())
-        else:
-            #  logger.debug("Unused keys: %s, %s", key, value.asnumpy().flatten()[:49])
-            pass
 
     for arg in args:
         if arg == 'data':

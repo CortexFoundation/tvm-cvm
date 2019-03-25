@@ -202,7 +202,8 @@ def test_nnvm_load(batch_size=10, iter_num=10):
         params[key] = tvm.nd.array(value.asnumpy().astype(use_dtype))
     with nnvm.compiler.build_config(opt_level=0): #, add_pass=["PrecomputePrune"]):
         deploy_graph, lib, params = nnvm.compiler.build(
-            nnvm_graph, target="cuda", shape={"data": in_shape},
+            #nnvm_graph, target="cuda", shape={"data": in_shape},
+            nnvm_sym, target="cuda", shape={"data": in_shape},
             params=params, dtype=use_dtype)
 
         with open("deploy.log", "w") as fout:
@@ -211,6 +212,7 @@ def test_nnvm_load(batch_size=10, iter_num=10):
     module = graph_runtime.create(deploy_graph, lib, tvm.gpu(1))
     param_bytes = nnvm.compiler.save_param_dict(params)
     module.load_params(param_bytes)
+
     out_shape = (1000,)
     qacc, total = 0, 0
     for i in range(iter_num):
