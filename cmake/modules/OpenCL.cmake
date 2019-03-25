@@ -1,4 +1,5 @@
 # OPENCL Module
+set(OpenCL_INCLUDE_DIR "/usr/local/cuda/include")
 find_package(OpenCL QUIET)
 
 if(OpenCL_FOUND)

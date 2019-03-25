@@ -2,6 +2,7 @@
 from __future__ import absolute_import
 import tvm
 from .. import tag
+from .. import cpp
 
 def dense_default(data, weight, bias=None):
     """The default implementation of dense in topi.
@@ -59,4 +60,6 @@ def dense(data, weight, bias=None):
     output : tvm.Tensor
         2-D with shape [batch, out_dim]
     """
-    return dense_default(data, weight, bias)
+#    return dense_default(data, weight, bias)
+    print("call cpp.nn.dense")
+    return cpp.nn.dense(data, weight, bias)
