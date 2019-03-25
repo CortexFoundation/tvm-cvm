@@ -28,7 +28,7 @@ def conv2d_w_shape(in_channel,
     return [out_channel, in_channel, filter_h, filter_w]
 
 
-def conv2d_output_shape(x_shape, 
+def conv2d_output_shape(x_shape,
                         w_shape,
                         pad_h = 0,
                         pad_w = 0,
@@ -111,8 +111,57 @@ def conv2d_forward(x, w, strides, padding, dilation, layout):
         oshape, [x, w],
         lambda ins, outs: _intrin.call_packed(
             "tvm.contrib.cvm.conv2d.forward",
-            padding[0], padding[1],
-            strides[0], strides[1],
-            dilation[0], dilation[1],
-            ins[0], ins[1], outs[0], layout
-        ), name="y", dtype='int32')
+            conv_mode,
+            tensor_format,
+            0,
+            pad_h,
+            pad_w,
+            stride_h,
+            stride_w,
+            dilation_h,
+            dilation_w,
+            ins[0],
+            ins[1],
+            outs[0]), name="y", dtype='int32')
+
+
+
+
+def dense(data,
+          weight,
+          bias=None):
+
+    """Create an extern op that compute 2D convolution with CVM
+
+    Parameters
+    ----------
+    data: Tensor
+        input data int8
+    weight: Tensor
+        input weight int8
+    bias: Tensor
+        input bias int32
+    Returns
+    -------
+    y: Tensor
+        The result tensor int32
+    """
+
+    oshape = list([data.shape[0], weight.shape[1]])
+    if bias is not None:
+        return _api.extern(
+            oshape, [data, weight, bias],
+            lambda ins, outs: _intrin.call_packed(
+                "tvm.contrib.cvm.dense.forward",
+                ins[0],
+                ins[1],
+                ins[2],
+                outs[0]), name="y", dtype='int32')
+    else:
+        return _api.extern(
+                oshape, [data, weight],
+                lambda ins, outs: _intrin.call_packed(
+                    "tvm.contrib.cvm.dense.forward",
+                    ins[0],
+                    ins[1],
+                    outs[0]), name="y", dtype='int32')
