@@ -69,7 +69,6 @@ inline tvm::Tensor dense(const tvm::Tensor& data,
       }, "tensor", kBroadcast);
   }
 
-  std::cout << "dense end" << std::endl;
   return matmul;
 }
 

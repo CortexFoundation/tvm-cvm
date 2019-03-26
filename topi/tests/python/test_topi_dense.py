@@ -50,7 +50,7 @@ def verify_dense(batch, in_dim, out_dim, use_bias=True):
         check_device(device)
 
 def test_dense():
-    verify_dense(1, 1024, 1000, use_bias=True)
+    verify_dense(1, 2**16, 1000, use_bias=True)
     verify_dense(1, 1024, 1000, use_bias=False)
 
     verify_dense(2, 1024, 1000, use_bias=True)

@@ -49,13 +49,11 @@ def verify_dense(batch, in_dim, out_dim, use_bias=True):
         check_device(device)
 
 def test_dense():
-    #print("use_bias is true")
-    #verify_dense(1, 1024, 1000, use_bias=True)
-    print("use_bias is false")
-    verify_dense(1, 1024, 1000, use_bias=False)
-    print("use_bias is true")
+    verify_dense(1, 1024, 1000, use_bias=True)
+    verify_dense(1, 2**16-2, 1000, use_bias=True)
+    verify_dense(1, 2**16-1, 1000, use_bias=True)
+#    verify_dense(1, 1024, 1000, use_bias=False)
     verify_dense(2, 1024, 1000, use_bias=True)
-
 
 if __name__ == "__main__":
     test_dense()

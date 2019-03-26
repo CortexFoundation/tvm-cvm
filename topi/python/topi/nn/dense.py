@@ -3,6 +3,7 @@ from __future__ import absolute_import
 import tvm
 from .. import tag
 from .. import cpp
+from verify import *
 
 def dense_default(data, weight, bias=None):
     """The default implementation of dense in topi.
@@ -25,6 +26,9 @@ def dense_default(data, weight, bias=None):
     """
     assert len(data.shape) == 2 and len(weight.shape) == 2, \
         "only support 2-dim dense"
+    ret = verify_dense(data, weight, bias)
+    assert ret.value == True, "dense verify failed"
+
     if bias is not None:
         assert len(bias.shape) == 1
     batch, in_dim = data.shape
@@ -60,6 +64,5 @@ def dense(data, weight, bias=None):
     output : tvm.Tensor
         2-D with shape [batch, out_dim]
     """
-#    return dense_default(data, weight, bias)
-    print("call cpp.nn.dense")
-    return cpp.nn.dense(data, weight, bias)
+    return dense_default(data, weight, bias)
+    #return cpp.nn.dense(data, weight, bias)
