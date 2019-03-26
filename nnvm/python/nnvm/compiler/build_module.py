@@ -18,6 +18,7 @@ OPT_PASS_LEVEL = {
     "OpFusion": 1,
     "FoldScaleAxis": 3,
     "AlterOpLayout": 3,
+    "OpQuantizationFuse": 4,
 }
 
 # List of optimization pass and level when switch on
@@ -178,6 +179,7 @@ def optimize(graph, shape, dtype="float32", layout=None):
     if cfg.pass_enabled("FoldScaleAxis"):
         graph = graph_attr.set_shape_inputs(graph, shape)
         graph = graph.apply(["InferShape", "FoldScaleAxis"])
+
     return graph
 
 
@@ -282,6 +284,11 @@ def build(graph, target=None, shape=None, dtype="float32",
 
         # Clear extra params without nodes.
         _remove_noref_params(params, graph)
+
+        # Fuse op for quantization
+        if cfg.pass_enabled("OpQuantizationFuse"):
+            graph, params = op_quant_fuse(graph, params)
+            shape, dtype = _update_shape_dtype(shape, dtype, params)
 
         # Precompute prune
         if params and cfg.pass_enabled("PrecomputePrune"):
@@ -406,6 +413,13 @@ def precompute_prune(graph, params):
     with tvm.build_config(auto_unroll_max_step=0):
         out_arrs = _run_graph(pre_graph, params)
     return graph, dict(zip(out_names, out_arrs))
+
+
+def op_quant_fuse(graph, params):
+    graph = graph if isinstance(graph, _graph.Graph) else _graph.create(graph)
+    graph._set_json_attr("quant_param_name_list", list(params.keys()), "list_str")
+    graph = graph.apply("OpQuantizationFuse")
+    op_quant_graph = graph_attr._move_out_graph(graph, "op_quant_graph")
 
 
 def initialize_variables(ishape, idtype):

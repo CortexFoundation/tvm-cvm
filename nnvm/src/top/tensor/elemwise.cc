@@ -179,6 +179,32 @@ NNVM_REGISTER_ELEMWISE_UNARY_OP(exp)
     };
 });
 
+// log2
+NNVM_REGISTER_ELEMWISE_UNARY_OP(log2)
+.describe(R"code(Returns the log input array, computed element-wise.
+
+.. math::
+   log2(x)
+
+)code" NNVM_ADD_FILELINE)
+.set_support_level(1)
+.set_attr<FTVMCompute>(
+  "FTVMCompute", [](const NodeAttrs& attrs,
+                    const Array<Tensor>& inputs,
+                    const Array<Tensor>& out_info) {
+      return Array<Tensor>{ topi::log(inputs[0]) };
+})
+.set_attr<FGradient>(
+  "FGradient", [](const NodePtr& n,
+                  const std::vector<NodeEntry>& ograds) {
+    // y = log(n0)
+    // grad_0 = grad_y / n0
+    return std::vector<NodeEntry>{
+      MakeNode("elemwise_div", n->attrs.name + "_grad_0",
+               {ograds[0], n->inputs[0]})
+    };
+});
+
 // log
 NNVM_REGISTER_ELEMWISE_UNARY_OP(log)
 .describe(R"code(Returns the log input array, computed element-wise.
@@ -366,7 +392,7 @@ NNVM_REGISTER_ELEMWISE_BINARY_OP(logical_and)
 .describe(R"code(Elementwise compute the logical AND
 
 )code")
-.set_support_level(1)
+.set_support_level(4)
 .set_attr<FTVMCompute>(
   "FTVMCompute", [](const NodeAttrs& attrs,
                     const Array<Tensor>& inputs,
@@ -378,7 +404,7 @@ NNVM_REGISTER_ELEMWISE_BINARY_OP(logical_or)
 .describe(R"code(Elementwise compute the logical OR
 
 )code")
-.set_support_level(1)
+.set_support_level(4)
 .set_attr<FTVMCompute>(
   "FTVMCompute", [](const NodeAttrs& attrs,
                     const Array<Tensor>& inputs,
@@ -413,7 +439,7 @@ NNVM_REGISTER_ELEMWISE_UNARY_OP(logical_not)
 .describe(R"code(Elementwise compute the logical NOT
 
 )code"  NNVM_ADD_FILELINE)
-.set_support_level(3)
+.set_support_level(4)
 .set_attr<FTVMCompute>(
   "FTVMCompute", [](const NodeAttrs& attrs,
                     const Array<Tensor>& inputs,

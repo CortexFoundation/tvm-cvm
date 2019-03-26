@@ -158,6 +158,20 @@ def abs(data):
     """
     return _make.abs(data)
 
+def sign(data):
+    """Compute element-wise absolute of data.
+
+    Parameters
+    ----------
+    data : relay.Expr
+        The input data
+
+    Returns
+    -------
+    result : relay.Expr
+        The computed result.
+    """
+    return _make.sign(data)
 
 def tanh(data):
     """Compute element-wise tanh of data.
@@ -189,6 +203,22 @@ def negative(data):
         The computed result.
     """
     return _make.negative(data)
+
+
+def logical_not(data):
+    """Compute element-wise logical not of data.
+
+    Parameters
+    ----------
+    data : relay.Expr
+        The input data
+
+    Returns
+    -------
+    result : relay.Expr
+        The computed result.
+    """
+    return _make.logical_not(data)
 
 
 def add(lhs, rhs):
@@ -305,6 +335,42 @@ def mod(lhs, rhs):
         The computed result.
     """
     return _make.mod(lhs, rhs)
+
+
+def logical_and(lhs, rhs):
+    """logical AND with numpy-style broadcasting.
+
+    Parameters
+    ----------
+    lhs : relay.Expr
+        The left hand side input data
+    rhs : relay.Expr
+        The right hand side input data
+
+    Returns
+    -------
+    result : relay.Expr
+        The computed result.
+    """
+    return _make.logical_and(lhs, rhs)
+
+
+def logical_or(lhs, rhs):
+    """logical OR with numpy-style broadcasting.
+
+    Parameters
+    ----------
+    lhs : relay.Expr
+        The left hand side input data
+    rhs : relay.Expr
+        The right hand side input data
+
+    Returns
+    -------
+    result : relay.Expr
+        The computed result.
+    """
+    return _make.logical_or(lhs, rhs)
 
 
 def equal(lhs, rhs):
@@ -661,3 +727,22 @@ def device_copy(data, src_dev, dst_dev):
         raise ValueError("dst_dev is expected to be the type of TVMContext or "
                          "str, but received %s" % (type(dst_dev)))
     return _make.device_copy(data, src_dev, dst_dev)
+
+
+def shape_of(data, dtype="int32"):
+    """Get shape of a tensor.
+
+    Parameters
+    ----------
+    data : tvm.relay.Expr
+        The input tensor.
+
+    dtype : str, optional
+        The target data type.
+
+    Returns
+    -------
+    result : tvm.relay.Expr
+        The shape tensor.
+    """
+    return _make.shape_of(data, dtype)
