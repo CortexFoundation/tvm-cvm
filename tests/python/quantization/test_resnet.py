@@ -179,7 +179,7 @@ def test_nnvm_load(batch_size=10, iter_num=10):
     logger = logging.getLogger("log.test.nnvm")
     logger.info("=== Log Test NNVM ===")
 
-    target = "opencl"
+    target = "cuda"
     ctx = tvm.context(target, 0)
 
     load_symbol_fname, load_params_fname = get_dump_fname("gluon.quant")
