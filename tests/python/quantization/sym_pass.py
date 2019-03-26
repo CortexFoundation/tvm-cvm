@@ -332,11 +332,13 @@ IdentitySymbols = {
 def quant_realize(symbol, params, graph, quant_flag):
     """Transform Sim-Quant(Float32 Simulate Int8) to Int8-Inference Graph
         Works:
-        1) Remove floor layer in Int8 graph
+        *) Remove floor layer in Int8 graph
         *) Cast _*_scalar op to Int32
-        2) Remove unused params in graph
-        2) Check&cast params type from Float32 to Int8|Int32
-        3) Check supported op in cvm engine
+        *) Remove unused params in graph
+        *) Check&cast params type from Float32 to Int8|Int32
+        *) Check supported op in cvm engine
+        *) Cast broadcast_div to broadcast_right_shift
+
 
     Parameters:
     ===========

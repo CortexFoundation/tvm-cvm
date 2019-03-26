@@ -179,6 +179,9 @@ def test_nnvm_load(batch_size=10, iter_num=10):
     logger = logging.getLogger("log.test.nnvm")
     logger.info("=== Log Test NNVM ===")
 
+    target = "opencl"
+    ctx = tvm.context(target, 0)
+
     load_symbol_fname, load_params_fname = get_dump_fname("gluon.quant")
 
     in_shape = (batch_size, 3, 224, 224)
@@ -191,6 +194,7 @@ def test_nnvm_load(batch_size=10, iter_num=10):
     nnvm_sym, _ = nnvm.frontend.from_mxnet(sym)
 
     nnvm_sym, params = quant_realize(nnvm_sym, params, {}, quant_flag)
+    # , ctx=tvm.context("opencl", 0))
 
     nnvm_graph = nnvm.graph.create(nnvm_sym)
     save_symbol_file, _ = get_dump_fname("nnvm.realize")
@@ -199,17 +203,16 @@ def test_nnvm_load(batch_size=10, iter_num=10):
 
     use_dtype = "int32"
     for key, value in list(params.items()):
-        params[key] = tvm.nd.array(value.asnumpy().astype(use_dtype))
+        params[key] = tvm.nd.array(value.asnumpy().astype(use_dtype), ctx)
     with nnvm.compiler.build_config(opt_level=0): #, add_pass=["PrecomputePrune"]):
         deploy_graph, lib, params = nnvm.compiler.build(
-            #nnvm_graph, target="cuda", shape={"data": in_shape},
-            nnvm_sym, target="cuda", shape={"data": in_shape},
+            nnvm_sym, target=target, shape={"data": in_shape},
             params=params, dtype=use_dtype)
 
         with open("deploy.log", "w") as fout:
             fout.write(deploy_graph.ir())
 
-    module = graph_runtime.create(deploy_graph, lib, tvm.gpu(1))
+    module = graph_runtime.create(deploy_graph, lib, ctx)
     param_bytes = nnvm.compiler.save_param_dict(params)
     module.load_params(param_bytes)
 
@@ -217,6 +220,7 @@ def test_nnvm_load(batch_size=10, iter_num=10):
     qacc, total = 0, 0
     for i in range(iter_num):
         qimage_data, _ = quant_helper(calib_data.data[0])
+        qimage_data = tvm.nd.array(qimage_data.asnumpy(), ctx)
 
         module.run(data=qimage_data.asnumpy())
         qres = module.get_output(0).asnumpy()
@@ -262,7 +266,6 @@ if __name__ == "__main__":
     #  gluon_quant_resnet(quant_flag, batch_size=10, iter_num=10,
             #  need_requant=False)
 
-    # mxnet_realize(quant_flag)
     test_nnvm_load(batch_size=10, iter_num=10)
 
 
