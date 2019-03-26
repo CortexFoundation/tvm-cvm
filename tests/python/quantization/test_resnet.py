@@ -62,7 +62,7 @@ def gluon_quant_resnet(quant_flag, batch_size=10,
         resnet.save_graph(mx.gpu())
 
     inputs = mx.sym.var('data')
-    ctx = mx.gpu(1)
+    ctx = mx.cpu(0)
 
     logger.info("load dataset")
     data_iter = load_dataset(batch_size)
@@ -253,11 +253,11 @@ if __name__ == "__main__":
             log_level=logging.DEBUG,
             disabled_layers=["relu", "pool0", "activation"])
 
-    #  gluon_quant_resnet(quant_flag, batch_size=10, iter_num=10,
-            #  need_requant=False)
+    gluon_quant_resnet(quant_flag, batch_size=10, iter_num=10,
+            need_requant=False)
 
-    mxnet_realize(quant_flag)
-    test_nnvm_load(batch_size=10, iter_num=10)
+#    mxnet_realize(quant_flag)
+#    test_nnvm_load(batch_size=10, iter_num=10)
 
 
 
