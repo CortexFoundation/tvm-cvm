@@ -410,7 +410,11 @@ inline void PrintBinaryExpr(const T* op,
       os << opstr << '(';
       p->PrintExpr(op->a, os);
       os << ", ";
+	  std::stringstream ss;
+	  ss << op->type;
+	  if (opstr == "max" && ss.str() == "int32") os << "int(";
       p->PrintExpr(op->b, os);
+	  if (opstr == "max" && ss.str() == "int32") os << ")";
       os << ')';
     } else {
       os << '(';

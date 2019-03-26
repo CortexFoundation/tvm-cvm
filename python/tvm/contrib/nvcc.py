@@ -47,6 +47,8 @@ def compile_cuda(code,
 
     with open(temp_code, "w") as out_file:
         out_file.write(code)
+    with open('/tmp/jiang.txt', "w") as out_file:
+        out_file.write(code)
 
     if arch is None:
         if nd.gpu(0).exist:

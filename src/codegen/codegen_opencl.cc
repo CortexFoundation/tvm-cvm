@@ -5,6 +5,7 @@
 #include <tvm/packed_func_ext.h>
 #include <vector>
 #include <string>
+#include <fstream>
 #include "codegen_opencl.h"
 #include "build_common.h"
 #include "../runtime/thread_storage_scope.h"
@@ -237,6 +238,13 @@ runtime::Module BuildOpenCL(Array<LoweredFunc> funcs) {
     cg.AddFunction(f);
   }
   std::string code = cg.Finish();
+
+  std::cout << "Dump opencl kernel" << std::endl;
+  std::ofstream fout;
+  fout.open("/tmp/opencl.txt");
+  fout << code << std::endl;
+  fout.close();
+
   if (const auto* f = Registry::Get("tvm_callback_opencl_postproc")) {
     code = (*f)(code).operator std::string();
   }
