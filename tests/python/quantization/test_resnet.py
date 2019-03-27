@@ -191,7 +191,7 @@ def test_nnvm_load(batch_size=10, iter_num=10):
             params=params, dtype=use_dtype)
 
         with open("deploy.log", "w") as fout:
-            fout.write(deploy_graph.ir())
+            fout.write(deploy_graph.json())
 
     module = graph_runtime.create(deploy_graph, lib, ctx)
     param_bytes = nnvm.compiler.save_param_dict(params)
