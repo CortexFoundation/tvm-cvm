@@ -30,25 +30,6 @@ def get_dump_fname(suffix="quant"):
     return '%s.%s'%(resnet.SYMBOL_FILE, suffix), \
         '%s.%s'%(resnet.PARAMS_FILE, suffix)
 
-def mxnet_realize(quant_flag):
-    logger = logging.getLogger("log.quant.main.mxnet")
-
-    load_symbol_file, load_params_file = get_dump_fname("gluon.quant")
-
-    inputs = mx.sym.var('data')
-    ctx = mx.gpu(1)
-
-    mxnet_symbol = mx.sym.load(load_symbol_file)
-    params = nd.load(load_params_file)
-
-    #  sym, params = quant_realize(mxnet_symbol, params, {}, quant_flag)
-
-    save_symbol_file, save_params_file = get_dump_fname("post.quant")
-    nd.save(save_params_file, params)
-    print (params.keys())
-    with open(save_symbol_file, 'w') as fout:
-        fout.write(sym.tojson())
-
 def gluon_quant_resnet(quant_flag, batch_size=10,
         iter_num=10, need_requant=False):
     logger = logging.getLogger("log.quant.main.gluon")

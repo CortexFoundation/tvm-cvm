@@ -1,128 +1,14 @@
 import logging
-import json
-import math
-import numpy as np
-from enum import Enum
-
-import quant_pass as qpass
 
 import mxnet as mx
-from mxnet.symbol import _internal
-from mxnet import symbol as _sym
-
 import nnvm as nnvm
 import tvm
+
+from sym_utils import *
 
 INT32_MIN, INT32_MAX = -2147483647, 2147483647
 INT8_MIN, INT8_MAX = -127, 127
 INT8_TYPE, INT32_TYPE= ('int8', 'int32')
-
-
-class OpExt():
-    def __init__(self, op_name='null',
-            in_types=[], out_types=[]):
-        self.op_name = op_name
-        self.in_types = in_types
-        self.out_types = out_types
-
-
-class _GraphHelper(object):
-    def __init__(self, graph={}, gtype=_sym.Symbol):
-        self.graph = graph
-        self.gtype = gtype
-
-    def _get_name(self, name):
-        if isinstance(name, self.gtype):
-            name = name.attr('name')
-
-        assert isinstance(name, str)
-        return name
-
-    def get_node(self, sym, default=None):
-        name = self._get_name(sym)
-
-        if name not in self.graph:
-            if default is None:
-                assert False, "op:%s haven't been processed in graph"%name
-            else:
-                assert isinstance(default, self.gtype)
-                self.graph[name] = default
-
-        return self.graph[name]
-
-    def set_node(self, sym, default):
-        name = self._get_name(sym)
-
-        assert name not in self.graph
-
-        self.graph[name] = default
-        return default
-
-def _topo_sort(symbol):
-    """Sort all symbols in the mxnet graph in topological order.
-
-    Parameters
-    ----------
-    symbol : mxnet.sym.Symbol
-
-    Returns:
-    -------
-    list
-        List of mxnet symbol
-    """
-    queue = []
-    symbol_map = {}
-    deps = {}
-    dep_cnts = {}
-    for s in symbol:
-        symbol_map[s.attr('name')] = s
-        queue.append(s)
-    while queue:
-        sym = queue.pop(0)
-        name = sym.attr('name')
-        childs = sym.get_children()
-        if childs is None:
-            dep_cnts[name] = 0
-        else:
-            dep_cnts[name] = len({c.attr('name') for c in childs})
-            for child in childs:
-                child_name = child.attr('name')
-                if child_name not in deps:
-                    deps[child_name] = set()
-                deps[child_name].add(name)
-                if child_name not in symbol_map:
-                    symbol_map[child_name] = child
-                    queue.append(child)
-    order = []
-    while dep_cnts:
-        remove = []
-        for name in dep_cnts:
-            if dep_cnts[name] == 0:
-                order.append(symbol_map[name])
-                remove.append(name)
-                if name in deps:
-                    for other in deps[name]:
-                        dep_cnts[other] -= 1
-        for name in remove:
-            del dep_cnts[name]
-    return order
-
-def _get_mxnet_op(op_name):
-    try:
-        op = getattr(_internal, op_name)
-    except:
-        op = getattr(_sym, op_name)
-
-    if not op:
-        raise RuntimeError("Unable to map op_name {} to mxnet.sym".format(op_name))
-    return op
-
-def _get_nnvm_op(op_name):
-    op = getattr(nnvm.sym, op_name)
-
-    if not op:
-        raise RuntimeError("Unable to map op_name {} to nnvm.sym".format(op_name))
-    return op
 
 def fold_cond(symbol, params, graph, quant_flag):
     logger = logging.getLogger("log.quant.fold.condition")
@@ -262,18 +148,26 @@ Flatten:
     In[Int32] -> Out[Int32]
 
 # op for requant
-{broadcast_div}:
-    In[Int32] / P_scale[Int32] -> Out[Int32]
-broadcast_mul|_mul_scalar:
+broadcast_right_shift:
+    assert P_shift_bits[Int8] >= 0
+    In[Int32] >> P_shift_bits[Int8] -> Out[Int32]
+broadcast_mul:
     In[Int32] * P_scale[Int32] -> Out[Int32]
+broadcast_add:
+    In[Int32] + P_scale[Int32] -> Out[Int32]
+
+ClipInt: the only operator to forward Int32 input to Int8 output.
+    In[Int32] -> Out[Int8]
+
+# optional
+broadcast_div:
+    In[Int32] / P_scale[Int32] -> Out[Int32]
+_mul_scalar:
     In[Int32] * C_scale[Int32] -> Out[Int32]
 _div_scalar:
     In[Int32] / C_scale[Int32] -> Out[Int32]
 _plus_scalar:
     In[Int32] + C_scale[Int32] -> Out[Int32]
-
-ClipInt: the only operator to forward Int32 input to Int8 output.
-    In[Int32] -> Out[Int8]
 
 """
 _identity_ext = {
@@ -413,25 +307,8 @@ def quant_realize(symbol, params, graph, quant_flag):
     # params
     ops = set()
     for sym in _topo_sort(ret_sym):
-        # name = sym.attr('name')
         op_name = sym.attr('op_name')
-        # childs = sym.get_children()
         ops.add(op_name)
-
-        # if childs is None:
-        #     continue
-
-        # params_name = []
-        # for child in childs:
-        #     child_name = child.attr('name')
-        #     child_op_name = child.attr('op_name')
-        #     if child_name != 'data' and child_op_name == 'null':
-        #         params_name.append(child_name)
-
-        # op_ext = _identity_ext[op_name]
-        # for name in params_name:
-        #     assert name in params, 'arg:%s in graph not exists params'%arg
-
 
     args = ret_sym.list_input_names()
     ret_params, params_dtype = {}, {}
