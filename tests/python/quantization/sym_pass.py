@@ -26,7 +26,7 @@ def fold_cond(symbol, params, graph, quant_flag):
 
         # update inputs layer symbol
         if childs is not None:
-            childs = [gh.get_node(child) for child in childs]
+            childs = [gh.get_node(childs[idx]) for idx, child in enumerate(childs.list_outputs())]
             # update childs inputs
             op = _get_mxnet_op(op_name)
             node = op(*childs, **attr)
@@ -40,6 +40,7 @@ def fold_cond(symbol, params, graph, quant_flag):
             # cond_func, then_func, else_func = sym.attr('subgraph')
             sb_param_idx, lesser_scalar_idx, others = None, None, []
             for idx, child in enumerate(childs):
+                child = childs[idx]
                 child_op_name = child.attr('op_name')
                 if child_op_name == 'null':
                     assert sb_param_idx is None

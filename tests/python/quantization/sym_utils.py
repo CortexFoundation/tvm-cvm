@@ -72,8 +72,10 @@ def _topo_sort(symbol):
         if childs is None:
             dep_cnts[name] = 0
         else:
-            dep_cnts[name] = len({c.attr('name') for c in childs})
-            for child in childs:
+            childs_ = (childs) if isinstance(childs, nnvm.symbol.Symbol) else (childs.list_outputs())
+            dep_cnts[name] = len({childs[idx].attr('name') for idx, c  in enumerate(childs_)})
+            for idx, _  in enumerate(childs_):
+                child = childs[idx]
                 child_name = child.attr('name')
                 if child_name not in deps:
                     deps[child_name] = set()

@@ -243,10 +243,10 @@ if __name__ == "__main__":
     quant_flag = QuantFlag(is_fuse_bn=True, calib_mode=CalibMode.NAIVE,
             log_level=logging.DEBUG,
             disabled_layers=["relu", "pool0", "activation"])
+    # enable quantization
+    if True:
+        gluon_quant_resnet(quant_flag, batch_size=16, iter_num=10, need_requant=False)
 
-    #  gluon_quant_resnet(quant_flag, batch_size=10, iter_num=10,
-            #  need_requant=False)
-
-    test_nnvm_load(batch_size=10, iter_num=10)
+    test_nnvm_load(batch_size=16, iter_num=10)
 
 
