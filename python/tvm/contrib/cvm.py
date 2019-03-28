@@ -77,7 +77,7 @@ def conv2d_forward(x, w, strides = [1, 1]):
         The result tensor
     """
 
-    [stride_h, stride_w] = strides 
+    [stride_h, stride_w] = strides
     oshape = conv2d_output_shape(list(x.shape), list(w.shape), stride_h, stride_w)
 
     return _api.extern(
@@ -113,8 +113,7 @@ def dense(data,
         The result tensor int32
     """
 
-    oshape = list([data.shape[0], weight.shape[1]])
-    print(data.shape, weight.shape, oshape)
+    oshape = list([data.shape[0], weight.shape[0]])
     if bias is not None:
         return _api.extern(
             oshape, [data, weight, bias],
