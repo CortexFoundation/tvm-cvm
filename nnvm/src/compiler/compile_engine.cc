@@ -220,7 +220,7 @@ class CompileEngine {
           if ((as_const_int(inferred_tensor->shape[j])) &&
               (as_const_int(computed_tensor->shape[j])))
             CHECK_EQ((*as_const_int(inferred_tensor->shape[j])),
-                     (*as_const_int(computed_tensor->shape[j]))) << inode.source->op()->name;
+                     (*as_const_int(computed_tensor->shape[j]))) << inode.source->op()->name << j;
         }
       }
 
