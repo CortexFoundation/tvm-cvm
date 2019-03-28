@@ -14,7 +14,7 @@ def test_dense(use_bias=True):
     k = tvm.var("k")
     n = tvm.var("n")
     data = tvm.placeholder((m,k), dtype=inType, name='data')
-    weight = tvm.placeholder((k,n), dtype=inType, name='weight')
+    weight = tvm.placeholder((n,k), dtype=inType, name='weight')
     bias = tvm.placeholder((n,), dtype=outType, name='bias')
     if use_bias :
         out = cvm.dense(data, weight, bias)
@@ -33,14 +33,14 @@ def test_dense(use_bias=True):
         k = 64
         n = 1024
         d = tvm.nd.array(np.random.randint(low=-128, high=127, size=(m,k)).astype(data.dtype), ctx)
-        w = tvm.nd.array(np.random.randint(low=-128, high=127, size=(k,n)).astype(weight.dtype), ctx)
+        w = tvm.nd.array(np.random.randint(low=-128, high=127, size=(n,k)).astype(weight.dtype), ctx)
         b = tvm.nd.array(np.random.randint(low=-128, high=127, size=(n,)).astype(bias.dtype), ctx)
         o = tvm.nd.array(np.zeros((m,n), outType), ctx)
         if use_bias:
             f(d, w, b, o)
         else:
             f(d, w, o)
-        answer = np.dot(d.asnumpy().astype(o.dtype), w.asnumpy().astype(o.dtype))
+        answer = np.dot(d.asnumpy().astype(o.dtype), w.asnumpy().astype(o.dtype).T)
         if use_bias:
             answer += b.asnumpy()
         tvm.testing.assert_allclose(o.asnumpy(), answer)
