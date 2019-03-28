@@ -300,7 +300,24 @@ inline Expr MaxOp(Expr source, Array<IterVar> axis) {
 inline Expr ProdOp(Expr source, Array<IterVar> axis) {
   return tvm::prod(source, axis);  // NOLINT(*)
 }
-
+/*! \brief Wrap tvm::sum to ensure we get the correct overload */
+inline Expr SumOp(Expr source, Array<IterVar> axis) {
+  return tvm::sum(tvm::cast(tvm::Int(32), source), axis);
+//  if (source.type().is_int() && source.type().bits() < 32) {
+//    return tvm::cast(tvm::Int(32), tvm::sum(source, axis));
+//  } else {
+//    return tvm::sum(source, axis);  // NOLINT(*)
+//  }
+}
+/*
+inline Tensor cast(const Tensor& x,
+                     std::string name = "tensor",
+                     std::string tag = kElementWise) {
+  return compute(x->shape, [&](const Array<Var>& i) {
+      return ::tvm::cast(tvm::Int(32), x(i));
+    }, name, tag);
+}
+*/
 /*!
 * \brief Creates an operation that sums array elements over a given axis
 *
@@ -318,7 +335,7 @@ inline Tensor sum(const Tensor& data,
                   const Array<Integer>& axis,
                   bool keepdims = false,
                   bool atleast1d = false) {
-  return CommReduce(data, axis, tvm::sum, keepdims, atleast1d);
+  return CommReduce(data, axis, SumOp, keepdims, atleast1d);
 }
 
 inline Tensor collapse_sum(const Tensor& data, Array<Expr> target_shape) {

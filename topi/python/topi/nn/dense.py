@@ -1,7 +1,9 @@
 """TVM operator fully connected compute."""
 from __future__ import absolute_import
 import tvm
+from tvm.contrib import cvm
 from .. import tag
+from .. import math
 
 def dense_default(data, weight, bias=None):
     """The default implementation of dense in topi.
@@ -30,13 +32,14 @@ def dense_default(data, weight, bias=None):
     out_dim, _ = weight.shape
     k = tvm.reduce_axis((0, in_dim), name='k')
     matmul = tvm.compute((batch, out_dim), \
-                         lambda i, j: tvm.sum(data[i, k] * weight[j, k], axis=k), \
+                         lambda i, j: tvm.sum(data[i, k].astype('int32') * weight[j, k].astype('int32'), axis=k), \
                          tag='dense')
     if bias is not None:
         matmul = tvm.compute((batch, out_dim), \
-                             lambda i, j: matmul[i, j] + bias[j], \
+                             lambda i, j: matmul[i, j] + bias[j].astype('int32'), \
                              tag=tag.BROADCAST)
-    return matmul
+    print(matmul)
+    return math.cast(matmul, 'int32')
 
 
 @tvm.target.override_native_generic_func("dense")
@@ -59,4 +62,9 @@ def dense(data, weight, bias=None):
     output : tvm.Tensor
         2-D with shape [batch, out_dim]
     """
+    print('use dense')
+    target = tvm.target.current_target()
+    if "cvm" in target.libs:
+        # check type here.
+        return cvm.dense(data, weight)
     return dense_default(data, weight, bias)

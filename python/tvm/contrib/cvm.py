@@ -114,6 +114,7 @@ def dense(data,
     """
 
     oshape = list([data.shape[0], weight.shape[1]])
+    print(data.shape, weight.shape, oshape)
     if bias is not None:
         return _api.extern(
             oshape, [data, weight, bias],
