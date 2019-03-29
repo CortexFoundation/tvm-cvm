@@ -11,9 +11,11 @@
 #include "topi/detail/broadcast.h"
 #include "topi/detail/constant_utils.h"
 #include "topi/tags.h"
+#include "tvm/ir.h"
+#include "tvm/tvm.h"
 
 namespace topi {
-
+using namespace tvm;
 /*!
  * \brief Creates an operation that broadcasts a tensor into a compatible
  * shape according to numpy's rules
@@ -135,6 +137,7 @@ TOPI_DEFINE_OP_OVERLOAD(operator||, logical_or);
  */
 TOPI_DEFINE_BCAST_OP(add, { return a.type().is_int() ? tvm::cast(tvm::Int(32), a) + tvm::cast(tvm::Int(32), b) : a + b; });
 TOPI_DEFINE_OP_OVERLOAD(operator+, add);
+
 
 /*!
  * \fn subtract
@@ -259,6 +262,28 @@ TOPI_DEFINE_OP_OVERLOAD(operator<<, left_shift);
 TOPI_DEFINE_BCAST_OP(right_shift, { return (a.type().is_int() && b.type().is_int()) ? (tvm::cast(tvm::Int(32), a) >> tvm::cast(tvm::Int(32), b)) : (a >> b); });
 TOPI_DEFINE_OP_OVERLOAD(operator>>, right_shift);
 
+/*!
+ * \fn cvm_left_shift, only accept int input
+ *
+ * \brief a << b
+ * \brief b must between range 0 and 8
+ */
+TOPI_DEFINE_BCAST_OP(cvm_left_shift, {
+            Expr clipA = tvm::max(tvm::min(a, 127), -127);
+            Expr leftA = tvm::cast(tvm::Int(32), clipA) << b;
+            return tvm::max(tvm::min(leftA, 127), -127);
+        });
+/*!
+ * \fn cvm_right_shift
+ *
+ * \brief a >> b
+ * \brief b must between range 1 and 8
+ *
+ */
+TOPI_DEFINE_BCAST_OP(cvm_right_shift, {
+            Expr rightA = ((a >> (b-1)) + 1 ) >> 1;
+            return tvm::max(tvm::min(rightA, 127), -127);
+        });
 /*!
  * \fn greater
  * \brief Compute (A > B) with auto-broadcasting.
