@@ -42,22 +42,22 @@ TVM_REGISTER_GLOBAL("tvm.contrib.cvm.dense.forward")
 
     int32_t *out = argsSize == 4 ? (int32_t*)(d->data) : (int32_t*)(c->data);
 
-    CHECK_EQ(data_w, weight_h) << "data width should equal weight height";
+    CHECK_EQ(data_w, weight_w) << "data width should equal weight height";
 
     for(int oh = 0; oh < data_h; oh++){
-        for(int ow = 0; ow < weight_w; ow++){
+        for(int ow = 0; ow < weight_h; ow++){
             int32_t sum = 0;
             for(int k = 0; k < data_w; k++){
-                sum += static_cast<int32_t>(data[oh * data_w + k]) * weight[k * weight_w + ow];
+                sum += static_cast<int32_t>(data[oh * data_w + k]) * weight[ow * weight_w + k];
             }
-            out[oh * weight_w + ow] = sum;
+            out[oh * weight_h + ow] = sum;
         }
     }
 
     if(bias_l > 0){
         for(int i = 0; i < data_h; i++){
-            for(int j = 0; j < weight_w; j++){
-                out[i *weight_w + j] += bias[j];
+            for(int j = 0; j < weight_h; j++){
+                out[i *weight_h + j] += bias[j];
             }
         }
     }

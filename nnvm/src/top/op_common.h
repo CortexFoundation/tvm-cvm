@@ -117,7 +117,7 @@ inline bool type_assign(int *y, const int& x) {
     *y = x;
     return true;
   } else if (*y != x && x != -1) {
-    return false;
+    return true;
   }
   return true;
 }

@@ -179,7 +179,7 @@ def test_nnvm_load(batch_size=10, iter_num=10):
     logger = logging.getLogger("log.test.nnvm")
     logger.info("=== Log Test NNVM ===")
 
-    target = "cuda"
+    target = "llvm -mcpu=core-avx2 -libs=cvm"
     ctx = tvm.context(target, 0)
 
     load_symbol_fname, load_params_fname = get_dump_fname("gluon.quant")
@@ -204,17 +204,23 @@ def test_nnvm_load(batch_size=10, iter_num=10):
     use_dtype = "int32"
 #    for key, value in list(params.items()):
 #        params[key] = tvm.nd.array(value.asnumpy().astype(use_dtype), ctx)
-    with nnvm.compiler.build_config(opt_level=0): #, add_pass=["PrecomputePrune"]):
+    with nnvm.compiler.build_config(opt_level=0): 
+#, add_pass=["PrecomputePrune"]):
         deploy_graph, lib, params = nnvm.compiler.build(
-            nnvm_sym, target=target, shape={"data": in_shape},
+            nnvm_sym, target=target,
+            shape={"data": in_shape},
             params=params, dtype={})
+        ret = deploy_graph.apply('SaveJSON')
+        graph_str = ret.json_attr('json')
 
+        with open("graph_str.log", "w") as fout:
+            fout.write(graph_str)
         with open("deploy.log", "w") as fout:
             fout.write(deploy_graph.ir())
 
     module = graph_runtime.create(deploy_graph, lib, ctx)
     param_bytes = nnvm.compiler.save_param_dict(params)
-    module.load_params(param_bytes)
+    module.set_input(**params)
 
     out_shape = (1000,)
     qacc, total = 0, 0
