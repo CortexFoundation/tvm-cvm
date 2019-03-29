@@ -113,7 +113,7 @@ class GlobalAvgPool2D(nn.GlobalAvgPool2D):
                 # out.max().asnumpy(), out.min().asnumpy(),
                 # (x.shape[2]*x.shape[3]))
 
-        out = F.reshape(out, (0, 0, 1, 1))
+        # out = F.reshape(out, (0, 0, 1, 1))
         return out
 
 # def conv2d_quant(channels, kernel_size, stride, padding, use_bias, in_channels):

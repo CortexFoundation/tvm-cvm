@@ -38,6 +38,7 @@ class CodeGenCUDA final : public CodeGenC {
   void VisitExpr_(const Ramp* op, std::ostream& os) final; // NOLINT(*)
   void VisitExpr_(const Broadcast* op, std::ostream& os) final; // NOLINT(*)
   void VisitExpr_(const FloatImm *op, std::ostream& os) final;
+  void VisitExpr_(const Max *op, std::ostream& os) final;
   void VisitStmt_(const Evaluate *op) final;
 
  private:

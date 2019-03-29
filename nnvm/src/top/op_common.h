@@ -9,6 +9,7 @@
 #include <dmlc/logging.h>
 #include <dmlc/parameter.h>
 #include <nnvm/top/tensor.h>
+#include <nnvm/node.h>
 #include <string>
 #include <vector>
 #include <utility>

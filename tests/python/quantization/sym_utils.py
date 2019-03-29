@@ -3,7 +3,13 @@ from mxnet import symbol as _sym
 import nnvm as nnvm
 
 __all__ = ["_topo_sort", "_GraphHelper", "OpExt",
-        "_get_mxnet_op", "_get_nnvm_op"]
+        "_get_mxnet_op", "_get_nnvm_op", "_identity_ext",
+        "INT8_MIN", "INT8_MAX", "INT32_MIN", "INT32_MAX"]
+
+INT32_MIN, INT32_MAX = -2147483647, 2147483647
+INT8_MIN, INT8_MAX = -127, 127
+
+INT8_TYPE, INT32_TYPE= ('int8', 'int32')
 
 
 class OpExt():
@@ -114,3 +120,84 @@ def _get_nnvm_op(op_name):
         raise RuntimeError("Unable to map op_name {} to nnvm.sym".format(op_name))
     return op
 
+
+"""Deterministic Op Description
+The specific op for quantization with Int8 or Int32, more details
+described as belows:
+
+In: inputs variable, maybe followed with int counter.
+Out: output variable, maybe followed with int counter.
+P_X: params variable, load from params file.
+C_X: constant variable, fixed in graph.
+
+Activation: specific indicate relu.
+    In[Int8] -> Out[Int8]
+Pooling: sepcific indicate max pool.
+    In[Int8] -> Out[Int8]
+Convolution:
+    In[Int8] * P_weight[Int8] + P_bias[Int32] -> Out[Int32]
+FullyConnected|Dense:
+    In[Int8] * P_weight[Int8] + P_bias[Int32] -> Out[Int32]
+elemwise_add:
+    In1[Int8] + In2[Int8] -> Out[Int32]
+sum: reduce op over specific axis, sum(data, axis=[1, 2])
+    In[Int8] -> Out[Int32]
+
+Reshape:
+    In[Int32] -> Out[Int32]
+Flatten:
+    In[Int32] -> Out[Int32]
+
+broadcast_add:
+    In1[Int32] + In2[Int32] -> Out[Int64]
+    In1[Int8]  + In2[Int8]  -> Out[Int32]
+broadcast_sub:
+    In1[Int32] + In2[Int32] -> Out[Int64]
+    In1[Int8]  - In2[Int8]  -> Out[Int32]
+broadcast_mul:
+    In1[Int32] * In2[Int32] -> Out[Int64]
+    In1[Int8]  * In2[Int8]  -> Out[Int32]
+broadcast_div:
+    In1[Int32] / In2[Int32] -> Out[Int32]
+    In1[Int8]  / In2[Int8]  -> Out[Int8]
+
+_plus_scalar:
+    In[Int32] + C_scale[Int32] -> Out[Int64]
+_sub_scalar:
+    In[Int32] - C_scale[Int32] -> Out[Int64]
+_mul_scalar:
+    In[Int32] * C_scale[Int32] -> Out[Int64]
+_div_scalar:
+    In[Int32] / C_scale[Int32] -> Out[Int32]
+
+# Requant Op
+cvm_right_shift:
+    assert P_shift_bits > 0
+    In[Int8|Int32|Int64] >> P_shift_bits[Int8] -> Out[Int8]
+cvm_left_shift:
+    assert 0 <= P_shift_bits < 24
+    In[Int8|Int32|Int64] << P_shift_bits[Int8] -> Out[Int8]
+
+"""
+_identity_ext = {
+    'null': OpExt(out_types=[INT8_TYPE, INT32_TYPE]),
+
+    'relu': OpExt('relu', [INT8_TYPE], [INT8_TYPE]),
+    'max_pool2d': OpExt('max_pool2d', [INT8_TYPE], [INT8_TYPE]),
+
+    'conv2d': OpExt('conv2d', [INT8_TYPE], [INT32_TYPE]),
+    'dense': OpExt('dense', [INT8_TYPE], [INT32_TYPE]),
+    'sum': OpExt('sum', [INT8_TYPE], [INT32_TYPE]),
+    'elemwise_add': OpExt('elemwise_add', [INT8_TYPE], [INT32_TYPE]),
+
+    'reshape': OpExt('reshape', [INT8_TYPE, INT32_TYPE], [INT8_TYPE, INT32_TYPE]),
+    'flatten': OpExt('flatten', [INT8_TYPE, INT32_TYPE], [INT8_TYPE, INT32_TYPE]),
+
+    'broadcast_right_shift': OpExt('broadcast_right_shift', [INT32_TYPE], [INT8_TYPE]),
+    'broadcast_left_shift': OpExt('broadcast_left_shift', [INT32_TYPE], [INT8_TYPE]),
+    'broadcast_div': OpExt('broadcast_div', [INT32_TYPE], [INT32_TYPE]),
+    'broadcast_mul': OpExt('broadcast_mul', [INT32_TYPE], [INT32_TYPE]),
+    'broadcast_add': OpExt('broadcast_mul', [INT32_TYPE], [INT32_TYPE]),
+
+    'clip': OpExt('clip', [INT32_TYPE], [INT8_TYPE]),
+}

@@ -6,10 +6,6 @@ import tvm
 
 from sym_utils import *
 
-INT32_MIN, INT32_MAX = -2147483647, 2147483647
-INT8_MIN, INT8_MAX = -127, 127
-INT8_TYPE, INT32_TYPE= ('int8', 'int32')
-
 def fold_cond(symbol, params, graph, quant_flag):
     logger = logging.getLogger("log.quant.fold.condition")
     logger.setLevel(quant_flag.log_level)
@@ -119,81 +115,7 @@ def fold_cond(symbol, params, graph, quant_flag):
 
     return ret_sym, params
 
-
-"""Deterministic Op Description
-The specific op for quantization with Int8 or Int32, more details
-described as belows:
-
-In: inputs variable, maybe followed with int counter.
-Out: output variable, maybe followed with int counter.
-P_X: params variable, load from params file.
-C_X: constant variable, fixed in graph.
-
-Activation: specific indicate relu.
-    In[Int8] -> Out[Int8]
-Pooling: sepcific indicate max pool.
-    In[Int8] -> Out[Int8]
-Convolution:
-    In[Int8] * P_weight[Int8] + P_bias[Int32] -> Out[Int32]
-FullyConnected|Dense:
-    In[Int8] * P_weight[Int8] + P_bias[Int32] -> Out[Int32]
-elemwise_add: forward with Int8 input, which means the previous layer
-must be ClipInt.
-    In1[Int8] + In2[Int8] -> Out[Int32]
-sum: reduce op over specific axis, sum(data, axis=[1, 2])
-    In[Int8] -> Out[Int32]
-
-Reshape:
-    In[Int32] -> Out[Int32]
-Flatten:
-    In[Int32] -> Out[Int32]
-
-# op for requant
-broadcast_right_shift:
-    assert P_shift_bits[Int8] >= 0
-    In[Int32] >> P_shift_bits[Int8] -> Out[Int32]
-broadcast_mul:
-    In[Int32] * P_scale[Int32] -> Out[Int32]
-broadcast_add:
-    In[Int32] + P_scale[Int32] -> Out[Int32]
-
-ClipInt: the only operator to forward Int32 input to Int8 output.
-    In[Int32] -> Out[Int8]
-
-# optional
-broadcast_div:
-    In[Int32] / P_scale[Int32] -> Out[Int32]
-_mul_scalar:
-    In[Int32] * C_scale[Int32] -> Out[Int32]
-_div_scalar:
-    In[Int32] / C_scale[Int32] -> Out[Int32]
-_plus_scalar:
-    In[Int32] + C_scale[Int32] -> Out[Int32]
-
-"""
-_identity_ext = {
-    'null': OpExt(out_types=[INT8_TYPE, INT32_TYPE]),
-
-    'relu': OpExt('relu', [INT8_TYPE], [INT8_TYPE]),
-    'max_pool2d': OpExt('max_pool2d', [INT8_TYPE], [INT8_TYPE]),
-
-    'conv2d': OpExt('conv2d', [INT8_TYPE], [INT32_TYPE]),
-    'dense': OpExt('dense', [INT8_TYPE], [INT32_TYPE]),
-    'sum': OpExt('sum', [INT8_TYPE], [INT32_TYPE]),
-    'elemwise_add': OpExt('elemwise_add', [INT8_TYPE], [INT32_TYPE]),
-
-    'reshape': OpExt('reshape', [INT8_TYPE, INT32_TYPE], [INT8_TYPE, INT32_TYPE]),
-    'flatten': OpExt('flatten', [INT8_TYPE, INT32_TYPE], [INT8_TYPE, INT32_TYPE]),
-
-    'broadcast_right_shift': OpExt('broadcast_right_shift', [INT32_TYPE], [INT8_TYPE]),
-    'broadcast_div': OpExt('broadcast_div', [INT32_TYPE], [INT32_TYPE]),
-    'broadcast_mul': OpExt('broadcast_mul', [INT32_TYPE], [INT32_TYPE]),
-    'broadcast_add': OpExt('broadcast_mul', [INT32_TYPE], [INT32_TYPE]),
-
-    'clip': OpExt('clip', [INT32_TYPE], [INT8_TYPE]),
-}
-
-def quant_realize(symbol, params, graph, quant_flag):
+def int_realize(symbol, params, graph, quant_flag):
     """Transform Sim-Quant(Float32 Simulate Int8) to Int8-Inference Graph
         Works:
         *) Remove floor layer in Int8 graph
@@ -284,6 +206,34 @@ def quant_realize(symbol, params, graph, quant_flag):
 
             node = nnvm.sym.broadcast_right_shift(input_sym, sb_sym)
             deleted_params_name.add(div_sym_name)
+
+        # elif op_name == 'broadcast_mul':
+            # msg = '%s(op=%s, inputs=%s)'%(name, op_name, [c.attr('name') for c in childs])
+            # input_sym = childs[0]
+            # mul_sym = childs[1]
+            # assert mul_sym.attr('op_name') == 'null'
+            # mul_sym_name = mul_sym.attr('name')
+            # assert mul_sym_name in params
+
+            # mul = params[mul_sym_name]
+            # shift_bits = mx.ndarray.log2(mul).astype('float32')
+
+            # assert all(mul >= 0), msg
+            # assert shift_bits.astype('int8').astype('float32') == shift_bits, msg
+
+            # sb_sym_name = mul_sym_name.replace('_scale', '') + '_shift_bits'
+            # if sb_sym_name in graph:
+                # sb_sym = graph[sb_sym_name]
+            # else:
+                # sb_sym = nnvm.sym.Variable(sb_sym_name, shape=(1,))
+                # graph[sb_sym_name] = sb_sym
+
+                # params[sb_sym_name] = shift_bits
+                # added_params_name.append(sb_sym_name)
+
+            # node = nnvm.sym.broadcast_left_shift(input_sym, sb_sym)
+            # deleted_params_name.add(mul_sym_name)
+
         elif op_name not in _identity_ext:
             logger.critical(
                 "Unsupported op:%s(name=%s, attr=%s) in INT8 Inference network",
@@ -335,4 +285,3 @@ def quant_realize(symbol, params, graph, quant_flag):
     logger.info("Created graph operators: %s", sorted(ops))
 
     return ret_sym, ret_params
-

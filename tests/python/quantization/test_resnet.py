@@ -13,12 +13,14 @@ import nnvm
 
 import numpy as np
 import logging
+import json
 import os
 
 from quant_op import *
 from quant_utils import *
 from utils import *
 import quant_pass as qpass
+import cvm_pass
 
 # import resnet18 as resnet
 # import resnet152 as resnet
@@ -163,38 +165,65 @@ def test_nnvm_load(batch_size=10, iter_num=10):
     target = "cuda"
     ctx = tvm.context(target, 0)
 
-    load_symbol_fname, load_params_fname = get_dump_fname("gluon.quant")
-
     in_shape = (batch_size, 3, 224, 224)
     data_iter = load_dataset(batch_size)
     calib_data = data_iter.next()
 
-    params = nd.load(load_params_fname)
+    dump_symbol, dump_params = get_dump_fname("nnvm.compile")
+    _, dump_lib = get_dump_fname("nnvm.so")
+    if True or not os.path.exists(dump_symbol):
+        load_symbol_fname, load_params_fname = get_dump_fname("gluon.quant")
 
-    sym = mx.sym.load(load_symbol_fname)
-    nnvm_sym, _ = nnvm.frontend.from_mxnet(sym)
+        params = nd.load(load_params_fname)
 
-    nnvm_sym, params = quant_realize(nnvm_sym, params, {}, quant_flag)
-    # , ctx=tvm.context("opencl", 0))
+        sym = mx.sym.load(load_symbol_fname)
+        nnvm_sym, _ = nnvm.frontend.from_mxnet(sym)
+        nnvm_sym, params = int_realize(nnvm_sym, params, {}, quant_flag)
 
-    nnvm_graph = nnvm.graph.create(nnvm_sym)
-    save_symbol_file, _ = get_dump_fname("nnvm.realize")
-    with open(save_symbol_file, "w") as fout:
-       fout.write(nnvm_graph.ir())
+        nnvm_graph = nnvm.graph.create(nnvm_sym)
+        save_symbol_file, _ = get_dump_fname("nnvm.realize")
+        with open(save_symbol_file, "w") as fout:
+           fout.write(nnvm_graph.json())
 
-    use_dtype = "int32"
-    for key, value in list(params.items()):
-        params[key] = tvm.nd.array(value.asnumpy().astype(use_dtype), ctx)
-    with nnvm.compiler.build_config(opt_level=0): #, add_pass=["PrecomputePrune"]):
-        deploy_graph, lib, params = nnvm.compiler.build(
-            nnvm_sym, target=target, shape={"data": in_shape},
-            params=params, dtype=use_dtype)
+        # nnvm_sym, params = cvm_pass.create(nnvm_sym, params, quant_flag)
+        # save_symbol_file, _ = get_dump_fname("cvm.quant")
+        # with open(save_symbol_file, "w") as fout:
+        #    fout.write(nnvm_sym.tojson())
 
-        with open("deploy.log", "w") as fout:
+        use_dtype = "int32"
+        for key, value in list(params.items()):
+            params[key] = tvm.nd.array(value.asnumpy().astype(use_dtype), ctx)
+
+        with nnvm.compiler.build_config(opt_level=0): #, add_pass=["PrecomputePrune"]):
+            deploy_graph, lib, params = nnvm.compiler.build(
+                nnvm_sym, target=target, shape={"data": in_shape},
+                params=params, dtype=use_dtype)
+
+        with open(dump_symbol, "w") as fout:
             fout.write(deploy_graph.json())
+        with open(dump_params, "wb") as fout:
+            param_bytes = nnvm.compiler.save_param_dict(params)
+            fout.write(param_bytes)
+        lib.export_library(dump_lib)
+
+    print ("Load graph from json")
+    with open(dump_symbol) as fout:
+        json_str = fout.read()
+        deploy_graph = nnvm.graph.load_json(json_str)
+    with open(dump_params, "rb") as fread:
+        param_bytes = fread.read()
+        params = nnvm.compiler.load_param_dict(param_bytes)
+    lib = tvm.module.load(dump_lib)
+
+    print (params.keys())
+    # cvm_pass.infer_type(deploy_graph, params)
+    # deploy_graph.apply("InferType")
+    # dtype_attr = deploy_graph.json_attr("dtype")
+    # print (len(dtype_attr), dtype_attr)
+    # with open("deploy_%s_ir.log"%target, "w") as fout:
+    #     fout.write(deploy_graph.ir())
 
     module = graph_runtime.create(deploy_graph, lib, ctx)
-    param_bytes = nnvm.compiler.save_param_dict(params)
     module.load_params(param_bytes)
 
     out_shape = (1000,)
@@ -241,10 +270,10 @@ if __name__ == "__main__":
         handler.setFormatter(formatter)
 
     quant_flag = QuantFlag(is_fuse_bn=True, calib_mode=CalibMode.NAIVE,
-            log_level=logging.DEBUG,
+            log_level=logging.DEBUG, use_scalar=False,
             disabled_layers=["relu", "pool0", "activation"])
     # enable quantization
-    if True:
+    if False:
         gluon_quant_resnet(quant_flag, batch_size=16, iter_num=10, need_requant=False)
 
     test_nnvm_load(batch_size=16, iter_num=10)

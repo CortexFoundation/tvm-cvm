@@ -294,6 +294,27 @@ void CodeGenCUDA::VisitExpr_(const Broadcast* op, std::ostream& os) {   // NOLIN
   os << ')';
 }
 
+void CodeGenCUDA::VisitExpr_(const Max *op, std::ostream& os) {
+  const char* opstr = "max";
+  if (op->type.lanes() == 1) {
+      os << opstr << '(';
+      this->PrintExpr(op->a, os);
+      os << ", ";
+
+	  std::stringstream ss;
+	  ss << op->type;
+	  bool is_max_op = (std::strcmp(opstr, "max") == 0);
+	  bool is_int_infer = (ss.str() == "int32");
+
+	  if (is_max_op && is_int_infer) os << "int(";
+      this->PrintExpr(op->b, os);
+	  if (is_max_op && is_int_infer) os << ")";
+      os << ')';
+  } else {
+    this->PrintVecBinaryOp(opstr, op->type, op->a, op->b, os);
+  }
+}
+
 
 inline void PrintConst(const FloatImm* op, std::ostream& os, CodeGenCUDA* p) { // NOLINT(*)
   switch (op->type.bits()) {
