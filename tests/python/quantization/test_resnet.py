@@ -173,6 +173,7 @@ def test_nnvm_load(batch_size=10, iter_num=10):
     _, dump_lib = get_dump_fname("nnvm.so")
     if True or not os.path.exists(dump_symbol):
         load_symbol_fname, load_params_fname = get_dump_fname("gluon.quant")
+        print ('sym, params', load_symbol_fname, load_params_fname)
 
         params = nd.load(load_params_fname)
 
@@ -250,6 +251,14 @@ def test_nnvm_load(batch_size=10, iter_num=10):
         logger.info("Iteration: %5d | Quant Acc: %.2f%% | Total Sample: %5d",
                 i, 100.*qacc/total, total)
 
+def save_data():
+    batch_size = 1024
+    data_iter = load_dataset(batch_size)
+    calib_data = data_iter.next()
+    x, _ = quant_helper(calib_data.data[0])
+    np.save('/tmp/imagenet.x', x.asnumpy())
+    np.save('/tmp/imagenet.y', calib_data.label[0].asnumpy())
+
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.NOTSET)
@@ -275,7 +284,8 @@ if __name__ == "__main__":
     # enable quantization
     if False:
         gluon_quant_resnet(quant_flag, batch_size=16, iter_num=10, need_requant=False)
-
+    save_data()
+    exit(-1)
     test_nnvm_load(batch_size=16, iter_num=10)
 
 
