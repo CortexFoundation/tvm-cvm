@@ -18,6 +18,7 @@
 #include <utility>
 #include <limits>
 #include <unordered_map>
+#include <iostream>
 
 #include "graph_fuse.h"
 #include "graph_runtime.h"
@@ -63,7 +64,7 @@ nnvm::Graph GraphFindFusibleGroups(nnvm::Graph g) {
     }
     TOpPattern pt = op_pattern.get(inode.source->op(), kOpaque);
 
-    if (pt <= kBroadcast) {
+    if (false && pt <= kBroadcast) {
       // Check if we can fuse to the master.
       int chosen_master = -1;
       bool ewise = inode.source->num_outputs() == 1;
@@ -100,7 +101,7 @@ nnvm::Graph GraphFindFusibleGroups(nnvm::Graph g) {
       } else {
         pt = ewise ? kElemWise : kBroadcast;
       }
-    } else if (pt == kInjective || pt == kCommReduce) {
+    } else if (false && (pt == kInjective || pt == kCommReduce)) {
       // Fuse to the comm reduce or injective
       for (const auto& e : inode.inputs) {
         if (fuse_vec[e.node_id] == FuseRule::kUknown) {
@@ -324,6 +325,7 @@ nnvm::Graph GraphFuse(nnvm::Graph g) {
     FuseEntry& fe = fuse_entries[root_id];
     fe.flatten_data = (pattern_vec[root_id] == kElemWise ||
                        inode.source->op() == assign_op);
+    std::cout << "#" << nid << " Input ";
     for (const auto& e : inode.inputs) {
       if (group_vec[e.node_id] != root_id && fe.imap.count(e) == 0) {
         Array<Expr> shape;
@@ -346,12 +348,14 @@ nnvm::Graph GraphFuse(nnvm::Graph g) {
         Tensor data = placeholder(
             shape, TVMType2Type(GetDLType(dtype_vec[idx.entry_id(e)])),
             os_name.str());
+        std::cout << dtype_vec[idx.entry_id(e)] << ' ';
         NodeEntry garg = Symbol::CreateVariable(os_name.str()).outputs[0];
         fe.imap[e] = garg;
         fe.reverse_imap[garg.node.get()] = e;
         fe.input_info[garg.node.get()] = std::move(data);
       }
     }
+    std::cout << dtype_vec[nid] << std::endl;
   }
 
   // Setup the Subgraph

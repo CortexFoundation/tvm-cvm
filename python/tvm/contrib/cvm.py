@@ -76,11 +76,15 @@ def conv2d_forward(x, w, strides = [1, 1]):
     y: Tensor
         The result tensor
     """
-
-    [stride_h, stride_w] = strides
+    print(x, w, strides)
+    stride_h, stride_w = strides
+    #if isinstance(stride_h, list):
+    stride_h = stride_h[1]
+    #if isinstance(stride_w, list):
+    stride_w = stride_w[0]
     oshape = conv2d_output_shape(list(x.shape), list(w.shape), stride_h, stride_w)
 
-    return _api.extern(
+    ret = _api.extern(
         oshape, [x, w],
         lambda ins, outs: _intrin.call_packed(
             "tvm.contrib.cvm.conv2d.forward",
@@ -89,7 +93,8 @@ def conv2d_forward(x, w, strides = [1, 1]):
             ins[0],
             ins[1],
             outs[0]), name="y", dtype='int32')
-
+    print(ret.dtype)
+    return ret
 
 
 

@@ -6,6 +6,7 @@
 #ifdef TVM_LLVM_VERSION
 #include <tvm/runtime/packed_func.h>
 #include <tvm/codegen.h>
+#include <iostream>
 #include <mutex>
 #include "llvm_common.h"
 #include "codegen_llvm.h"
@@ -47,9 +48,9 @@ class LLVMModuleNode final : public runtime::ModuleNode {
     std::lock_guard<std::mutex> lock(mutex_);
     const std::string& fname = (name == runtime::symbol::tvm_module_main ?
                                 entry_func_ : name);
-
     BackendPackedCFunc faddr =
         reinterpret_cast<BackendPackedCFunc>(GetFunctionAddr(fname));
+    std::cout << fname << " is address " << (long long)faddr << std::endl;
     if (faddr == nullptr) return PackedFunc();
     return WrapPackedFunc(faddr, sptr_to_self);
   }

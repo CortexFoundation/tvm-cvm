@@ -495,6 +495,7 @@ def extern(shape,
     if out_buffers is None:
         for shp, dt in zip(shape, dtype):
             output_placeholders.append(decl_buffer(shp, dt, name))
+    print(dtype, output_placeholders)
     body = fcompute(input_placeholders, output_placeholders)
     if isinstance(body, _expr.Expr):
         body = _make.Evaluate(body)

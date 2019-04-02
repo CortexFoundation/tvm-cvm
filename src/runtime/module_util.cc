@@ -51,7 +51,7 @@ PackedFunc WrapPackedFunc(BackendPackedCFunc faddr,
           const_cast<TVMValue*>(args.values),
           const_cast<int*>(args.type_codes),
           args.num_args);
-      CHECK_EQ(ret, 0) << TVMGetLastError() << ((int*)args.type_codes)[0] << ((int*)args.type_codes)[1] << ((int*)args.type_codes)[2] << ((int*)args.type_codes)[3];
+      CHECK_EQ(ret, 0) << TVMGetLastError() << ", happened on func " << (long long)faddr;
     });
 }
 

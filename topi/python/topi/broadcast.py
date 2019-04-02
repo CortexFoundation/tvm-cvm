@@ -20,8 +20,10 @@ def broadcast_to(data, shape):
     -------
     ret : tvm.Tensor
     """
-    return _cpp.broadcast_to(data, shape)
-
+    
+    ret = _cpp.broadcast_to(data, shape)
+    print('broadcast_to', ret.dtype)
+    return ret
 
 def add(lhs, rhs):
     """Addition with auto-broadcasting
@@ -39,8 +41,8 @@ def add(lhs, rhs):
         Returns Expr if both operands are Expr.
         Otherwise returns Tensor.
     """
-    return _cpp.add(lhs, rhs)
-
+    ret = _cpp.add(lhs, rhs)
+    return ret
 
 def subtract(lhs, rhs):
     """Subtraction with auto-broadcasting

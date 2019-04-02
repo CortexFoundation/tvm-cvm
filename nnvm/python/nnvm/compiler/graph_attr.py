@@ -58,6 +58,33 @@ TCODE_TO_DTYPE = {
     11: "bool",
 }
 
+def set_dtype_outputs(g, dtype):
+    """Set the dtype outputs of graph nodes
+
+    Parameters
+    ----------
+    g : Graph
+        The input graph
+
+    dtype : dict of str to str or str
+        The output dtype
+
+    Returns
+    -------
+    g : Graph
+        The updated graph with updated dtype.
+    """
+    print(g.index)
+    if isinstance(dtype, dict):
+        list_dtype = [
+            DTYPE_TO_TCODE[str(dtype.get(name, "default"))]
+            for name in g.index.output_names]
+    else:
+        list_dtype = [DTYPE_TO_TCODE[dtype]] * len(g.index.output_names)
+    g._set_json_attr("dtype", list_dtype, "list_int")
+    return g
+
+
 def set_dtype_inputs(g, dtype):
     """Set the dtype inputs of graph nodes
 

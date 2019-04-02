@@ -15,7 +15,8 @@ Workload = namedtuple('Workload',
                       ['in_dtype', 'out_dtype', 'height', 'width', 'in_filter', 'out_filter',
                        'hkernel', 'wkernel', 'hpad', 'wpad', 'hstride', 'wstride'])
 
-@tvm.target.generic_func
+#@tvm.target.generic_func
+@tvm.target.override_native_generic_func("conv2d")
 def conv2d(input, filter, strides, padding, dilation, layout='NCHW', out_dtype=None):
     """Conv2D operator.
 
@@ -44,9 +45,16 @@ def conv2d(input, filter, strides, padding, dilation, layout='NCHW', out_dtype=N
     output : tvm.Tensor
         4-D with shape [batch, out_channel, out_height, out_width]
     """
+    print('use conv')
+    target = tvm.target.current_target()
+    if "cvm" in target.libs:
+        # check type here.
+        print(input, filter, strides)
+        ret = cvm.conv2d_forward(input, filter, strides)
+        print(str(ret.dtype))
+        return ret
     # search platform specific declaration first
     # default declaration
-    print('use conv2d')
     if layout == 'NCHW':
         return conv2d_nchw(input, filter, strides, padding, dilation, out_dtype)
     if layout == 'HWCN':
@@ -121,7 +129,7 @@ def conv2d_nchw(Input, Filter, stride, padding, dilation, out_dtype=None):
         4-D with shape [batch, out_channel, out_height, out_width]
     """
     if out_dtype is None:
-        out_dtype = Input.dtype
+        out_dtype = 'int32'
     assert isinstance(stride, int) or len(stride) == 2
     assert isinstance(dilation, int) or len(dilation) == 2
     if isinstance(stride, int):

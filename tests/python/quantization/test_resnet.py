@@ -200,11 +200,10 @@ def test_nnvm_load(batch_size=10, iter_num=10):
     save_symbol_file, _ = get_dump_fname("nnvm.realize")
     with open(save_symbol_file, "w") as fout:
        fout.write(nnvm_graph.ir())
-
     use_dtype = "int32"
 #    for key, value in list(params.items()):
 #        params[key] = tvm.nd.array(value.asnumpy().astype(use_dtype), ctx)
-    with nnvm.compiler.build_config(opt_level=0): 
+    with nnvm.compiler.build_config(opt_level=0):
 #, add_pass=["PrecomputePrune"]):
         deploy_graph, lib, params = nnvm.compiler.build(
             nnvm_sym, target=target,

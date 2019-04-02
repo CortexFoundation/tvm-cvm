@@ -32,15 +32,14 @@ def dense_default(data, weight, bias=None):
     out_dim, _ = weight.shape
     k = tvm.reduce_axis((0, in_dim), name='k')
     matmul = tvm.compute((batch, out_dim), \
-                         lambda i, j: tvm.sum(data[i, k].astype('int32') * weight[j, k].astype('int32'), axis=k), \
+                         lambda i, j: tvm.sum(data[i, k] * weight[j, k], axis=k), \
                          tag='dense')
     if bias is not None:
         matmul = tvm.compute((batch, out_dim), \
-                             lambda i, j: matmul[i, j] + bias[j].astype('int32'), \
+                             lambda i, j: matmul[i, j] + bias[j], \
                              tag=tag.BROADCAST)
-    print(matmul)
-    return math.cast(matmul, 'int32')
-
+    print(str(matmul.dtype), str(data.dtype), str(weight.dtype))    
+    return matmul
 
 @tvm.target.override_native_generic_func("dense")
 def dense(data, weight, bias=None):
@@ -66,5 +65,7 @@ def dense(data, weight, bias=None):
     target = tvm.target.current_target()
     if "cvm" in target.libs:
         # check type here.
-        return cvm.dense(data, weight)
+        ret = cvm.dense(data, weight)
+        print(str(ret.dtype))
+        return ret
     return dense_default(data, weight, bias)

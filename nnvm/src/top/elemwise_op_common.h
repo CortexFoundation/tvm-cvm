@@ -8,6 +8,7 @@
 
 #include <nnvm/layout.h>
 #include <nnvm/top/nn.h>
+#include <nnvm/top/tensor.h>
 #include <string>
 #include <vector>
 #include <utility>
@@ -86,6 +87,64 @@ inline bool ElemwiseType(const NodeAttrs& attrs,
   return ElemwiseAttr<int, type_is_none, type_assign, true, type_string>(
     attrs, in_attrs, out_attrs, -1);
 }
+
+template<int n_in, int n_out, int type_in, int type_out>
+inline bool CortexElemwiseType(const NodeAttrs& attrs,
+                         std::vector<int> *in_attrs,
+                         std::vector<int> *out_attrs) {
+  bool is_int = true;
+  int kFloatP = (1 << kFloat16) + (1 << kFloat32) + (1 << kFloat64);
+#define IS_FLOAT(x) ((1 << (x)) | kFloatP)
+  if (n_in != -1) {
+    CHECK_EQ(in_attrs->size(), static_cast<size_t>(n_in)) << " in operator " << attrs.name;
+    for (size_t i = 0; i < n_in; ++i) {
+      if (IS_FLOAT(in_attrs->at(i))) {
+        is_int = false;
+      }
+    }
+  }
+
+  if (n_out != -1) {
+    CHECK_EQ(out_attrs->size(), static_cast<size_t>(n_out)) << " in operator " << attrs.name;
+    for (size_t i = 0; i < n_out; ++i) {
+      if (IS_FLOAT(out_attrs->at(i))) {
+        is_int = false;
+      }
+    }
+  }
+
+  if (is_int) {
+    if (type_in != -1) {
+      for (size_t i = 0; i < n_in; ++i) {
+        if (in_attrs->at(i) == -1) {
+          *in_attrs[i] = type_in;
+        } else {
+          CHECK_EQ(in_attrs->at(i), type_in) << " (type check failed) in operator " << attrs.name;
+        }
+      }
+    }
+    if (type_out != -1) {
+      for (size_t i = 0; i < n_out; ++i) {
+        if (out_attrs->at(i) == -1) {
+          *out_attrs[i] = type_out;
+        } else {
+          CHECK_EQ(out_attrs->at(i), type_out) << " (type check failed) in operator " << attrs.name;
+        }
+      }
+    }
+    return true;
+  }
+  return ElemwiseAttr<int, type_is_none, type_assign, true, type_string>(attrs, in_attrs, out_attrs, -1);
+}
+
+inline bool CortexElementWiseReduceType(const NodeAttrs& attrs,
+                                  std::vector<int> *in_attrs,
+                                  std::vector<int> *out_attrs) {
+  CHECK_EQ(out_attrs->size(), 1);
+  return ElemwiseAttr<int, type_is_none, type_assign, true, type_string>(
+    attrs, in_attrs, out_attrs, -1);
+}
+
 
 inline bool ElementWiseReduceShape(const NodeAttrs& attrs,
                                    std::vector<TShape> *in_attrs,

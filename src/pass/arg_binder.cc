@@ -158,7 +158,7 @@ void ArgBinder::BindDLTensor(const Buffer& buffer,
   // type checks
   Type dtype = buffer->dtype;
   std::ostringstream type_err_msg;
-  type_err_msg << arg_name << ".dtype is expected to be " << dtype;
+  type_err_msg << "Buffer " << arg_name << "is int" << buffer->dtype.bits() << ", " << arg_name << ".dtype is expected to be " << dtype;
   Expr cond = (TVMArrayGet(UInt(8), handle, intrinsic::kArrTypeCode) ==
                UIntImm::make(UInt(8), dtype.code()) &&
                TVMArrayGet(UInt(8), handle, intrinsic::kArrTypeBits) ==
