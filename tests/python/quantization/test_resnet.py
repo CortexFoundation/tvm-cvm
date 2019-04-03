@@ -25,7 +25,6 @@ import cvm_pass
 # import resnet18 as resnet
 # import resnet152 as resnet
 import resnet50 as resnet
-
 from sym_pass import *
 
 def get_dump_fname(suffix="quant"):
@@ -250,6 +249,13 @@ def test_nnvm_load(batch_size=10, iter_num=10):
         logger.info("Iteration: %5d | Quant Acc: %.2f%% | Total Sample: %5d",
                 i, 100.*qacc/total, total)
 
+
+    qimage_data, _ = quant_helper(calib_data.data[0])
+    np.savez("data.npz", a=qimage_data.asnumpy())
+    npdata = np.load("data.npz")['a']
+    module.run(data=npdata)
+    qres = module.get_output(0).asnumpy()
+    print(qres)
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.NOTSET)

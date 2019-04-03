@@ -33,6 +33,7 @@ tvm_option(USE_LLVM "Build with LLVM, can be set to specific llvm-config path" O
 tvm_option(USE_STACKVM_RUNTIME "Include stackvm into the runtime" OFF)
 tvm_option(USE_GRAPH_RUNTIME "Build with tiny graph runtime" ON)
 tvm_option(USE_GRAPH_RUNTIME_DEBUG "Build with tiny graph runtime debug mode" OFF)
+tvm_option(USE_CVM_GRAPH_RUNTIME "Build with CVM graph runtime" ON)
 tvm_option(USE_SGX "Build with SGX" OFF)
 tvm_option(USE_RTTI "Build with RTTI" ON)
 tvm_option(USE_MSVC_MT "Build with MT" OFF)
@@ -140,6 +141,7 @@ file(GLOB TOPI_SRCS
 file(GLOB_RECURSE HALIDEIR_SRCS 3rdparty/HalideIR/src/*.cpp)
 list(APPEND COMPILER_SRCS ${HALIDEIR_SRCS})
 file(GLOB RUNTIME_SRCS src/runtime/*.cc)
+#file(GLOB CVM_RUNTIME_SRCS src/runtime/*.cc)
 
 # Package runtime rules
 if(NOT USE_RTTI)
@@ -176,6 +178,13 @@ if(USE_GRAPH_RUNTIME)
   endif(USE_GRAPH_RUNTIME_DEBUG)
 endif(USE_GRAPH_RUNTIME)
 
+if(USE_CVM_GRAPH_RUNTIME)
+  message(STATUS "Build with CVM Graph runtime support...")
+  file(GLOB CVM_RUNTIME_GRAPH_SRCS cvm/runtime/*.cc)
+  list(APPEND CVM_RUNTIME_SRCS ${CVM_RUNTIME_GRAPH_SRCS})
+endif(USE_CVM_GRAPH_RUNTIME)
+
+
 # Module rules
 include(cmake/modules/VTA.cmake)
 include(cmake/modules/CUDA.cmake)
@@ -196,6 +205,7 @@ include(cmake/modules/contrib/HybridDump.cmake)
 add_library(tvm SHARED ${COMPILER_SRCS} ${RUNTIME_SRCS})
 add_library(tvm_topi SHARED ${TOPI_SRCS})
 add_library(tvm_runtime SHARED ${RUNTIME_SRCS})
+add_library(cvm_runtime SHARED ${CVM_RUNTIME_SRCS})
 if(NOT USE_SGX STREQUAL "OFF")
   add_dependencies(tvm sgx_edl)
   add_dependencies(tvm_runtime sgx_edl tvm_t)
@@ -247,6 +257,7 @@ add_custom_target(runtime DEPENDS tvm_runtime)
 install(TARGETS tvm DESTINATION lib${LIB_SUFFIX})
 install(TARGETS tvm_topi DESTINATION lib${LIB_SUFFIX})
 install(TARGETS tvm_runtime DESTINATION lib${LIB_SUFFIX})
+install(TARGETS cvm_runtime DESTINATION lib${LIB_SUFFIX})
 install(TARGETS nnvm_compiler DESTINATION lib${LIB_SUFFIX})
 
 if (INSTALL_DEV)
