@@ -1,4 +1,5 @@
 import logging
+import math
 
 import mxnet as mx
 import nnvm as nnvm
@@ -6,15 +7,15 @@ import tvm
 
 from sym_utils import *
 
-def fold_cond(symbol, params, graph, quant_flag):
+def fold_cond_op(symbol, params, graph, quant_flag):
     logger = logging.getLogger("log.quant.fold.condition")
     logger.setLevel(quant_flag.log_level)
     logger.info("fold _cond op in graph")
 
-    gh = _GraphHelper(graph)
+    gh = GraphHelper(graph)
 
     added_params_name, deleted_params_name = set(), []
-    for sym in _topo_sort(symbol):
+    for sym in topo_sort(symbol, logger):
         name = sym.attr('name')
         attr = sym.list_attr()
         op_name = sym.attr('op_name')
@@ -22,9 +23,9 @@ def fold_cond(symbol, params, graph, quant_flag):
 
         # update inputs layer symbol
         if childs is not None:
-            childs = [gh.get_node(childs[idx]) for idx, child in enumerate(childs.list_outputs())]
+            childs = [gh.get_node(childs[idx]) for idx in range(len(childs))]
             # update childs inputs
-            op = _get_mxnet_op(op_name)
+            op = get_mxnet_op(op_name)
             node = op(*childs, **attr)
         elif op_name != 'null':
             assert False, "Unrecognized op without input"
@@ -33,6 +34,7 @@ def fold_cond(symbol, params, graph, quant_flag):
             node = sym
 
         if op_name == '_cond':
+            logger.debug("Fold condition op:%s", name)
             # cond_func, then_func, else_func = sym.attr('subgraph')
             sb_param_idx, lesser_scalar_idx, others = None, None, []
             for idx, child in enumerate(childs):
@@ -115,7 +117,7 @@ def fold_cond(symbol, params, graph, quant_flag):
 
     return ret_sym, params
 
-def int_realize(symbol, params, graph, quant_flag):
+def nnvm_realize(symbol, params, graph, quant_flag):
     """Transform Sim-Quant(Float32 Simulate Int8) to Int8-Inference Graph
         Works:
         *) Remove floor layer in Int8 graph
@@ -136,23 +138,15 @@ def int_realize(symbol, params, graph, quant_flag):
     symbol: nnvm.Symbol
     params: tvm.nd.Array
     """
-    logger = logging.getLogger("log.quant.post")
+    logger = logging.getLogger("log.quant.nnvm.realize")
 
-    def get_node(sym):
-        name = sym.attr('name')
-        if name not in graph:
-            assert False, "Unrecognized layer:%s in sym_post_quant"%name
-        return graph[name]
-
-    # symbol
-    added_params_name, deleted_params_name = [], set()
-    for sym in _topo_sort(symbol):
+    def _realize(sym, params, graph, inputs_ext, ops):
         name = sym.attr('name')
         attr = sym.list_attr()
         op_name = sym.attr('op_name')
         childs = sym.get_children()
 
-        # cast scalar attribute to Int8 type
+        node = sym
         if 'scalar' in attr:
             scalar = float(attr['scalar'])
 
@@ -161,33 +155,17 @@ def int_realize(symbol, params, graph, quant_flag):
             assert float(int(scalar)) == scalar, msg
 
             attr['scalar'] = int(scalar)
-
-        # update inputs layer symbol
-        if childs is not None:
-            childs = [get_node(child) for child in childs]
-            op = _get_nnvm_op(op_name)
-            node = op(*childs, **attr)
-        elif op_name != 'null':
-            assert False, "Unrecognized op without input"
-        else:
-            # inputs or params
-            node = sym
+            node = get_nnvm_op(op_name)(*childs, **attr)
 
         # remove layer: floor in int8
         if op_name == "floor":
-            childs_name = [c.attr('name') for c in childs]
-            assert len(childs) == 1
             node = childs[0]
         elif op_name == "broadcast_div":
             msg = '%s(op=%s, inputs=%s)'%(name, op_name, [c.attr('name') for c in childs])
-            assert (len(childs) == 2)
-
             input_sym = childs[0]
             div_sym = childs[1]
             assert div_sym.attr('op_name') == 'null' # params or constant
             div_sym_name = div_sym.attr('name')
-
-            assert div_sym_name in params, msg
 
             div = params[div_sym_name]
             shift_bits = mx.ndarray.log2(div).astype('float32')
@@ -200,88 +178,151 @@ def int_realize(symbol, params, graph, quant_flag):
             else:
                 sb_sym = nnvm.sym.Variable(sb_sym_name, shape=(1,))
                 graph[sb_sym_name] = sb_sym
-
                 params[sb_sym_name] = shift_bits
-                added_params_name.append(sb_sym_name)
-
             node = nnvm.sym.broadcast_right_shift(input_sym, sb_sym)
-            deleted_params_name.add(div_sym_name)
-
-        # elif op_name == 'broadcast_mul':
-            # msg = '%s(op=%s, inputs=%s)'%(name, op_name, [c.attr('name') for c in childs])
-            # input_sym = childs[0]
-            # mul_sym = childs[1]
-            # assert mul_sym.attr('op_name') == 'null'
-            # mul_sym_name = mul_sym.attr('name')
-            # assert mul_sym_name in params
-
-            # mul = params[mul_sym_name]
-            # shift_bits = mx.ndarray.log2(mul).astype('float32')
-
-            # assert all(mul >= 0), msg
-            # assert shift_bits.astype('int8').astype('float32') == shift_bits, msg
-
-            # sb_sym_name = mul_sym_name.replace('_scale', '') + '_shift_bits'
-            # if sb_sym_name in graph:
-                # sb_sym = graph[sb_sym_name]
-            # else:
-                # sb_sym = nnvm.sym.Variable(sb_sym_name, shape=(1,))
-                # graph[sb_sym_name] = sb_sym
-
-                # params[sb_sym_name] = shift_bits
-                # added_params_name.append(sb_sym_name)
-
-            # node = nnvm.sym.broadcast_left_shift(input_sym, sb_sym)
-            # deleted_params_name.add(mul_sym_name)
-
-        elif op_name not in _identity_ext:
+        elif op_name not in nnvm_identity_ext:
             logger.critical(
                 "Unsupported op:%s(name=%s, attr=%s) in INT8 Inference network",
                 op_name, name, attr)
             assert False
 
-        graph[name] = node
+        return node, params
 
-    for name in deleted_params_name:
-        del params[name]
-    logger.debug("[ added_params_name       ]: %s", added_params_name)
-    logger.debug("[ deleted_params_name     ]: %s", deleted_params_name)
+    ret_sym, params = topo_visit(symbol, params, graph, get_op=get_nnvm_op,
+            logger=logger, inputs_ext={'data':{}}, callback=_realize)
 
-    nodes = []
-    for sym in symbol:
-        node = graph[sym.attr('name')]
-        nodes.append(node)
-    ret_sym = nodes[0]
-    if len(nodes) > 1:
-        ret_sym = nnvm.sym.Group(nodes)
-
-    # params
     ops = set()
-    for sym in _topo_sort(ret_sym):
+    for sym in topo_sort(ret_sym):
         op_name = sym.attr('op_name')
         ops.add(op_name)
+    logger.info("Created graph operators: %s", sorted(ops))
 
     args = ret_sym.list_input_names()
-    ret_params, params_dtype = {}, {}
+    ret_params = {}
     for key, value in params.items():
         if key in args:
             msg = "key:%s value:%s"%(key, value)
             flat = value.asnumpy().flatten()
-
             assert all(flat >= INT32_MIN) and all(flat <= INT32_MAX), msg
-
-            dtype = 'int8' if all(flat >= INT8_MIN) and all(flat <= INT8_MAX) \
-                    else 'int32'
-
             assert all(flat.astype('int32').astype('float32') == flat), msg
-            params_dtype[key] = dtype
-            ret_params[key] = tvm.nd.array(value.astype(dtype).asnumpy())
 
-    for arg in args:
-        if arg == 'data':
-            continue
-        assert arg in ret_params, 'arg:%s in symbol not exists params'%arg
-
-    logger.info("Created graph operators: %s", sorted(ops))
+            ret_params[key] = tvm.nd.array(value.astype('int32').asnumpy())
 
     return ret_sym, ret_params
+
+# matrix decomposition
+MATRIX_MAXIMUM_SIZE = 65536 # 2 ** 16
+def _find_usable_split(n, amax):
+    """Find usable split length with integer n.
+
+    Returns split_size, split_number
+    """
+    assert n > 1
+
+    start = max((n // amax), 2)
+    stop = int(math.sqrt(n)) + 1
+    for i in range(start, stop):
+        if n % i == 0:
+            return n/i, i
+
+    return 1, n
+
+def _matrix_decomposition(sym, params, graph, inputs_ext, infer_shapes):
+    logger = logging.getLogger('log.quant.op.rewrite.matrix_decomposition')
+    name = sym.attr('name')
+    op_name = sym.attr('op_name')
+    childs = sym.get_children()
+    attr = sym.list_attr()
+
+    # Infer internal symbol output shape and save it in infer_shapes.
+    inputs_shape = {k:v['shape'] for k, v in inputs_ext.items()}
+    if op_name != 'null':
+        _, out_shapes, _ = sym.infer_shape(**inputs_shape)
+        if name in infer_shapes:
+            logger.warn("Symbol:%s has been infered shape in graph", out_shapes)
+            assert infer_shapes[name] == out_shapes
+        infer_shapes[name] = out_shapes
+
+    node = sym
+    if op_name == 'Convolution':
+        logger.info('Convolution: %s', name)
+        childs = sym_iter(childs)
+        sym_ops = [c for c in childs if c.attr('op_name') != 'null']
+        sym_params= [c for c in childs if c.attr('op_name') == 'null']
+
+        params_name = [p.attr('name') for p in sym_params]
+        params_shape = [params[n].shape for n in params_name if n in params]
+
+    elif op_name == 'FullyConnected':
+        logger.info('FullyConnected: %s', name)
+        childs = sym_iter(childs)
+        childs_name = [c.attr('name') for c in childs]
+        childs_shape = [infer_shapes[n] for n in childs_name]
+
+        for idx, cshape in enumerate(childs_shape):
+            cname = childs_name[idx]
+            if cname in params and cshape != params[cname].shape:
+                logger.critical(
+                    "parameter(%s): infer shape(%s) in graph isn't consistent \
+                    with params dict(%s)",
+                    cshape, params[cname])
+
+        if '_weight' not in childs_name[1]:
+            logger.warn("'_weight' not in symbol(%s) weight parameter(%s), \
+                    may be wrong",
+                    childs_name[1])
+        if attr['no_bias'] == 'False' and '_bias' not in childs_name[2]:
+            logger.warn("'_bias' not in symbol(%s) bias parameter(%s), \
+                    may be wrong",
+                    childs_name[2])
+
+        weight_shape = childs_shape[1]
+        matrix_len = weight_shape[1]
+        if matrix_len > MATRIX_MAXIMUM_SIZE:
+            weight_name_prefix = childs[1].attr('name')
+            bias = childs[2] if attr['no_bias']=='False' else None
+
+            size, number = _find_usable_split(matrix_len, MATRIX_MAXIMUM_SIZE)
+            if size == 1:
+                logger.error(
+                    "cannot find usable split shape for %s in symbol(%s), \
+                    split by size 1 eventually",
+                    childs_shape, name)
+
+            X, W = childs[0], childs[1]
+            out = mx.sym.flatten(X)
+            out = mx.sym.split(out, axis=1, num_outputs=number)
+
+            # update params
+            weight_params = params[weight_name_prefix]
+            weights_split = weight_params.split(axis=1, num_outputs=number)
+
+            node = None
+            for idx in range(number):
+                weight_name = weight_name_prefix + '_split' + str(idx)
+                assert weight_name not in graph
+                weight = mx.sym.var(weight_name)
+
+                tmp = mx.sym.FullyConnected(out[idx], weight, bias, **attr)
+                node = tmp if node is None else (node + tmp)
+
+                params[weight_name] = weights_split[idx]
+
+            del params[weight_name_prefix]
+
+    return node, params
+
+def mx_sym_rewrite(symbol, params, quant_flag, inputs_ext, graph={}):
+    logger = logging.getLogger('log.calib.rewrite.op')
+    logger.setLevel(quant_flag.log_level)
+
+    inputs_shape = {k:v['shape'] for k, v in inputs_ext.items()}
+    shapes, _, _ = symbol.infer_shape(**inputs_shape)
+    args = symbol.list_arguments()
+    infer_shapes = {args[i]:shapes[i] for i in range(len(args))}
+
+    sym, params = topo_visit(symbol, params, get_op=get_mxnet_op,
+            logger=logger, inputs_ext=inputs_ext,
+            callback=_matrix_decomposition, infer_shapes=infer_shapes)
+
+    return sym, params

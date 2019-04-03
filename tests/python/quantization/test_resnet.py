@@ -70,7 +70,7 @@ def gluon_quant_resnet(quant_flag, batch_size=10,
 
     graph = resnet.load_quant_graph(quant_flag)
     sym, qparams = graph(inputs), load_parameters(graph, qparams, ctx=ctx)
-    sym, qparams = fold_cond(sym, qparams, {}, quant_flag)
+    sym, qparams = fold_cond_op(sym, qparams, {}, quant_flag)
 
     nd.save(quant_params_file, qparams)
     with open(quant_symbol_file, 'w') as fout:
@@ -163,7 +163,7 @@ def test_nnvm_load(batch_size=10, iter_num=10):
     logger.info("=== Log Test NNVM ===")
 
     target = "cuda"
-    ctx = tvm.context(target, 0)
+    ctx = tvm.context(target, 1)
 
     in_shape = (batch_size, 3, 224, 224)
     data_iter = load_dataset(batch_size)
@@ -178,7 +178,7 @@ def test_nnvm_load(batch_size=10, iter_num=10):
 
         sym = mx.sym.load(load_symbol_fname)
         nnvm_sym, _ = nnvm.frontend.from_mxnet(sym)
-        nnvm_sym, params = int_realize(nnvm_sym, params, {}, quant_flag)
+        nnvm_sym, params = nnvm_realize(nnvm_sym, params, {}, quant_flag)
 
         nnvm_graph = nnvm.graph.create(nnvm_sym)
         save_symbol_file, _ = get_dump_fname("nnvm.realize")
@@ -274,7 +274,7 @@ if __name__ == "__main__":
             disabled_layers=["relu", "pool0", "activation"])
     # enable quantization
     if False:
-        gluon_quant_resnet(quant_flag, batch_size=16, iter_num=10, need_requant=False)
+        gluon_quant_resnet(quant_flag, batch_size=16, iter_num=10, need_requant=True)
 
     test_nnvm_load(batch_size=16, iter_num=10)
 

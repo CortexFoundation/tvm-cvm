@@ -1,10 +1,8 @@
 from mxnet.symbol import _internal
 from mxnet import symbol as _sym
-import nnvm as nnvm
-
-__all__ = ["_topo_sort", "_GraphHelper", "OpExt",
-        "_get_mxnet_op", "_get_nnvm_op", "_identity_ext",
-        "INT8_MIN", "INT8_MAX", "INT32_MIN", "INT32_MAX"]
+import mxnet as mx
+import nnvm
+import logging
 
 INT32_MIN, INT32_MAX = -2147483647, 2147483647
 INT8_MIN, INT8_MAX = -127, 127
@@ -20,7 +18,7 @@ class OpExt():
         self.out_types = out_types
 
 
-class _GraphHelper(object):
+class GraphHelper(object):
     def __init__(self, graph={}, gtype=_sym.Symbol):
         self.graph = graph
         self.gtype = gtype
@@ -52,7 +50,30 @@ class _GraphHelper(object):
         self.graph[name] = default
         return default
 
-def _topo_sort(symbol):
+def get_mxnet_op(op_name):
+    try:
+        op = getattr(_internal, op_name)
+    except:
+        op = getattr(_sym, op_name)
+
+    if not op:
+        raise RuntimeError("Unable to map op_name {} to mxnet.sym".format(op_name))
+    return op
+
+def get_nnvm_op(op_name):
+    op = getattr(nnvm.sym, op_name)
+
+    if not op:
+        raise RuntimeError("Unable to map op_name {} to nnvm.sym".format(op_name))
+    return op
+
+def sym_iter(sym):
+    if isinstance(sym, mx.sym.Symbol):
+        sym = [sym[i] for i in range(len(sym))]
+
+    return sym
+
+def topo_sort(symbol, logger=logging):
     """Sort all symbols in the mxnet graph in topological order.
 
     Parameters
@@ -71,6 +92,7 @@ def _topo_sort(symbol):
     for s in symbol:
         symbol_map[s.attr('name')] = s
         queue.append(s)
+
     while queue:
         sym = queue.pop(0)
         name = sym.attr('name')
@@ -78,10 +100,10 @@ def _topo_sort(symbol):
         if childs is None:
             dep_cnts[name] = 0
         else:
-            childs_ = (childs) if isinstance(childs, nnvm.symbol.Symbol) else (childs.list_outputs())
-            dep_cnts[name] = len({childs[idx].attr('name') for idx, c  in enumerate(childs_)})
-            for idx, _  in enumerate(childs_):
-                child = childs[idx]
+            childs = sym_iter(childs)
+            # remove duplication dependency
+            dep_cnts[name] = len({c.attr('name') for c in childs})
+            for child in childs:
                 child_name = child.attr('name')
                 if child_name not in deps:
                     deps[child_name] = set()
@@ -89,9 +111,16 @@ def _topo_sort(symbol):
                 if child_name not in symbol_map:
                     symbol_map[child_name] = child
                     queue.append(child)
+
     order = []
+    reduce_flag = True
     while dep_cnts:
+        if not reduce_flag:
+            logger.critical("deps cannot reduce -> %s", dep_cnts)
+            assert False
+
         remove = []
+        reduce_flag = False
         for name in dep_cnts:
             if dep_cnts[name] == 0:
                 order.append(symbol_map[name])
@@ -99,26 +128,62 @@ def _topo_sort(symbol):
                 if name in deps:
                     for other in deps[name]:
                         dep_cnts[other] -= 1
+
+                reduce_flag = True
         for name in remove:
             del dep_cnts[name]
     return order
 
-def _get_mxnet_op(op_name):
-    try:
-        op = getattr(_internal, op_name)
-    except:
-        op = getattr(_sym, op_name)
+def get_node(sym, graph):
+    name = sym.attr('name')
+    if name not in graph:
+        assert False, "Unrecognized layer:%s in graph"%name
+    return graph[name]
 
-    if not op:
-        raise RuntimeError("Unable to map op_name {} to mxnet.sym".format(op_name))
-    return op
+def topo_visit(symbol, params, graph={}, get_op=get_mxnet_op,
+        logger=logging, callback=None, inputs_ext={}, **kwargs):
 
-def _get_nnvm_op(op_name):
-    op = getattr(nnvm.sym, op_name)
+    for sym in topo_sort(symbol, logger):
+        name = sym.attr('name')
+        op_name = sym.attr('op_name')
+        childs = sym.get_children()
+        attr = sym.list_attr()
 
-    if not op:
-        raise RuntimeError("Unable to map op_name {} to nnvm.sym".format(op_name))
-    return op
+        if childs is not None:
+            # update childs in graph
+            childs = [get_node(c, graph) for c in sym_iter(childs)]
+            node = get_op(op_name)(*childs, **attr)
+
+            # check params dict
+            for c in childs:
+                if c.attr('op_name') != 'null':
+                    continue
+                cname = c.attr('name')
+                assert cname in params or cname in inputs_ext, \
+                    'graph parameter:%s is missing in params dict:%s' \
+                    % (cname, params.keys())
+        elif op_name != 'null':
+            logger.critical("Unrecognized operator:%s with none inputs", op_name)
+            assert False
+        else:
+            node = sym
+
+        if callback is not None:
+            # process symbol and params
+            node, params = callback(node, params, graph, inputs_ext, **kwargs)
+
+        graph[name] = node
+
+    nodes = []
+    for sym in symbol:
+        node = get_node(sym, graph)
+        nodes.append(node)
+
+    ret_sym = nodes[0]
+    if len(nodes) > 1:
+        ret_sym = mx.sym.Group(nodes)
+
+    return ret_sym, params
 
 
 """Deterministic Op Description
@@ -135,9 +200,9 @@ Activation: specific indicate relu.
 Pooling: sepcific indicate max pool.
     In[Int8] -> Out[Int8]
 Convolution:
-    In[Int8] * P_weight[Int8] + P_bias[Int32] -> Out[Int32]
+    In[Int8] * P_weight[Int8] + P_bias[Int32] -> Out[Int64]
 FullyConnected|Dense:
-    In[Int8] * P_weight[Int8] + P_bias[Int32] -> Out[Int32]
+    In[Int8] * P_weight[Int8] + P_bias[Int32] -> Out[Int64]
 elemwise_add:
     In1[Int8] + In2[Int8] -> Out[Int32]
 sum: reduce op over specific axis, sum(data, axis=[1, 2])
@@ -179,7 +244,7 @@ cvm_left_shift:
     In[Int8|Int32|Int64] << P_shift_bits[Int8] -> Out[Int8]
 
 """
-_identity_ext = {
+nnvm_identity_ext = {
     'null': OpExt(out_types=[INT8_TYPE, INT32_TYPE]),
 
     'relu': OpExt('relu', [INT8_TYPE], [INT8_TYPE]),
@@ -200,4 +265,24 @@ _identity_ext = {
     'broadcast_add': OpExt('broadcast_mul', [INT32_TYPE], [INT32_TYPE]),
 
     'clip': OpExt('clip', [INT32_TYPE], [INT8_TYPE]),
+}
+
+"""Mxnet Symbol Operator Extension
+QUANT_TYPE:
+    0: No change
+    1: Rewrite
+    2: Op fuse
+"""
+mx_identity_ext = {
+    'null': {},
+    'Convolution': {},
+    'BatchNorm': {},
+    'Pooling': {
+        'pool_type': ['max', 'avg'],
+    },
+    'Flatten': {},
+    'FullyConnected': {},
+    'Activation': {
+        'act_type': ['relu'], # Only supported relu
+    },
 }

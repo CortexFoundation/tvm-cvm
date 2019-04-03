@@ -96,7 +96,7 @@ def load_parameters(graph, params, prefix="", ctx=None):
         param_name = "_".join(uniq_name)
         param_name = param_name[len(prefix):]
         assert param_name in params or name in params, \
-            "param name(%s) with origin(%s) not exits"%(param_name, name)
+            "param name(%s) with origin(%s) not exists"%(param_name, name)
         data = params[name] if name in params else params[param_name]
         params_dict[name].set_data(data)
         ret_params[name] = data
