@@ -15,9 +15,9 @@ def verify_conv2d_nchw(batch, in_channel, in_size, num_filter, kernel, stride, p
 
     in_height = in_width = in_size
 
-    A = tvm.placeholder((batch, in_channel, in_height, in_width), name='A')
-    W = tvm.placeholder((num_filter, in_channel, kernel, kernel), name='W')
-    bias = tvm.placeholder((num_filter, 1, 1), name='bias')
+    A = tvm.placeholder((batch, in_channel, in_height, in_width), name='A', dtype='int32')
+    W = tvm.placeholder((num_filter, in_channel, kernel, kernel), name='W', dtype='int32')
+    bias = tvm.placeholder((num_filter, 1, 1), name='bias', dtype='int32')
 
     a_shape = get_const_tuple(A.shape)
     w_shape = get_const_tuple(W.shape)
@@ -26,13 +26,13 @@ def verify_conv2d_nchw(batch, in_channel, in_size, num_filter, kernel, stride, p
 
     @memoize("topi.tests.test_topi_conv2d_nchw.verify_conv2d_nchw")
     def get_ref_data():
-        a_np = np.random.uniform(size=a_shape).astype(dtype)
-        w_np = np.random.uniform(size=w_shape).astype(dtype)
-        b_np = np.random.uniform(size=bias_shape).astype(dtype)
+        a_np = np.random.uniform(size=a_shape).astype(A.dtype)
+        w_np = np.random.uniform(size=w_shape).astype(W.dtype)
+        b_np = np.random.uniform(size=bias_shape).astype(bias.dtype)
         dw_np = topi.testing.dilate_python(w_np, (1, 1, dilation, dilation))
         c_np = topi.testing.conv2d_nchw_python(a_np, dw_np, stride, padding)
         if add_bias:
-            b_np = np.random.uniform(size=bias_shape).astype(dtype)
+            b_np = np.random.uniform(size=bias_shape).astype(bias.dtype)
             c_np += b_np
         if add_relu:
             c_np = np.maximum(c_np, 0)
@@ -48,7 +48,7 @@ def verify_conv2d_nchw(batch, in_channel, in_size, num_filter, kernel, stride, p
         print("Running on target: %s" % device)
         with tvm.target.create(device):
             C = topi.nn.conv2d(A, W, (stride, stride), (padding, padding),
-                               (dilation, dilation), layout='NCHW', out_dtype=dtype)
+                               (dilation, dilation), layout='NCHW', out_dtype='int32')
             if add_bias:
                 C = topi.add(C, bias)
             if add_relu:

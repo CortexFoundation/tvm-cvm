@@ -244,15 +244,25 @@ inline tvm::Tensor conv2d_nchw(const tvm::Tensor& I,
   auto i = tvm::reduce_axis(tvm::Range{0, I->shape[1]}, "i");
   auto kh = tvm::reduce_axis(tvm::Range{0, W->shape[2]}, "kh");
   auto kw = tvm::reduce_axis(tvm::Range{0, W->shape[3]}, "kw");
+
   auto T = (pad_h == 0 && pad_w == 0)
                ? I
                : pad(I, {tvm::Expr(0), tvm::Expr(0), pad_h, pad_w});
-  auto l = [&](tvm::Var b, tvm::Var o, tvm::Var h, tvm::Var w) {
-    return tvm::sum(
-        T(b, i, stride_h * h + kh, stride_w * w + kw) * W(i, o, kh, kw),
-        {i, kh, kw});
-  };
-  return tvm::compute(output_shape, l, name, tag);
+  if(I->dtype.is_int() && W->dtype.is_int() && I->dtype.bits() == 8 && W->dtype.bits() == 8){
+    auto l = [&](tvm::Var b, tvm::Var o, tvm::Var h, tvm::Var w) {
+        return tvm::sum(
+            tvm::cast(tvm::Int(32), T(b, i, stride_h * h + kh, stride_w * w + kw)) * tvm::cast(tvm::Int(32), W(i, o, kh, kw)),
+            {i, kh, kw});
+      };
+    return tvm::compute(output_shape, l, name, tag);
+  }else{
+    auto l = [&](tvm::Var b, tvm::Var o, tvm::Var h, tvm::Var w) {
+        return tvm::sum(
+            T(b, i, stride_h * h + kh, stride_w * w + kw) * W(i, o, kh, kw),
+            {i, kh, kw});
+      };
+    return tvm::compute(output_shape, l, name, tag);
+  }
 }
 
 /*!
@@ -296,12 +306,21 @@ inline tvm::Tensor conv2d_hwcn(const tvm::Tensor& I,
   auto kh = tvm::reduce_axis(tvm::Range{0, W->shape[0]}, "kh");
   auto kw = tvm::reduce_axis(tvm::Range{0, W->shape[1]}, "kw");
   auto T = (pad_h == 0 && pad_w == 0) ? I : pad(I, {pad_h, pad_w});
-  auto l = [&](tvm::Var b, tvm::Var o, tvm::Var h, tvm::Var w) {
-    return tvm::sum(
-        T(stride_h * h + kh, stride_w * w + kw, i, b) * W(kh, kw, i, o),
-        {i, kh, kw});
-  };
-  return tvm::compute(output_shape, l, name, tag);
+  if(I->dtype.is_int() && W->dtype.is_int() && I->dtype.bits() == 8 && W->dtype.bits() == 8){
+      auto l = [&](tvm::Var b, tvm::Var o, tvm::Var h, tvm::Var w) {
+        return tvm::sum(
+            tvm::cast(tvm::Int(32), T(stride_h * h + kh, stride_w * w + kw, i, b)) * tvm::cast(tvm::Int(32), W(kh, kw, i, o)),
+            {i, kh, kw});
+      };
+      return tvm::compute(output_shape, l, name, tag);
+  }else{
+      auto l = [&](tvm::Var b, tvm::Var o, tvm::Var h, tvm::Var w) {
+        return tvm::sum(
+            T(stride_h * h + kh, stride_w * w + kw, i, b) * W(kh, kw, i, o),
+            {i, kh, kw});
+      };
+      return tvm::compute(output_shape, l, name, tag);
+  }
 }
 
 
@@ -350,12 +369,23 @@ inline tvm::Tensor depthwise_conv2d_nchw(const tvm::Tensor& I,
   auto T = (pad_h == 0 && pad_w == 0)
                ? I
                : pad(I, {tvm::Expr(0), tvm::Expr(0), pad_h, pad_w});
-  auto l = [&](tvm::Var b, tvm::Var o, tvm::Var h, tvm::Var w) {
-    return tvm::sum(T(b, i / pCM, stride_h * h + kh, stride_w * w + kw) *
-                        W(i / pCM, o % pCM, kh, kw),
-                    {i, kh, kw});
-  };
-  return tvm::compute(output_shape, l, name, tag);
+  if(I->dtype.is_int() && W->dtype.is_int() && I->dtype.bits() == 8 && W->dtype.bits() == 8){
+      auto l = [&](tvm::Var b, tvm::Var o, tvm::Var h, tvm::Var w) {
+        return tvm::sum(
+                tvm::cast(tvm::Int(32), T(b, i / pCM, stride_h * h + kh, stride_w * w + kw)) *
+                            tvm::cast(tvm::Int(32), W(i / pCM, o % pCM, kh, kw)),
+                        {i, kh, kw});
+      };
+      return tvm::compute(output_shape, l, name, tag);
+  }else{
+      auto l = [&](tvm::Var b, tvm::Var o, tvm::Var h, tvm::Var w) {
+        return tvm::sum(
+                T(b, i / pCM, stride_h * h + kh, stride_w * w + kw) *
+                            W(i / pCM, o % pCM, kh, kw),
+                        {i, kh, kw});
+      };
+      return tvm::compute(output_shape, l, name, tag);
+  }
 }
 
 inline tvm::Tensor depthwise_conv2d_nhwc(const tvm::Tensor& I,
@@ -383,12 +413,23 @@ inline tvm::Tensor depthwise_conv2d_nhwc(const tvm::Tensor& I,
   auto T = (pad_h == 0 && pad_w == 0)
                ? I
                : pad(I, {tvm::Expr(0), pad_h, pad_w, tvm::Expr(0)});
-  auto l = [&](tvm::Var b, tvm::Var h, tvm::Var w, tvm::Var o) {
-    return tvm::sum(T(b, stride_h * h + kh, stride_w * w + kw, i / pCM) *
-                        W(kh, kw, i / pCM, o % pCM),
-                    {kh, kw, i});
-  };
-  return tvm::compute(output_shape, l, name, tag);
+  if(I->dtype.is_int() && W->dtype.is_int() && I->dtype.bits() == 8 && W->dtype.bits() == 8){
+      auto l = [&](tvm::Var b, tvm::Var h, tvm::Var w, tvm::Var o) {
+        return tvm::sum(
+                tvm::cast(tvm::Int(32), T(b, stride_h * h + kh, stride_w * w + kw, i / pCM)) *
+                            tvm::cast(tvm::Int(32), W(kh, kw, i / pCM, o % pCM)),
+                        {kh, kw, i});
+      };
+      return tvm::compute(output_shape, l, name, tag);
+  }else{
+      auto l = [&](tvm::Var b, tvm::Var h, tvm::Var w, tvm::Var o) {
+        return tvm::sum(
+                T(b, stride_h * h + kh, stride_w * w + kw, i / pCM) *
+                            W(kh, kw, i / pCM, o % pCM),
+                        {kh, kw, i});
+      };
+      return tvm::compute(output_shape, l, name, tag);
+  }
 }
 
 /*!
@@ -437,17 +478,31 @@ inline tvm::Tensor group_conv2d_ngchw(const tvm::Tensor& I,
   auto T = (pad_h == 0 && pad_w == 0)
                ? I
                : pad(I, {tvm::Expr(0), tvm::Expr(0), tvm::Expr(0), pad_h, pad_w});
-  auto l = [&](tvm::Array<tvm::Var> args) {
-    tvm::Var b = args[0];
-    tvm::Var g = args[1];
-    tvm::Var o = args[2];
-    tvm::Var h = args[3];
-    tvm::Var w = args[4];
-    return tvm::sum(
-        I(b, g, i, stride_h * h + kh, stride_w * w + kw) * W(g, i, o, kh, kw),
-        {i, kh, kw});
-  };
-  return tvm::compute(output_shape, l, name, tag);
+  if(I->dtype.is_int() && W->dtype.is_int() && I->dtype.bits() == 8 && W->dtype.bits() == 8){
+      auto l = [&](tvm::Array<tvm::Var> args) {
+        tvm::Var b = args[0];
+        tvm::Var g = args[1];
+        tvm::Var o = args[2];
+        tvm::Var h = args[3];
+        tvm::Var w = args[4];
+        return tvm::sum(
+            tvm::cast(tvm::Int(32), I(b, g, i, stride_h * h + kh, stride_w * w + kw)) * tvm::cast(tvm::Int(32), W(g, i, o, kh, kw)),
+            {i, kh, kw});
+      };
+      return tvm::compute(output_shape, l, name, tag);
+  }else{
+      auto l = [&](tvm::Array<tvm::Var> args) {
+        tvm::Var b = args[0];
+        tvm::Var g = args[1];
+        tvm::Var o = args[2];
+        tvm::Var h = args[3];
+        tvm::Var w = args[4];
+        return tvm::sum(
+            I(b, g, i, stride_h * h + kh, stride_w * w + kw) * W(g, i, o, kh, kw),
+            {i, kh, kw});
+      };
+      return tvm::compute(output_shape, l, name, tag);
+  }
 }
 
 }  // namespace topi

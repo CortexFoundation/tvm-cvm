@@ -135,7 +135,19 @@ TOPI_DEFINE_OP_OVERLOAD(operator||, logical_or);
  *
  * \return The result.
  */
-TOPI_DEFINE_BCAST_OP(add, { return a.type().is_int() ? tvm::cast(tvm::Int(32), a) + tvm::cast(tvm::Int(32), b) : a + b; });
+TOPI_DEFINE_BCAST_OP(add, {
+    if(a.type().is_int() && b.type().is_int()){
+        if(a.type().bits() == 8 && b.type().bits() == 8){
+            return tvm::cast(tvm::Int(32), a) + tvm::cast(tvm::Int(32), b);
+        }else if(a.type().bits() == 32 && b.type().bits() == 32){
+            return tvm::cast(tvm::Int(64), a) + tvm::cast(tvm::Int(64), b);
+        }else{
+            return a+b;
+        }
+    }else{
+        return a+b;
+    }
+});
 TOPI_DEFINE_OP_OVERLOAD(operator+, add);
 
 
@@ -150,7 +162,20 @@ TOPI_DEFINE_OP_OVERLOAD(operator+, add);
  *
  * \return The result.
  */
-TOPI_DEFINE_BCAST_OP(subtract, { return a.type().is_int() ? tvm::cast(tvm::Int(32), a) - tvm::cast(tvm::Int(32), b) : a - b; });
+TOPI_DEFINE_BCAST_OP(subtract, {
+    if(a.type().is_int() && b.type().is_int()){
+        if(a.type().bits() == 8 && b.type().bits() == 8){
+            return tvm::cast(tvm::Int(32), a) - tvm::cast(tvm::Int(32), b);
+        }else if(a.type().bits() == 32 && b.type().bits() == 32){
+            return tvm::cast(tvm::Int(64), a) - tvm::cast(tvm::Int(64), b);
+        }
+        else{
+            return a - b;
+        }
+    }else{
+        return a - b;
+    }
+});
 TOPI_DEFINE_OP_OVERLOAD(operator-, subtract);
 
 /*!
@@ -164,7 +189,20 @@ TOPI_DEFINE_OP_OVERLOAD(operator-, subtract);
  *
  * \return The result.
  */
-TOPI_DEFINE_BCAST_OP(multiply, { return a.type().is_int() ? tvm::cast(tvm::Int(32), a) * tvm::cast(tvm::Int(32), b) : a * b; });
+TOPI_DEFINE_BCAST_OP(multiply, {
+    if(a.type().is_int() && b.type().is_int()){
+        if(a.type().bits() == 8 && b.type().bits() == 8){
+            return tvm::cast(tvm::Int(32), a) * tvm::cast(tvm::Int(32), b);
+        }else if(a.type().bits() == 32 && b.type().bits() == 32){
+            return tvm::cast(tvm::Int(64), a) * tvm::cast(tvm::Int(64), b);
+        }
+        else{
+            return a * b;
+        }
+    }else{
+        return a * b;
+    }
+});
 TOPI_DEFINE_OP_OVERLOAD(operator*, multiply);
 
 /*!
@@ -178,7 +216,20 @@ TOPI_DEFINE_OP_OVERLOAD(operator*, multiply);
  *
  * \return The result.
  */
-TOPI_DEFINE_BCAST_OP(divide, { return a.type().is_int() ? tvm::cast(tvm::Int(32), a) / tvm::cast(tvm::Int(32), b) : a / b; });
+TOPI_DEFINE_BCAST_OP(divide, {
+    if(a.type().is_int() && b.type().is_int()){
+        if(a.type().bits() == 8 && b.type().bits() == 8){
+            return tvm::cast(tvm::Int(32), a) / tvm::cast(tvm::Int(32), b);
+        }else if(a.type().bits() == 32 && b.type().bits() == 32){
+            return tvm::cast(tvm::Int(64), a) / tvm::cast(tvm::Int(64), b);
+        }
+        else{
+            return a / b;
+        }
+    }else{
+        return a / b;
+    }
+});
 TOPI_DEFINE_OP_OVERLOAD(operator/, divide);
 
 /*!

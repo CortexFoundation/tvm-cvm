@@ -218,7 +218,7 @@ def cvm_left_shift(lhs, rhs):
     Parameters
     ---------
     lhs : tvm.Tensor or Expr
-    rhs : rhs must between range 1 and 8
+    rhs : rhs must between range 0 and 8
     ---------
     """
     return _cpp.cvm_left_shift(lhs, rhs)

@@ -152,13 +152,23 @@ def conv2d_nchw(Input, Filter, stride, padding, dilation, out_dtype=None):
     ry = tvm.reduce_axis((0, kernel_h), name='ry')
     rx = tvm.reduce_axis((0, kernel_w), name='rx')
 
-    return tvm.compute(
-        (batch, out_channel, out_height, out_width),
-        lambda nn, ff, yy, xx: tvm.sum(
-            temp[nn, rc, yy * stride_h + ry * dilation_h,
-                 xx * stride_w + rx * dilation_w].astype(out_dtype) *
-            Filter[ff, rc, ry, rx].astype(out_dtype),
-            axis=[rc, ry, rx]), tag="conv2d_nchw")
+    if Input.dtype == 'int8' and Filter.dtype == 'int8':
+        return tvm.compute(
+            (batch, out_channel, out_height, out_width),
+            lambda nn, ff, yy, xx: tvm.sum(
+                temp[nn, rc, yy * stride_h + ry * dilation_h,
+                     xx * stride_w + rx * dilation_w].astype('int32') *
+                Filter[ff, rc, ry, rx].astype('int32'),
+                axis=[rc, ry, rx]), tag="conv2d_nchw")
+    else:
+        return tvm.compute(
+            (batch, out_channel, out_height, out_width),
+            lambda nn, ff, yy, xx: tvm.sum(
+                temp[nn, rc, yy * stride_h + ry * dilation_h,
+                     xx * stride_w + rx * dilation_w].astype(out_dtype) *
+                Filter[ff, rc, ry, rx].astype(out_dtype),
+                axis=[rc, ry, rx]), tag="conv2d_nchw")
+
 
 
 def conv2d_hwcn(Input, Filter, stride, padding, dilation, out_dtype=None):
@@ -217,13 +227,23 @@ def conv2d_hwcn(Input, Filter, stride, padding, dilation, out_dtype=None):
     rc = tvm.reduce_axis((0, in_channel), name='rc')
     ry = tvm.reduce_axis((0, kernel_h), name='ry')
     rx = tvm.reduce_axis((0, kernel_w), name='rx')
-    Output = tvm.compute(
-        (out_height, out_width, out_channel, batch),
-        lambda yy, xx, ff, nn: tvm.sum(
-            PaddedInput[yy * stride_h + ry * dilation_h, xx * stride_w + rx * dilation_w,
-                        rc, nn].astype(out_dtype) *
-            Filter[ry, rx, rc, ff].astype(out_dtype), axis=[ry, rx, rc]),
-        name="Conv2dOutput", tag="conv2d_hwcn")
+
+    if Input.dtype == 'int8' and Filter.dtype == 'int8':
+        Output = tvm.compute(
+            (out_height, out_width, out_channel, batch),
+            lambda yy, xx, ff, nn: tvm.sum(
+                PaddedInput[yy * stride_h + ry * dilation_h, xx * stride_w + rx * dilation_w,
+                            rc, nn].astype('int32') *
+                Filter[ry, rx, rc, ff].astype('int32'), axis=[ry, rx, rc]),
+            name="Conv2dOutput", tag="conv2d_hwcn")
+    else:
+        Output = tvm.compute(
+            (out_height, out_width, out_channel, batch),
+            lambda yy, xx, ff, nn: tvm.sum(
+                PaddedInput[yy * stride_h + ry * dilation_h, xx * stride_w + rx * dilation_w,
+                            rc, nn].astype(out_dtype) *
+                Filter[ry, rx, rc, ff].astype(out_dtype), axis=[ry, rx, rc]),
+            name="Conv2dOutput", tag="conv2d_hwcn")
     return Output
 
 
@@ -281,13 +301,24 @@ def conv2d_nhwc(Input, Filter, stride, padding, dilation, out_dtype='float32'):
     rc = tvm.reduce_axis((0, in_channel), name='rc')
     ry = tvm.reduce_axis((0, kernel_h), name='ry')
     rx = tvm.reduce_axis((0, kernel_w), name='rx')
-    Output = tvm.compute(
-        (batch, out_height, out_width, out_channel),
-        lambda nn, yy, xx, ff: tvm.sum(
-            PaddedInput[nn, yy * stride_h + ry * dilation_h,
-                        xx * stride_w + rx * dilation_w, rc].astype(out_dtype) *
-            Filter[ry, rx, rc, ff].astype(out_dtype), axis=[ry, rx, rc]),
-        name="Conv2dOutput", tag="conv2d_nhwc")
+
+    if Input.dtype == 'int8' and Filter.dtype == 'int8':
+        Output = tvm.compute(
+            (batch, out_height, out_width, out_channel),
+            lambda nn, yy, xx, ff: tvm.sum(
+                PaddedInput[nn, yy * stride_h + ry * dilation_h,
+                            xx * stride_w + rx * dilation_w, rc].astype('int32') *
+                Filter[ry, rx, rc, ff].astype('int32'), axis=[ry, rx, rc]),
+            name="Conv2dOutput", tag="conv2d_nhwc")
+    else:
+        Output = tvm.compute(
+            (batch, out_height, out_width, out_channel),
+            lambda nn, yy, xx, ff: tvm.sum(
+                PaddedInput[nn, yy * stride_h + ry * dilation_h,
+                            xx * stride_w + rx * dilation_w, rc].astype(out_dtype) *
+                Filter[ry, rx, rc, ff].astype(out_dtype), axis=[ry, rx, rc]),
+            name="Conv2dOutput", tag="conv2d_nhwc")
+
     return Output
 
 
