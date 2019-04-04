@@ -21,8 +21,8 @@ endif()
 # You can create a config.cmake at build folder
 # and add set(OPTION VALUE) to override these build options.
 # Alernatively, use cmake -DOPTION=VALUE through command-line.
-tvm_option(USE_CUDA "Build with CUDA" OFF)
-tvm_option(USE_OPENCL "Build with OpenCL" OFF)
+tvm_option(USE_CUDA "Build with CUDA" ON)
+tvm_option(USE_OPENCL "Build with OpenCL" ON)
 tvm_option(USE_VULKAN "Build with Vulkan" OFF)
 tvm_option(USE_OPENGL "Build with OpenGL" OFF)
 tvm_option(USE_METAL "Build with Metal" OFF)

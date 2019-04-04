@@ -2,6 +2,7 @@ import logging
 import math
 
 import mxnet as mx
+from mxnet import ndarray as nd
 import nnvm as nnvm
 import tvm
 
@@ -140,7 +141,7 @@ def nnvm_realize(symbol, params, graph, quant_flag):
     """
     logger = logging.getLogger("log.quant.nnvm.realize")
 
-    def _realize(sym, params, graph, inputs_ext, ops):
+    def _realize(sym, params, graph, inputs_ext):
         name = sym.attr('name')
         attr = sym.list_attr()
         op_name = sym.attr('op_name')
@@ -282,31 +283,58 @@ def _matrix_decomposition(sym, params, graph, inputs_ext, infer_shapes):
             weight_name_prefix = childs[1].attr('name')
             bias = childs[2] if attr['no_bias']=='False' else None
 
-            size, number = _find_usable_split(matrix_len, MATRIX_MAXIMUM_SIZE)
-            if size == 1:
-                logger.error(
-                    "cannot find usable split shape for %s in symbol(%s), \
-                    split by size 1 eventually",
-                    childs_shape, name)
-
             X, W = childs[0], childs[1]
             out = mx.sym.flatten(X)
-            out = mx.sym.split(out, axis=1, num_outputs=number)
-
-            # update params
             weight_params = params[weight_name_prefix]
-            weights_split = weight_params.split(axis=1, num_outputs=number)
 
-            node = None
-            for idx in range(number):
-                weight_name = weight_name_prefix + '_split' + str(idx)
-                assert weight_name not in graph
-                weight = mx.sym.var(weight_name)
+            # Use `take` symbol, which is created a lot params
+            if False:
+                number = matrix_len//MATRIX_MAXIMUM_SIZE+1
+                node, start, stop = None, 0, MATRIX_MAXIMUM_SIZE
+                for idx in range(number):
+                    print (start, stop)
+                    weight_name = weight_name_prefix + '_split' + str(idx)
+                    assert weight_name not in graph
+                    weight = mx.sym.var(weight_name)
+                    graph[weight_name] = weight
 
-                tmp = mx.sym.FullyConnected(out[idx], weight, bias, **attr)
-                node = tmp if node is None else (node + tmp)
+                    arr = nd.array(range(start, stop))
+                    indices_name = 'const_var_' + str(start) + '_' + str(stop)
+                    if indices_name in graph:
+                        indices = graph[indices_name]
+                    else:
+                        indices = mx.sym.var(indices_name, shape=arr.shape)
+                        graph[indices_name] = indices
+                        params[indices_name] = arr
 
-                params[weight_name] = weights_split[idx]
+                    tmp = mx.sym.take(out, indices, axis=1, mode='clip')
+                    tmp = mx.sym.FullyConnected(tmp, weight, bias, **attr)
+                    params[weight_name] = weight_params.take(
+                            arr, axis=1, mode='clip')
+
+                    node = tmp if node is None else (node + tmp)
+                    start, stop = stop, stop+MATRIX_MAXIMUM_SIZE
+                    stop = min(stop, matrix_len)
+            else:
+                node = None
+                start, step, idx = 0, MATRIX_MAXIMUM_SIZE, 0
+                while start < matrix_len:
+                    stop = min(start + step, matrix_len)
+
+                    weight_name = weight_name_prefix + '_split' + str(idx)
+                    assert weight_name not in graph
+                    weight = mx.sym.var(weight_name)
+                    graph[weight_name] = weight
+
+                    tmp = mx.sym.slice(out,
+                            begin=(None, start), end=(None, stop))
+                    tmp = mx.sym.FullyConnected(tmp, weight, bias, **attr)
+                    node = tmp if node is None else (node + tmp)
+                    params[weight_name] = weight_params.slice(
+                            begin=(None, start), end=(None, stop))
+
+                    start, idx = stop, idx+1
+
 
             del params[weight_name_prefix]
 
