@@ -78,6 +78,29 @@ def fuse_bn_parameters(resnet_params, quant_flag):
     logger.debug("[ deleted_params_name     ]: %s", deleted_params_name)
     return resnet_params
 
+def matrix_decomposition(params, quant_flag):
+    if not quant_flag.matrix_decomposition:
+        return params
+
+    param_names = params.keys()
+    for name in list(param_names):
+        if name == 'fc0_weight':
+            weight = params['fc0_weight']
+            matrix_len = 100352
+            start, step, idx = 0, 1000, 0
+            while start < matrix_len:
+                stop = min(start+step, matrix_len)
+
+                weight_name = 'fc0_weight' + str(idx)
+                params[weight_name] = weight.slice(
+                        begin=(None, start), end=(None, stop))
+
+                start, idx = stop, idx+1
+
+            del params['fc0_weight']
+
+    return params
+
 def calibrate_parameters(graph, qparams, ctx, calib_data, quant_flag, name_scope=""):
     logger = logging.getLogger("log.calib")
     logger.setLevel(quant_flag.log_level)
@@ -90,13 +113,14 @@ def calibrate_parameters(graph, qparams, ctx, calib_data, quant_flag, name_scope
     cpu_ctx = mx.cpu()
     len_scope = len(name_scope)
 
+    print ("graph", graph.collect_params().keys())
     layers = graph(inputs).get_internals()
     # TODO: !!!IMPORTANT!!!, outputs must be logic sequential
     outputs = [sym for sym in layers.list_outputs() if sym.endswith("_output") ]
     outputs_quant_flags = {output: True for output in outputs}
 
-    image_data = calib_data.data[0]
-    _, input_shift_bits = quant_helper(image_data)
+    # image_data = calib_data.data[0]
+    _, input_shift_bits = quant_helper(calib_data)
     calib_res = {}
 
     def collect_quant_layers():
@@ -111,10 +135,10 @@ def calibrate_parameters(graph, qparams, ctx, calib_data, quant_flag, name_scope
 
         added_params_name = []
         for lname in outputs:
-            logger.debug("calib output data in layer:%s", lname)
             stacked_graph = gluon.SymbolBlock(layers[lname], [inputs])
+            print (lname, stacked_graph.collect_params().keys())
             load_parameters(stacked_graph, qparams, prefix=name_scope, ctx=ctx)
-            qres = stacked_graph.forward(image_data.as_in_context(ctx))
+            qres = stacked_graph.forward(calib_data.as_in_context(ctx))
 
             prename = lname[len_scope:].replace("_fwd", "").replace("_output", "")
             output_sb_name = prename + "_output_shift_bits"
@@ -129,6 +153,9 @@ def calibrate_parameters(graph, qparams, ctx, calib_data, quant_flag, name_scope
                     "shape": quant_res.shape,
                     "shift_bits": output_sb.asnumpy(),
             }
+
+            logger.debug("calib output data in layer(%s) with shift bits(%s)",
+                    lname, output_sb.asnumpy())
 
             del qres
             del quant_res

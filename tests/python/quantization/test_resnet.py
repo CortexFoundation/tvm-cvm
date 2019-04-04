@@ -44,6 +44,11 @@ def gluon_quant_resnet(quant_flag, batch_size=10,
         logger.info("save resnet symbol&params")
         resnet.save_graph(mx.gpu())
 
+    inputs_ext = {
+        'data': {
+            'shape': (batch_size, 3, 224, 244),
+        }
+    }
     inputs = mx.sym.var('data')
     ctx = mx.gpu(1)
 
@@ -65,12 +70,15 @@ def gluon_quant_resnet(quant_flag, batch_size=10,
                         calib_mode=CalibMode.NONE))
             scope_graph.add(graph)
         qparams = qpass.calibrate_parameters(scope_graph, qparams, ctx,
-                calib_data, quant_flag, name_scope=name_scope)
+                calib_data.data[0], quant_flag, name_scope=name_scope)
         nd.save(tmp_params_file, qparams)
 
     graph = resnet.load_quant_graph(quant_flag)
     sym, qparams = graph(inputs), load_parameters(graph, qparams, ctx=ctx)
+
     sym, qparams = fold_cond_op(sym, qparams, {}, quant_flag)
+    # sym, qparams = mx_sym_rewrite(sym, qparams, quant_flag, inputs_ext)
+    # exit()
 
     nd.save(quant_params_file, qparams)
     with open(quant_symbol_file, 'w') as fout:
@@ -273,7 +281,7 @@ if __name__ == "__main__":
             log_level=logging.DEBUG, use_scalar=False,
             disabled_layers=["relu", "pool0", "activation"])
     # enable quantization
-    if False:
+    if True:
         gluon_quant_resnet(quant_flag, batch_size=16, iter_num=10, need_requant=True)
 
     test_nnvm_load(batch_size=16, iter_num=10)

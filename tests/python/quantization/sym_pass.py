@@ -51,7 +51,7 @@ def fold_cond_op(symbol, params, graph, quant_flag):
 
             shift_bits_sym = childs[sb_param_idx]
             sb_param_name = shift_bits_sym.attr('name')
-            assert sb_param_name in params
+            assert sb_param_name in params, sb_param_name
 
             assert len(others) == 2
             # _cond op must be created by same input
@@ -213,50 +213,53 @@ def nnvm_realize(symbol, params, graph, quant_flag):
 
 # matrix decomposition
 MATRIX_MAXIMUM_SIZE = 65536 # 2 ** 16
-def _find_usable_split(n, amax):
-    """Find usable split length with integer n.
-
-    Returns split_size, split_number
-    """
-    assert n > 1
-
-    start = max((n // amax), 2)
-    stop = int(math.sqrt(n)) + 1
-    for i in range(start, stop):
-        if n % i == 0:
-            return n/i, i
-
-    return 1, n
-
 def _matrix_decomposition(sym, params, graph, inputs_ext, infer_shapes):
     logger = logging.getLogger('log.quant.op.rewrite.matrix_decomposition')
     name = sym.attr('name')
     op_name = sym.attr('op_name')
-    childs = sym.get_children()
+    childs = sym_iter(sym.get_children())
     attr = sym.list_attr()
 
     # Infer internal symbol output shape and save it in infer_shapes.
-    inputs_shape = {k:v['shape'] for k, v in inputs_ext.items()}
+    args = sym.list_inputs()
+    inputs_shape = {k:v['shape'] for k,v in inputs_ext.items() if k in args}
     if op_name != 'null':
         _, out_shapes, _ = sym.infer_shape(**inputs_shape)
         if name in infer_shapes:
             logger.warn("Symbol:%s has been infered shape in graph", out_shapes)
             assert infer_shapes[name] == out_shapes
-        infer_shapes[name] = out_shapes
+
+        assert len(out_shapes) == 1
+        infer_shapes[name] = out_shapes[0]
 
     node = sym
     if op_name == 'Convolution':
         logger.info('Convolution: %s', name)
-        childs = sym_iter(childs)
-        sym_ops = [c for c in childs if c.attr('op_name') != 'null']
-        sym_params= [c for c in childs if c.attr('op_name') == 'null']
+        childs_name = [c.attr('name') for c in childs]
+        childs_shape = [infer_shapes[n] for n in childs_name]
 
-        params_name = [p.attr('name') for p in sym_params]
-        params_shape = [params[n].shape for n in params_name if n in params]
+        print (childs_name, childs_shape)
+
+        for idx, cshape in enumerate(childs_shape):
+            cname = childs_name[idx]
+            if cname in params and cshape != params[cname].shape:
+                logger.critical(
+                    "parameter(%s): infer shape(%s) in graph isn't consistent \
+                    with params dict(%s)",
+                    cshape, params[cname].shape)
+
+        assert 'layout' not in attr or attr['layout'] == 'NCHW'
+        # conv input is NCHW format
+        data_shape = childs_shape[0] # (batch, channel, height, weight)
+        weight_shape = childs_shape[1] # (filter, channel, kernel, kernel)
+
+        channel = data_shape[1] # channel
+        kernel = [weight_shape[2], weight_shape[3]] # kernel size
+        matrix_len = channel * kernel[0] * kernel[1]
+        print (data_shape, weight_shape, matrix_len)
 
     elif op_name == 'FullyConnected':
         logger.info('FullyConnected: %s', name)
-        childs = sym_iter(childs)
         childs_name = [c.attr('name') for c in childs]
         childs_shape = [infer_shapes[n] for n in childs_name]
 
@@ -266,7 +269,7 @@ def _matrix_decomposition(sym, params, graph, inputs_ext, infer_shapes):
                 logger.critical(
                     "parameter(%s): infer shape(%s) in graph isn't consistent \
                     with params dict(%s)",
-                    cshape, params[cname])
+                    cshape, params[cname].shape)
 
         if '_weight' not in childs_name[1]:
             logger.warn("'_weight' not in symbol(%s) weight parameter(%s), \
@@ -279,6 +282,7 @@ def _matrix_decomposition(sym, params, graph, inputs_ext, infer_shapes):
 
         weight_shape = childs_shape[1]
         matrix_len = weight_shape[1]
+        print (matrix_len, weight_shape, childs_shape[2])
         if matrix_len > MATRIX_MAXIMUM_SIZE:
             weight_name_prefix = childs[1].attr('name')
             bias = childs[2] if attr['no_bias']=='False' else None
@@ -287,60 +291,30 @@ def _matrix_decomposition(sym, params, graph, inputs_ext, infer_shapes):
             out = mx.sym.flatten(X)
             weight_params = params[weight_name_prefix]
 
-            # Use `take` symbol, which is created a lot params
-            if False:
-                number = matrix_len//MATRIX_MAXIMUM_SIZE+1
-                node, start, stop = None, 0, MATRIX_MAXIMUM_SIZE
-                for idx in range(number):
-                    print (start, stop)
-                    weight_name = weight_name_prefix + '_split' + str(idx)
-                    assert weight_name not in graph
-                    weight = mx.sym.var(weight_name)
-                    graph[weight_name] = weight
+            node = None
+            start, step, idx = 0, MATRIX_MAXIMUM_SIZE, 0
+            while start < matrix_len:
+                stop = min(start + step, matrix_len)
 
-                    arr = nd.array(range(start, stop))
-                    indices_name = 'const_var_' + str(start) + '_' + str(stop)
-                    if indices_name in graph:
-                        indices = graph[indices_name]
-                    else:
-                        indices = mx.sym.var(indices_name, shape=arr.shape)
-                        graph[indices_name] = indices
-                        params[indices_name] = arr
+                weight_name = weight_name_prefix + '_split' + str(idx)
+                assert weight_name not in graph
+                weight = mx.sym.var(weight_name)
+                graph[weight_name] = weight
 
-                    tmp = mx.sym.take(out, indices, axis=1, mode='clip')
-                    tmp = mx.sym.FullyConnected(tmp, weight, bias, **attr)
-                    params[weight_name] = weight_params.take(
-                            arr, axis=1, mode='clip')
+                tmp = mx.sym.slice(out,
+                        begin=(None, start), end=(None, stop))
+                tmp = mx.sym.FullyConnected(tmp, weight, bias, **attr)
+                node = tmp if node is None else (node + tmp)
+                params[weight_name] = weight_params.slice(
+                        begin=(None, start), end=(None, stop))
 
-                    node = tmp if node is None else (node + tmp)
-                    start, stop = stop, stop+MATRIX_MAXIMUM_SIZE
-                    stop = min(stop, matrix_len)
-            else:
-                node = None
-                start, step, idx = 0, MATRIX_MAXIMUM_SIZE, 0
-                while start < matrix_len:
-                    stop = min(start + step, matrix_len)
-
-                    weight_name = weight_name_prefix + '_split' + str(idx)
-                    assert weight_name not in graph
-                    weight = mx.sym.var(weight_name)
-                    graph[weight_name] = weight
-
-                    tmp = mx.sym.slice(out,
-                            begin=(None, start), end=(None, stop))
-                    tmp = mx.sym.FullyConnected(tmp, weight, bias, **attr)
-                    node = tmp if node is None else (node + tmp)
-                    params[weight_name] = weight_params.slice(
-                            begin=(None, start), end=(None, stop))
-
-                    start, idx = stop, idx+1
-
+                start, idx = stop, idx+1
 
             del params[weight_name_prefix]
 
     return node, params
 
-def mx_sym_rewrite(symbol, params, quant_flag, inputs_ext, graph={}):
+def mx_sym_rewrite(symbol, params, quant_flag, inputs_ext):
     logger = logging.getLogger('log.calib.rewrite.op')
     logger.setLevel(quant_flag.log_level)
 

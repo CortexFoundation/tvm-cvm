@@ -68,6 +68,9 @@ def get_nnvm_op(op_name):
     return op
 
 def sym_iter(sym):
+    if sym is None:
+        return None
+
     if isinstance(sym, mx.sym.Symbol):
         sym = [sym[i] for i in range(len(sym))]
 
