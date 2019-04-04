@@ -128,19 +128,18 @@ print(lib.imported_modules[0].get_source())
 # is serialized into a bytearray.
 #
 temp = util.tempdir()
-path_lib = temp.relpath("deploy.so")
-lib.export_library(path_lib)
-with open(temp.relpath("deploy.json"), "w") as fo:
+lib.export_library("deploy.so", fcompile=False)
+with open("deploy.json", "w") as fo:
     fo.write(deploy_graph.json())
-with open(temp.relpath("deploy.params"), "wb") as fo:
+with open("deploy.params", "wb") as fo:
     fo.write(nnvm.compiler.save_param_dict(params))
 print(temp.listdir())
 
 ######################################################################
 # We can load the module back.
-loaded_lib = tvm.module.load(path_lib)
-loaded_json = open(temp.relpath("deploy.json")).read()
-loaded_params = bytearray(open(temp.relpath("deploy.params"), "rb").read())
+loaded_lib = tvm.module.load("deploy.so")
+loaded_json = open("deploy.json").read()
+loaded_params = bytearray(open("deploy.params", "rb").read())
 module = graph_runtime.create(loaded_json, loaded_lib, tvm.gpu(0))
 params = nnvm.compiler.load_param_dict(loaded_params)
 # directly load from byte array

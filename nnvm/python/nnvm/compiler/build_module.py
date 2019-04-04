@@ -271,6 +271,7 @@ def build(graph, target=None, shape=None, dtype="float32",
         # Initial pass do shape type inference
         ishape, _ = graph_util.infer_shape(graph, **shape)
         shape.update(zip(graph.index.input_names, ishape))
+        print(dtype)
         if not isinstance(dtype, str):
             idtype, _ = graph_util.infer_dtype(graph, **dtype)
             dtype.update(zip(graph.index.input_names, idtype))

@@ -8,11 +8,11 @@ from tvm.contrib.pickle_memoize import memoize
 from topi.util import get_const_tuple
 
 
-def verify_conv2d_hwcn(batch, in_channel, in_size, num_filter, kernel, stride, padding, dilation=1):
+def verify_conv2d_hwcn(batch, in_channel, in_size, num_filter, kernel, stride, padding, dilation=1, itype='int8', otype='int32'):
     in_height = in_width = in_size
 
-    A = tvm.placeholder((in_height, in_width, in_channel, batch), name='A')
-    W = tvm.placeholder((kernel, kernel, in_channel, num_filter), name='W')
+    A = tvm.placeholder((in_height, in_width, in_channel, batch), name='A', dtype=itype)
+    W = tvm.placeholder((kernel, kernel, in_channel, num_filter), name='W', dtype=itype)
     B = topi.nn.conv2d_hwcn(A, W, stride, padding, dilation)
     C = topi.nn.relu(B)
     s1 = topi.cuda.schedule_conv2d_hwcn([B])
@@ -56,12 +56,12 @@ def verify_conv2d_hwcn(batch, in_channel, in_size, num_filter, kernel, stride, p
 def test_conv2d_hwcn():
     verify_conv2d_hwcn(1, 256, 32, 256, 3, 1, "SAME")
     verify_conv2d_hwcn(1, 256, 32, 256, 3, 1, "SAME")
-    verify_conv2d_hwcn(4, 128, 16, 128, 5, 2, "SAME")
-    verify_conv2d_hwcn(4, 128, 16, 256, 5, 2, "SAME")
+    verify_conv2d_hwcn(4, 128, 16, 128, 5, 2, "SAME", itype='float32', otype='float32')
+    verify_conv2d_hwcn(4, 128, 16, 256, 5, 2, "SAME", itype='float32', otype='float32')
     verify_conv2d_hwcn(1, 256, 32, 256, 3, 1, "VALID")
     verify_conv2d_hwcn(1, 256, 32, 256, 3, 1, "VALID")
-    verify_conv2d_hwcn(4, 128, 16, 128, 5, 2, "VALID")
-    verify_conv2d_hwcn(4, 128, 16, 256, 5, 2, "VALID")
+    verify_conv2d_hwcn(4, 128, 16, 128, 5, 2, "VALID", itype='float32', otype='float32')
+    verify_conv2d_hwcn(4, 128, 16, 256, 5, 2, "VALID", itype='float32', otype='float32')
     # dilation = 2
     verify_conv2d_hwcn(1, 256, 32, 256, 3, 1, "SAME", dilation=2)
 

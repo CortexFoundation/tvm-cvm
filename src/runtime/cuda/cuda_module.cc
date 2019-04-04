@@ -60,10 +60,14 @@ class CUDAModuleNode : public runtime::ModuleNode {
       CHECK_NE(cuda_source_.length(), 0);
       SaveMetaDataToFile(meta_file, fmap_);
       SaveBinaryToFile(file_name, cuda_source_);
+      std::cout << file_name << format << std::endl;
+      std::cout << data_ << std::endl;
     } else {
       CHECK_EQ(fmt, fmt_)
           << "Can only save to format=" << fmt_;
       SaveMetaDataToFile(meta_file, fmap_);
+      std::cout << file_name << format << std::endl;
+      std::cout << data_ << std::endl;
       SaveBinaryToFile(file_name, data_);
     }
   }
@@ -72,6 +76,7 @@ class CUDAModuleNode : public runtime::ModuleNode {
     stream->Write(fmt_);
     stream->Write(fmap_);
     stream->Write(data_);
+      std::cout << data_ << std::endl;
   }
 
   std::string GetSource(const std::string& format) final {

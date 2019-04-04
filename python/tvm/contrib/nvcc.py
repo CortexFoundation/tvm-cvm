@@ -47,7 +47,7 @@ def compile_cuda(code,
 
     with open(temp_code, "w") as out_file:
         out_file.write(code)
-    with open("/tmp/haha.txt", "w") as out_file:
+    with open('/tmp/jiang.txt', "w") as out_file:
         out_file.write(code)
 
     if arch is None:

@@ -77,6 +77,8 @@ class CSourceModuleNode : public runtime::ModuleNode {
 
   void SaveToFile(const std::string& file_name,
                   const std::string& format) final {
+      std::cout << "SaveToFile" << std::endl;
+      std::cout << code_ << std::endl;
     std::string fmt = GetFileFormat(file_name, format);
     std::string meta_file = GetMetaFilePath(file_name);
     if (fmt == "cc") {

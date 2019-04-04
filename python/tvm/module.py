@@ -109,12 +109,12 @@ class Module(ModuleBase):
             else:
                 assert self.type_key == "c"
                 object_format = "cc"
-        path_obj = temp.relpath("lib." + object_format)
+        path_obj = "lib." + object_format
         self.save(path_obj)
         files = [path_obj]
         is_system_lib = self.type_key == "llvm" and self.get_function("__tvm_is_system_module")()
         if self.imported_modules:
-            path_cc = temp.relpath("devc.cc")
+            path_cc = "devc.cc"
             with open(path_cc, "w") as f:
                 f.write(_PackImportsToC(self, is_system_lib))
             files.append(path_cc)

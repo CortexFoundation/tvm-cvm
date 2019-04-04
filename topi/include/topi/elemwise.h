@@ -182,11 +182,19 @@ inline Tensor elemwise_sum(const Array<Tensor>& xs,
                            std::string tag = kElementWise) {
   CHECK_GT(xs.size(), 0) << "elemwise sum must have at least one input tensor.";
   return compute(xs[0]->shape, [&](const Array<Var>& i) {
-      auto sum_expr = xs[0](i);
-      for (size_t j = 1; j < xs.size(); j++) {
-        sum_expr = sum_expr + xs[j](i);
+      if (xs[0](i).type().is_int()) {
+        auto sum_expr = tvm::cast(tvm::Int(32), xs[0](i));
+        for (size_t j = 1; j < xs.size(); j++) {
+          sum_expr = sum_expr + tvm::cast(tvm::Int(32), xs[j](i));
+        }
+        return sum_expr;
+      } else {
+        auto sum_expr = xs[0](i);
+        for (size_t j = 1; j < xs.size(); j++) {
+          sum_expr = sum_expr + xs[j](i);
+        }
+        return sum_expr;
       }
-      return sum_expr;
   }, name, tag);
 }
 

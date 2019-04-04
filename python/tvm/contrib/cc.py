@@ -13,6 +13,7 @@ def create_shared(output,
                   objects,
                   options=None,
                   cc="g++"):
+    print("create_shared")
     """Create shared library.
 
     Parameters
@@ -38,6 +39,7 @@ def create_shared(output,
 
 
 def _linux_shared(output, objects, options, cc="g++"):
+    print("_linux_shared")
     cmd = [cc]
     cmd += ["-shared", "-fPIC"]
     if sys.platform == "darwin":
@@ -49,6 +51,7 @@ def _linux_shared(output, objects, options, cc="g++"):
         cmd += objects
     if options:
         cmd += options
+    print(cmd)
     proc = subprocess.Popen(
         cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     (out, _) = proc.communicate()

@@ -117,6 +117,10 @@ if tgt == "cuda" or tgt.startswith('opencl'):
 # to the generated device function internally.
 #
 fadd = tvm.build(s, [A, B, C], tgt, target_host=tgt_host, name="myadd")
+print (fadd.get_source())
+print ('================================================================')
+print (fadd.imported_modules)
+exit(-1)
 
 ######################################################################
 # Run the Function
@@ -135,9 +139,14 @@ fadd = tvm.build(s, [A, B, C], tgt, target_host=tgt_host, name="myadd")
 ctx = tvm.context(tgt, 0)
 
 n = 1024
+n1 = 2048
 a = tvm.nd.array(np.random.uniform(size=n).astype(A.dtype), ctx)
+a1 = tvm.nd.array(np.random.uniform(size=n1).astype(A.dtype), ctx)
 b = tvm.nd.array(np.random.uniform(size=n).astype(B.dtype), ctx)
+b1 = tvm.nd.array(np.random.uniform(size=n1).astype(B.dtype), ctx)
 c = tvm.nd.array(np.zeros(n, dtype=C.dtype), ctx)
+c1 = tvm.nd.array(np.zeros(n1, dtype=C.dtype), ctx)
+
 fadd(a, b, c)
 tvm.testing.assert_allclose(c.asnumpy(), a.asnumpy() + b.asnumpy())
 
@@ -191,12 +200,12 @@ from tvm.contrib import cc
 from tvm.contrib import util
 
 temp = util.tempdir()
-fadd.save(temp.relpath("myadd.o"))
+fadd.save("myadd.o")
 if tgt == "cuda":
-    fadd.imported_modules[0].save(temp.relpath("myadd.ptx"))
+    fadd.imported_modules[0].save(("myadd.ptx"))
 if tgt.startswith('opencl'):
-    fadd.imported_modules[0].save(temp.relpath("myadd.cl"))
-cc.create_shared(temp.relpath("myadd.so"), [temp.relpath("myadd.o")])
+    fadd.imported_modules[0].save(("myadd.cl"))
+cc.create_shared(("myadd.so"), [("myadd.o")])
 print(temp.listdir())
 
 ######################################################################
@@ -215,13 +224,13 @@ print(temp.listdir())
 # The following code load the host and device module separately and
 # re-link them together. We can verify that the newly loaded function works.
 #
-fadd1 = tvm.module.load(temp.relpath("myadd.so"))
+fadd1 = tvm.module.load(("myadd.so"))
 if tgt == "cuda":
-    fadd1_dev = tvm.module.load(temp.relpath("myadd.ptx"))
+    fadd1_dev = tvm.module.load(("myadd.ptx"))
     fadd1.import_module(fadd1_dev)
 
 if tgt.startswith('opencl'):
-    fadd1_dev = tvm.module.load(temp.relpath("myadd.cl"))
+    fadd1_dev = tvm.module.load(("myadd.cl"))
     fadd1.import_module(fadd1_dev)
 
 fadd1(a, b, c)
@@ -236,10 +245,10 @@ tvm.testing.assert_allclose(c.asnumpy(), a.asnumpy() + b.asnumpy())
 # them together with the host code.
 # Currently we support packing of Metal, OpenCL and CUDA modules.
 #
-fadd.export_library(temp.relpath("myadd_pack.so"))
-fadd2 = tvm.module.load(temp.relpath("myadd_pack.so"))
-fadd2(a, b, c)
-tvm.testing.assert_allclose(c.asnumpy(), a.asnumpy() + b.asnumpy())
+fadd.export_library(("myadd_pack.so"))
+fadd2 = tvm.module.load(("myadd_pack.so"))
+fadd2(a1, b1, c1)
+tvm.testing.assert_allclose(c1.asnumpy(), a1.asnumpy() + b1.asnumpy())
 
 ######################################################################
 # .. note:: Runtime API and Thread-Safety

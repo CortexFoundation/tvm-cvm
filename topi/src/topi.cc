@@ -121,6 +121,8 @@ TOPI_REGISTER_BCAST_OP("topi.equal", topi::equal);
 TOPI_REGISTER_BCAST_OP("topi.not_equal", topi::not_equal);
 TOPI_REGISTER_BCAST_OP("topi.greater_equal", topi::greater_equal);
 TOPI_REGISTER_BCAST_OP("topi.less_equal", topi::less_equal);
+TOPI_REGISTER_BCAST_OP("topi.cvm_left_shift", topi::cvm_left_shift);
+TOPI_REGISTER_BCAST_OP("topi.cvm_right_shift", topi::cvm_right_shift);
 
 /* Ops from elemwise.h */
 TVM_REGISTER_GLOBAL("topi.exp")

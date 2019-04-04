@@ -1,9 +1,9 @@
 """TVM operator fully connected compute."""
 from __future__ import absolute_import
 import tvm
+from tvm.contrib import cvm
 from .. import tag
-from .. import cpp
-from verify import *
+from .. import math
 
 def dense_default(data, weight, bias=None):
     """The default implementation of dense in topi.
@@ -26,21 +26,30 @@ def dense_default(data, weight, bias=None):
     """
     assert len(data.shape) == 2 and len(weight.shape) == 2, \
         "only support 2-dim dense"
-    ret = verify_dense(data, weight, bias)
-    assert ret.value == True, "dense verify failed"
-
     if bias is not None:
         assert len(bias.shape) == 1
+
     batch, in_dim = data.shape
     out_dim, _ = weight.shape
     k = tvm.reduce_axis((0, in_dim), name='k')
-    matmul = tvm.compute((batch, out_dim), \
-                         lambda i, j: tvm.sum(data[i, k] * weight[j, k], axis=k), \
-                         tag='dense')
-    if bias is not None:
+    if data.dtype == 'int8' and weight.dtype == 'int8':
         matmul = tvm.compute((batch, out_dim), \
-                             lambda i, j: matmul[i, j] + bias[j], \
-                             tag=tag.BROADCAST)
+                             lambda i, j: tvm.sum(data[i, k].astype('int32') * weight[j, k].astype('int32'), axis=k), \
+                             tag='dense')
+        if bias is not None:
+            matmul = tvm.compute((batch, out_dim), \
+                                 lambda i, j: matmul[i, j].astype('int64') + bias[j].astype('int64'), \
+                                 tag=tag.BROADCAST)
+    else:
+        matmul = tvm.compute((batch, out_dim), \
+                             lambda i, j: tvm.sum(data[i, k] * weight[j, k], axis=k), \
+                             tag='dense')
+        if bias is not None:
+            matmul = tvm.compute((batch, out_dim), \
+                                 lambda i, j: matmul[i, j] + bias[j], \
+                                 tag=tag.BROADCAST)
+
+
     return matmul
 
 
@@ -64,5 +73,9 @@ def dense(data, weight, bias=None):
     output : tvm.Tensor
         2-D with shape [batch, out_dim]
     """
+    target = tvm.target.current_target()
+    if "cvm" in target.libs:
+        # check type here.
+        return cvm.dense(data, weight)
     return dense_default(data, weight, bias)
     #return cpp.nn.dense(data, weight, bias)

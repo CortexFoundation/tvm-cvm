@@ -41,6 +41,7 @@ def verify_broadcast_binary_ele(lhs_shape, rhs_shape,
     B = (tvm.var("B", dtype=dtype) if rhs_shape is None
          else tvm.placeholder(shape=rhs_shape, name="B", dtype=dtype))
     C = ftopi(A, B)
+    print(C.dtype)
     if isinstance(A, tvm.expr.Expr) and isinstance(B, tvm.expr.Expr):
         assert(isinstance(C, tvm.expr.Expr))
         return
@@ -74,14 +75,14 @@ def verify_broadcast_binary_ele(lhs_shape, rhs_shape,
                                         size=rhs_shape).astype(A.dtype)
             rhs_nd = tvm.nd.array(rhs_npy, ctx)
 
-        out_npy = fnumpy(lhs_npy, rhs_npy)
+        out_npy = fnumpy(lhs_npy.astype(C.dtype), rhs_npy)
         out_nd = tvm.nd.array(np.empty(out_npy.shape).astype(C.dtype), ctx)
         foo(lhs_nd, rhs_nd, out_nd)
         tvm.testing.assert_allclose(out_nd.asnumpy(), out_npy, rtol=1E-4, atol=1E-4)
 
-    for target in get_all_backend():
-        check_device(target)
-    check_device("sdaccel")
+#    for target in get_all_backend():
+#        check_device(target)
+    check_device("cuda")
 
 def test_broadcast_to():
     verify_broadcast_to_ele((1,), (10,), topi.broadcast_to)
@@ -91,31 +92,38 @@ def test_broadcast_to():
 
 def test_add():
     verify_broadcast_binary_ele(
-        (), (), topi.add, np.add)
+        (), (), topi.add, np.add, dtype='int32')
     verify_broadcast_binary_ele(
-        (5, 2, 3), (2, 1), topi.add, np.add)
+        (5, 2, 3), (2, 1), topi.add, np.add, dtype='int8')
+    verify_broadcast_binary_ele(
+        (5, 2, 3), None, topi.add, np.add, dtype='float32')
+
 
 def test_subtract():
     verify_broadcast_binary_ele(
-        (5, 2, 3), (), topi.subtract, np.subtract)
+        (5, 2, 3), (), topi.subtract, np.subtract, dtype='int32')
     verify_broadcast_binary_ele(
-        (5, 2, 3), None, topi.subtract, np.subtract)
+        (5, 2, 3), (1,), topi.subtract, np.subtract, dtype='int8')
     verify_broadcast_binary_ele(
         None, None, topi.subtract, np.subtract)
     verify_broadcast_binary_ele(
-        (1, 32), (64, 32), topi.subtract, np.subtract)
+        (1, 32), (64, 32), topi.subtract, np.subtract, dtype='float32')
 
 def test_multiply():
     verify_broadcast_binary_ele(
-        (5, 64, 128), (2, 5, 64, 1), topi.multiply, np.multiply)
+        (5, 64, 128), (2, 5, 64, 1), topi.multiply, np.multiply, dtype='int32')
+    verify_broadcast_binary_ele(
+        (5, 64, 128), (1,), topi.multiply, np.multiply, dtype='int8')
+    verify_broadcast_binary_ele(
+        (5, 64, 128), (1,), topi.multiply, np.multiply, dtype='float32')
 
 def test_divide():
     verify_broadcast_binary_ele(
-        None, (10,), topi.divide, np.divide, rhs_min=0.0001)
+        (5,), (1,), topi.divide, np.divide, dtype='int32')
     verify_broadcast_binary_ele(
-        (), None, topi.divide, np.divide, rhs_min=0.0001)
+        (10,2), (1,), topi.divide, np.divide, dtype='int32')
     verify_broadcast_binary_ele(
-        (2, 3, 1, 32), (64, 32), topi.divide, np.divide, rhs_min=0.0001)
+        (2, 3, 1, 32), (64, 32), topi.divide, np.divide, dtype='float32')
 
 def test_maximum_minmum():
     verify_broadcast_binary_ele(

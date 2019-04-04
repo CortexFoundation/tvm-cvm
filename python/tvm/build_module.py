@@ -397,6 +397,7 @@ def lower(sch,
 
 
 def _build_for_device(flist, target, target_host):
+    print("_build_for_device")
     """Build the lowered functions for a device with the given compilation
     target.
 

@@ -212,6 +212,27 @@ def right_shift(lhs, rhs):
     """
     return _cpp.right_shift(lhs, rhs)
 
+def cvm_left_shift(lhs, rhs):
+    """cvm left shift with auto-broadcasting : return lhs << rhs
+
+    Parameters
+    ---------
+    lhs : tvm.Tensor or Expr
+    rhs : rhs must between range 0 and 8
+    ---------
+    """
+    return _cpp.cvm_left_shift(lhs, rhs)
+
+def cvm_right_shift(lhs, rhs):
+    """cvm right shift with auto-broadcasting : return lhs >> rhs
+
+    Parameters
+    ---------
+    lhs : tvm.Tensor or Expr
+    rhs : rhs must between range 0 and 8
+    ---------
+    """
+    return _cpp.cvm_right_shift(lhs, rhs)
 
 def greater(lhs, rhs):
     """Compute (lhs>rhs) with auto-broadcasting
