@@ -13,23 +13,41 @@ import nnvm
 
 import numpy as np
 import logging
-import json
 import os
 
 from quant_op import *
 from quant_utils import *
 from utils import *
 import quant_pass as qpass
-import cvm_pass
 
 # import resnet18 as resnet
 # import resnet152 as resnet
 import resnet50 as resnet
+
 from sym_pass import *
 
 def get_dump_fname(suffix="quant"):
     return '%s.%s'%(resnet.SYMBOL_FILE, suffix), \
         '%s.%s'%(resnet.PARAMS_FILE, suffix)
+
+def mxnet_realize(quant_flag):
+    logger = logging.getLogger("log.quant.main.mxnet")
+
+    load_symbol_file, load_params_file = get_dump_fname("gluon.quant")
+
+    inputs = mx.sym.var('data')
+    ctx = mx.gpu(1)
+
+    mxnet_symbol = mx.sym.load(load_symbol_file)
+    params = nd.load(load_params_file)
+
+    #  sym, params = quant_realize(mxnet_symbol, params, {}, quant_flag)
+
+    save_symbol_file, save_params_file = get_dump_fname("post.quant")
+    nd.save(save_params_file, params)
+    print (params.keys())
+    with open(save_symbol_file, 'w') as fout:
+        fout.write(sym.tojson())
 
 def gluon_quant_resnet(quant_flag, batch_size=10,
         iter_num=10, need_requant=False):
@@ -44,7 +62,7 @@ def gluon_quant_resnet(quant_flag, batch_size=10,
         resnet.save_graph(mx.gpu())
 
     inputs = mx.sym.var('data')
-    ctx = mx.gpu(1)
+    ctx = mx.cpu(0)
 
     logger.info("load dataset")
     data_iter = load_dataset(batch_size)
@@ -161,70 +179,47 @@ def test_nnvm_load(batch_size=10, iter_num=10):
     logger = logging.getLogger("log.test.nnvm")
     logger.info("=== Log Test NNVM ===")
 
-    target = "cuda"
+    target = "llvm -mcpu=core-avx2 -libs=cvm"
     ctx = tvm.context(target, 0)
+
+    load_symbol_fname, load_params_fname = get_dump_fname("gluon.quant")
 
     in_shape = (batch_size, 3, 224, 224)
     data_iter = load_dataset(batch_size)
     calib_data = data_iter.next()
 
-    dump_symbol, dump_params = get_dump_fname("nnvm.compile")
-    _, dump_lib = get_dump_fname("nnvm.so")
-    if True or not os.path.exists(dump_symbol):
-        load_symbol_fname, load_params_fname = get_dump_fname("gluon.quant")
-        print ('sym, params', load_symbol_fname, load_params_fname)
+    params = nd.load(load_params_fname)
 
-        params = nd.load(load_params_fname)
+    sym = mx.sym.load(load_symbol_fname)
+    nnvm_sym, _ = nnvm.frontend.from_mxnet(sym)
 
-        sym = mx.sym.load(load_symbol_fname)
-        nnvm_sym, _ = nnvm.frontend.from_mxnet(sym)
-        nnvm_sym, params = int_realize(nnvm_sym, params, {}, quant_flag)
+    nnvm_sym, params = quant_realize(nnvm_sym, params, {}, quant_flag)
+    # , ctx=tvm.context("opencl", 0))
 
-        nnvm_graph = nnvm.graph.create(nnvm_sym)
-        save_symbol_file, _ = get_dump_fname("nnvm.realize")
-        with open(save_symbol_file, "w") as fout:
-           fout.write(nnvm_graph.json())
+    nnvm_graph = nnvm.graph.create(nnvm_sym)
+    save_symbol_file, _ = get_dump_fname("nnvm.realize")
+    with open(save_symbol_file, "w") as fout:
+       fout.write(nnvm_graph.ir())
+    use_dtype = "int32"
+    for key, value in list(params.items()):
+        params[key] = tvm.nd.array(value.asnumpy().astype(use_dtype), ctx)
+    with nnvm.compiler.build_config(opt_level=0):
+#, add_pass=["PrecomputePrune"]):
+        deploy_graph, lib, params = nnvm.compiler.build(
+            nnvm_sym, target=target,
+            shape={"data": in_shape},
+            params=params, dtype=use_dtype)
+        ret = deploy_graph.apply('SaveJSON')
+        graph_str = ret.json_attr('json')
 
-        # nnvm_sym, params = cvm_pass.create(nnvm_sym, params, quant_flag)
-        # save_symbol_file, _ = get_dump_fname("cvm.quant")
-        # with open(save_symbol_file, "w") as fout:
-        #    fout.write(nnvm_sym.tojson())
-
-        use_dtype = "int32"
-        for key, value in list(params.items()):
-            params[key] = tvm.nd.array(value.asnumpy().astype(use_dtype), ctx)
-
-        with nnvm.compiler.build_config(opt_level=0): #, add_pass=["PrecomputePrune"]):
-            deploy_graph, lib, params = nnvm.compiler.build(
-                nnvm_sym, target=target, shape={"data": in_shape},
-                params=params, dtype=use_dtype)
-
-        with open(dump_symbol, "w") as fout:
-            fout.write(deploy_graph.json())
-        with open(dump_params, "wb") as fout:
-            param_bytes = nnvm.compiler.save_param_dict(params)
-            fout.write(param_bytes)
-        lib.export_library(dump_lib)
-
-    print ("Load graph from json")
-    with open(dump_symbol) as fout:
-        json_str = fout.read()
-        deploy_graph = nnvm.graph.load_json(json_str)
-    with open(dump_params, "rb") as fread:
-        param_bytes = fread.read()
-        params = nnvm.compiler.load_param_dict(param_bytes)
-    lib = tvm.module.load(dump_lib)
-
-    print (params.keys())
-    # cvm_pass.infer_type(deploy_graph, params)
-    # deploy_graph.apply("InferType")
-    # dtype_attr = deploy_graph.json_attr("dtype")
-    # print (len(dtype_attr), dtype_attr)
-    # with open("deploy_%s_ir.log"%target, "w") as fout:
-    #     fout.write(deploy_graph.ir())
+        with open("graph_str.log", "w") as fout:
+            fout.write(graph_str)
+        with open("deploy.log", "w") as fout:
+            fout.write(deploy_graph.ir())
 
     module = graph_runtime.create(deploy_graph, lib, ctx)
-    module.load_params(param_bytes)
+    param_bytes = nnvm.compiler.save_param_dict(params)
+    module.set_input(**params)
 
     out_shape = (1000,)
     qacc, total = 0, 0
@@ -250,21 +245,6 @@ def test_nnvm_load(batch_size=10, iter_num=10):
         logger.info("Iteration: %5d | Quant Acc: %.2f%% | Total Sample: %5d",
                 i, 100.*qacc/total, total)
 
-def save_data():
-    batch_size = 1024
-    data_iter = load_dataset(batch_size)
-    calib_data = data_iter.next()
-    x, _ = quant_helper(calib_data.data[0])
-    np.save('/tmp/imagenet.x', x.asnumpy())
-    np.save('/tmp/imagenet.y', calib_data.label[0].asnumpy())
-
-
-    qimage_data, _ = quant_helper(calib_data.data[0])
-    np.savez("data.npz", a=qimage_data.asnumpy())
-    npdata = np.load("data.npz")['a']
-    module.run(data=npdata)
-    qres = module.get_output(0).asnumpy()
-    print(qres)
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.NOTSET)
@@ -285,13 +265,12 @@ if __name__ == "__main__":
         handler.setFormatter(formatter)
 
     quant_flag = QuantFlag(is_fuse_bn=True, calib_mode=CalibMode.NAIVE,
-            log_level=logging.DEBUG, use_scalar=False,
+            log_level=logging.DEBUG,
             disabled_layers=["relu", "pool0", "activation"])
-    # enable quantization
-    if False:
-        gluon_quant_resnet(quant_flag, batch_size=16, iter_num=10, need_requant=False)
-    save_data()
-    exit(-1)
-    test_nnvm_load(batch_size=16, iter_num=10)
+
+    # gluon_quant_resnet(quant_flag, batch_size=10, iter_num=10,
+    #         need_requant=False)
+
+    test_nnvm_load(batch_size=10, iter_num=10)
 
 

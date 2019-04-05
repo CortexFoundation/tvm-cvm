@@ -1,10 +1,119 @@
 import logging
+import json
+import math
+import numpy as np
+
+import quant_pass as qpass
 
 import mxnet as mx
+from mxnet.symbol import _internal
+from mxnet import symbol as _sym
+
 import nnvm as nnvm
 import tvm
 
-from sym_utils import *
+INT32_MIN, INT32_MAX = -2147483647, 2147483647
+INT8_MIN, INT8_MAX = -127, 127
+
+class _GraphHelper(object):
+    def __init__(self, graph={}, gtype=_sym.Symbol):
+        self.graph = graph
+        self.gtype = gtype
+
+    def _get_name(self, name):
+        if isinstance(name, self.gtype):
+            name = name.attr('name')
+
+        assert isinstance(name, str)
+        return name
+
+    def get_node(self, sym, default=None):
+        name = self._get_name(sym)
+
+        if name not in self.graph:
+            if default is None:
+                assert False, "op:%s haven't been processed in graph"%name
+            else:
+                assert isinstance(default, self.gtype)
+                self.graph[name] = default
+
+        return self.graph[name]
+
+    def set_node(self, sym, default):
+        name = self._get_name(sym)
+
+        assert name not in self.graph
+
+        self.graph[name] = default
+        return default
+
+
+
+def _topo_sort(symbol):
+    """Sort all symbols in the mxnet graph in topological order.
+
+    Parameters
+    ----------
+    symbol : mxnet.sym.Symbol
+
+    Returns:
+    -------
+    list
+        List of mxnet symbol
+    """
+    queue = []
+    symbol_map = {}
+    deps = {}
+    dep_cnts = {}
+    for s in symbol:
+        symbol_map[s.attr('name')] = s
+        queue.append(s)
+    while queue:
+        sym = queue.pop(0)
+        name = sym.attr('name')
+        childs = sym.get_children()
+        if childs is None:
+            dep_cnts[name] = 0
+        else:
+            dep_cnts[name] = len({c.attr('name') for c in childs})
+            for child in childs:
+                child_name = child.attr('name')
+                if child_name not in deps:
+                    deps[child_name] = set()
+                deps[child_name].add(name)
+                if child_name not in symbol_map:
+                    symbol_map[child_name] = child
+                    queue.append(child)
+    order = []
+    while dep_cnts:
+        remove = []
+        for name in dep_cnts:
+            if dep_cnts[name] == 0:
+                order.append(symbol_map[name])
+                remove.append(name)
+                if name in deps:
+                    for other in deps[name]:
+                        dep_cnts[other] -= 1
+        for name in remove:
+            del dep_cnts[name]
+    return order
+
+def _get_mxnet_op(op_name):
+    try:
+        op = getattr(_internal, op_name)
+    except:
+        op = getattr(_sym, op_name)
+
+    if not op:
+        raise RuntimeError("Unable to map op_name {} to mxnet.sym".format(op_name))
+    return op
+
+def _get_nnvm_op(op_name):
+    op = getattr(nnvm.sym, op_name)
+
+    if not op:
+        raise RuntimeError("Unable to map op_name {} to nnvm.sym".format(op_name))
+    return op
 
 def fold_cond(symbol, params, graph, quant_flag):
     logger = logging.getLogger("log.quant.fold.condition")
@@ -22,7 +131,7 @@ def fold_cond(symbol, params, graph, quant_flag):
 
         # update inputs layer symbol
         if childs is not None:
-            childs = [gh.get_node(childs[idx]) for idx, child in enumerate(childs.list_outputs())]
+            childs = [gh.get_node(child) for child in childs]
             # update childs inputs
             op = _get_mxnet_op(op_name)
             node = op(*childs, **attr)
@@ -36,7 +145,6 @@ def fold_cond(symbol, params, graph, quant_flag):
             # cond_func, then_func, else_func = sym.attr('subgraph')
             sb_param_idx, lesser_scalar_idx, others = None, None, []
             for idx, child in enumerate(childs):
-                child = childs[idx]
                 child_op_name = child.attr('op_name')
                 if child_op_name == 'null':
                     assert sb_param_idx is None
@@ -115,7 +223,113 @@ def fold_cond(symbol, params, graph, quant_flag):
 
     return ret_sym, params
 
-def int_realize(symbol, params, graph, quant_flag):
+def fuse_conv_bn(symbol, params, graph, quant_flag):
+    logger = logging.getLogger("log.fuse.conv_bn")
+
+    def get_node(sym):
+        name = sym.attr('name')
+        if name not in graph:
+            assert False, "Unrecognized error in fuse_conv_bn"
+        output_index = json.loads(sym.tojson())['heads'][0][1]
+        return graph[name][output_index]
+
+    logger.info("Fuse conv & bn")
+    qparams = qpass.fuse_bn_parameters(params, quant_flag)
+    graph = {}
+    fuse_maps = {}
+    remove_nodes = []
+    for sym in _topo_sort(symbol):
+        name = sym.attr('name')
+        attr = sym.list_attr()
+        op_name = sym.attr('op_name')
+        childs = sym.get_children()
+
+        if op_name == "BatchNorm":
+            assert childs is not None
+            childs = [get_node(child) for child in childs]
+            childs_op_name = [child.attr('op_name') for child in childs]
+
+            remove_nodes.append(name)
+
+            for child in childs:
+                if child.attr('op_name') == 'Convolution':
+                    fuse_maps[name] = child.attr('name')
+                    continue
+
+                assert child.attr('op_name') == 'null'
+                remove_nodes.append(child.attr('name'))
+
+            assert "Convolution" in childs_op_name
+
+            print (name, op_name, attr, childs_op_name)
+
+        graph[name] = sym
+
+"""Deterministic Op Description
+The specific op for quantization with Int8 or Int32, more details
+described as belows:
+
+In: inputs variable, maybe followed with int counter.
+Out: output variable, maybe followed with int counter.
+P_X: params variable, load from params file.
+C_X: constant variable, fixed in graph.
+
+Activation: specific indicate relu.
+    In[Int8] -> Out[Int8]
+Pooling: sepcific indicate max pool.
+    In[Int8] -> Out[Int8]
+Convolution:
+    In[Int8] * P_weight[Int8] + P_bias[Int32] -> Out[Int32]
+FullyConnected|Dense:
+    In[Int8] * P_weight[Int8] + P_bias[Int32] -> Out[Int32]
+elemwise_add: forward with Int8 input, which means the previous layer
+must be ClipInt.
+    In1[Int8] + In2[Int8] -> Out[Int32]
+sum: reduce op over specific axis, sum(data, axis=[1, 2])
+    In[Int8] -> Out[Int32]
+
+Reshape:
+    In[Int32] -> Out[Int32]
+Flatten:
+    In[Int32] -> Out[Int32]
+
+# op for requant
+{broadcast_div}:
+    In[Int32] / P_scale[Int32] -> Out[Int32]
+broadcast_mul|_mul_scalar:
+    In[Int32] * P_scale[Int32] -> Out[Int32]
+    In[Int32] * C_scale[Int32] -> Out[Int32]
+_div_scalar:
+    In[Int32] / C_scale[Int32] -> Out[Int32]
+_plus_scalar:
+    In[Int32] + C_scale[Int32] -> Out[Int32]
+
+ClipInt: the only operator to forward Int32 input to Int8 output.
+    In[Int32] -> Out[Int8]
+
+"""
+IdentitySymbols = {
+    'null': [],
+    'Activation': [],
+    'Pooling': [],
+    'Convolution': [],
+    'FullyConnected': [],
+
+    'Reshape': [],
+
+    'sum': [],
+    'broadcast_div': [],
+    'broadcast_mul': [],
+
+    'clip': [],
+
+    'elemwise_add': [],
+
+    '_div_scalar': [],
+    '_plus_scalar': [],
+}
+
+def quant_realize(symbol, params, graph, quant_flag):
     """Transform Sim-Quant(Float32 Simulate Int8) to Int8-Inference Graph
         Works:
         *) Remove floor layer in Int8 graph
@@ -152,7 +366,6 @@ def int_realize(symbol, params, graph, quant_flag):
         op_name = sym.attr('op_name')
         childs = sym.get_children()
 
-        # cast scalar attribute to Int8 type
         if 'scalar' in attr:
             scalar = float(attr['scalar'])
 
@@ -160,11 +373,13 @@ def int_realize(symbol, params, graph, quant_flag):
             assert scalar >= INT32_MIN and scalar <= INT32_MAX, msg
             assert float(int(scalar)) == scalar, msg
 
+            #  attr['scalar'] = max(min(int(scalar), INT8_MAX), INT8_MIN)
             attr['scalar'] = int(scalar)
 
         # update inputs layer symbol
         if childs is not None:
             childs = [get_node(child) for child in childs]
+            # update childs inputs
             op = _get_nnvm_op(op_name)
             node = op(*childs, **attr)
         elif op_name != 'null':
@@ -194,6 +409,9 @@ def int_realize(symbol, params, graph, quant_flag):
             assert all(div >= 0)
             assert shift_bits.astype('int8').astype('float32') == shift_bits, msg
 
+            logger.debug("broadcast_div to right_shift: %s -> (%s, %s)",
+                    msg, div.asnumpy(), shift_bits.asnumpy())
+
             sb_sym_name = div_sym_name.replace('_scale', '') + '_shift_bits'
             if sb_sym_name in graph:
                 sb_sym = graph[sb_sym_name]
@@ -206,39 +424,6 @@ def int_realize(symbol, params, graph, quant_flag):
 
             node = nnvm.sym.broadcast_right_shift(input_sym, sb_sym)
             deleted_params_name.add(div_sym_name)
-
-        # elif op_name == 'broadcast_mul':
-            # msg = '%s(op=%s, inputs=%s)'%(name, op_name, [c.attr('name') for c in childs])
-            # input_sym = childs[0]
-            # mul_sym = childs[1]
-            # assert mul_sym.attr('op_name') == 'null'
-            # mul_sym_name = mul_sym.attr('name')
-            # assert mul_sym_name in params
-
-            # mul = params[mul_sym_name]
-            # shift_bits = mx.ndarray.log2(mul).astype('float32')
-
-            # assert all(mul >= 0), msg
-            # assert shift_bits.astype('int8').astype('float32') == shift_bits, msg
-
-            # sb_sym_name = mul_sym_name.replace('_scale', '') + '_shift_bits'
-            # if sb_sym_name in graph:
-                # sb_sym = graph[sb_sym_name]
-            # else:
-                # sb_sym = nnvm.sym.Variable(sb_sym_name, shape=(1,))
-                # graph[sb_sym_name] = sb_sym
-
-                # params[sb_sym_name] = shift_bits
-                # added_params_name.append(sb_sym_name)
-
-            # node = nnvm.sym.broadcast_left_shift(input_sym, sb_sym)
-            # deleted_params_name.add(mul_sym_name)
-
-        elif op_name not in _identity_ext:
-            logger.critical(
-                "Unsupported op:%s(name=%s, attr=%s) in INT8 Inference network",
-                op_name, name, attr)
-            assert False
 
         graph[name] = node
 
@@ -255,12 +440,17 @@ def int_realize(symbol, params, graph, quant_flag):
     if len(nodes) > 1:
         ret_sym = nnvm.sym.Group(nodes)
 
-    # params
     ops = set()
     for sym in _topo_sort(ret_sym):
         op_name = sym.attr('op_name')
+        childs = sym.get_children()
+        v = []
+        if childs is not None:
+            v = [(c.attr('name'), c.attr('op_name')) for c in childs]
+
         ops.add(op_name)
 
+    # params
     args = ret_sym.list_input_names()
     ret_params, params_dtype = {}, {}
     for key, value in params.items():
@@ -282,6 +472,7 @@ def int_realize(symbol, params, graph, quant_flag):
             continue
         assert arg in ret_params, 'arg:%s in symbol not exists params'%arg
 
-    logger.info("Created graph operators: %s", sorted(ops))
+    logger.info("Existing operators: %s", sorted(ops))
 
     return ret_sym, ret_params
+
