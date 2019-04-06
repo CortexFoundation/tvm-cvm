@@ -76,6 +76,19 @@ def sym_iter(sym):
 
     return sym
 
+def examine_parameters(symbol, params, inputs_ext, callback=None):
+    args, new_params = symbol.list_inputs(), {}
+    for arg in args:
+        if arg not in inputs_ext:
+            assert arg in params, 'arg(%s) not exists in params dict(%s)' \
+                % (arg, params.keys())
+
+            if callback is not None:
+                callback(params, arg)
+
+            new_params[arg] = params[arg]
+    return new_params
+
 def topo_sort(symbol, logger=logging):
     """Sort all symbols in the mxnet graph in topological order.
 
@@ -149,13 +162,20 @@ def topo_visit(symbol, params, graph={}, get_op=get_mxnet_op,
     for sym in topo_sort(symbol, logger):
         name = sym.attr('name')
         op_name = sym.attr('op_name')
-        childs = sym.get_children()
+        childs = sym_iter(sym.get_children())
         attr = sym.list_attr()
 
-        if childs is not None:
+        node = sym
+        # TODO: add support for _cond op
+        if op_name in ['_cond'] and logger:
+            logger.warn(
+                    "topo_visit do not support op %s:%s(%s), \
+attention used in non-changable graph pass",
+                    op_name, name, [c.attr('name') for c in childs])
+        elif childs is not None:
             # update childs in graph
-            childs = [get_node(c, graph) for c in sym_iter(childs)]
-            node = get_op(op_name)(*childs, **attr)
+            childs = [get_node(c, graph) for c in childs]
+            node = get_op(op_name)(*childs, **attr, name=name)
 
             # check params dict
             for c in childs:
@@ -163,13 +183,12 @@ def topo_visit(symbol, params, graph={}, get_op=get_mxnet_op,
                     continue
                 cname = c.attr('name')
                 assert cname in params or cname in inputs_ext, \
-                    'graph parameter:%s is missing in params dict:%s' \
-                    % (cname, params.keys())
+                    'symbol:%s(%s) parameter:%s is missing in params dict:%s' \
+                    % (name, [c.attr('name') for c in childs],
+                        cname, params.keys())
         elif op_name != 'null':
-            logger.critical("Unrecognized operator:%s with none inputs", op_name)
-            assert False
-        else:
-            node = sym
+            assert False, "Unrecognized symbol:%s(%s) with none input" \
+                    % (op_name, name)
 
         if callback is not None:
             # process symbol and params
@@ -260,6 +279,7 @@ nnvm_identity_ext = {
 
     'reshape': OpExt('reshape', [INT8_TYPE, INT32_TYPE], [INT8_TYPE, INT32_TYPE]),
     'flatten': OpExt('flatten', [INT8_TYPE, INT32_TYPE], [INT8_TYPE, INT32_TYPE]),
+    'strided_slice': OpExt('strided_slice', [INT8_TYPE], [INT8_TYPE]),
 
     'broadcast_right_shift': OpExt('broadcast_right_shift', [INT32_TYPE], [INT8_TYPE]),
     'broadcast_left_shift': OpExt('broadcast_left_shift', [INT32_TYPE], [INT8_TYPE]),

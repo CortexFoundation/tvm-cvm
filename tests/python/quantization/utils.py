@@ -96,7 +96,8 @@ def load_parameters(graph, params, prefix="", ctx=None):
         param_name = "_".join(uniq_name)
         param_name = param_name[len(prefix):]
         assert param_name in params or name in params, \
-            "param name(%s) with origin(%s) not exists"%(param_name, name)
+            "param name(%s) with origin(%s) not exists in params dict(%s)" \
+            %(param_name, name, params.keys())
         data = params[name] if name in params else params[param_name]
         params_dict[name].set_data(data)
         ret_params[name] = data
@@ -122,4 +123,44 @@ def load_dataset(batch_size=10):
                                 seed=48564309,
                                 **mean_args,
                                 **std_args)
+
+def eval_accuracy(graph_func, data_iter_func, iter_num=10,
+        graph_comp_func=None, logger=logging):
+
+    acc, comp_acc, diff, total = 0, 0, 0, 0
+    for i in range(iter_num):
+        data, label = data_iter_func()
+
+        res = graph_func(data)
+        if graph_comp_func is not None:
+            res_comp = graph_comp_func(data)
+
+        for idx in range(res.shape[0]):
+            res_label = res[idx].asnumpy().argmax()
+            data_label = label[idx].asnumpy()
+            acc += 1 if res_label == data_label else 0
+
+            if graph_comp_func is not None:
+                res_comp_label = res_comp[idx].asnumpy().argmax()
+                comp_acc += 1 if res_comp_label == data_label else 0
+                diff += 0 if res_label == res_comp_label else 1
+
+            total += 1
+
+        logger.info(" \
+Iteration: %5d | Accuracy: %5.2f%% | \
+Compare Accuracy: %5.2f%% | Difference: %5.2f%% | \
+Total Sample: %5d",
+                i, 100.*acc/total, 100.*comp_acc/total, 100.*diff/total, total)
+
+
+
+
+
+
+
+
+
+
+
 

@@ -87,13 +87,16 @@ def matrix_decomposition(params, quant_flag):
         if name == 'fc0_weight':
             weight = params['fc0_weight']
             matrix_len = 100352
-            start, step, idx = 0, 1000, 0
+            start, step, idx = 0, 60000, 0
             while start < matrix_len:
                 stop = min(start+step, matrix_len)
 
-                weight_name = 'fc0_weight' + str(idx)
+                weight_name = 'fc0_' + str(idx) + '_weight'
                 params[weight_name] = weight.slice(
                         begin=(None, start), end=(None, stop))
+
+                bias_name = 'fc0_' + str(idx) + '_bias'
+                params[bias_name] = params['fc0_bias']
 
                 start, idx = stop, idx+1
 
@@ -136,7 +139,6 @@ def calibrate_parameters(graph, qparams, ctx, calib_data, quant_flag, name_scope
         added_params_name = []
         for lname in outputs:
             stacked_graph = gluon.SymbolBlock(layers[lname], [inputs])
-            print (lname, stacked_graph.collect_params().keys())
             load_parameters(stacked_graph, qparams, prefix=name_scope, ctx=ctx)
             qres = stacked_graph.forward(calib_data.as_in_context(ctx))
 
@@ -266,6 +268,7 @@ def calibrate_parameters(graph, qparams, ctx, calib_data, quant_flag, name_scope
         # quantize weight params
         for lname in outputs:
             prename = lname[len_scope:].replace("_fwd", "").replace("_output", "")
+            print (lname, prename)
             weight_name = prename + "_weight"
             quant_name = prename + "_weight_quant"
             sb_name = prename + "_weight_shift_bits"

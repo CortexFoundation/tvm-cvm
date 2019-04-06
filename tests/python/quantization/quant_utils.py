@@ -3,6 +3,8 @@ from enum import Enum
 from mxnet import symbol, sym
 from mxnet import ndarray as nd
 
+sym.contrib.cond
+
 class CalibMode(Enum):
     NONE = 0
     NAIVE = 1
