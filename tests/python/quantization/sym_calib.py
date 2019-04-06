@@ -14,7 +14,7 @@ from utils import *
 import sim_quant_helper as sim
 
 default_target_bit = 8 # INT8
-bias_target_bit = (default_target_bit + 1) * 4 - 1
+bias_target_bit = default_target_bit * 4 - 1
 
 
 def _calib_sym_real_shift_bits(sym, params, graph, inputs_ext,
@@ -51,7 +51,7 @@ def _calib_sym_real_shift_bits(sym, params, graph, inputs_ext,
         data = calib_data if name in inputs_ext else params[name]
         _, out_sbits[name] = sim.nd_quant(data.as_in_context(cpu),
                 target_bit=default_target_bit, logger=None)
-    elif op_name in ['Activation', 'Pooling']:
+    elif op_name in ['Activation', 'Pooling', 'slice', 'Flatten']:
         assert len(in_sbits[name]) == 1
         out_sbits[name] = in_sbits[name][0]
     else:
@@ -72,45 +72,6 @@ def _calib_sym_real_shift_bits(sym, params, graph, inputs_ext,
                 if name in in_sbits else [])
 
     return sym, params
-
-def _calib_sym_rewrite(sym, params, graph, inputs_ext, in_sbits, out_sbits):
-    logger = logging.getLogger('log.calib.sym.rewrite')
-
-    name = sym.attr('name')
-    op_name = sym.attr('op_name')
-    childs = sym_iter(sym.get_children())
-    attr = sym.list_attr()
-
-    node = sym
-    if op_name in ['elemwise_add', 'broadcast_add']:
-        childs_name = [c.attr('name') for c in childs]
-        childs_sb = in_sbits[name]
-
-        f_name, f_sb = childs_name[0], childs_sb[0]
-        f_sb_name = f_name + '_plus_shift_bits'
-        assert f_sb_name not in graph
-        f_sym = mx.sym.var(f_sb_name, shape=(1,))
-        graph[f_sb_name] = f_sym
-
-        s_name, s_sb = childs_name[1], childs_sb[1]
-        s_sb_name = s_name + '_plus_shift_bits'
-        assert s_sb_name not in graph
-        s_sym = mx.sym.var(s_sb_name, shape=(1,))
-        graph[s_sb_name] = s_sym
-
-        assert f_sb.shape == (1,) and s_sb.shape == (1,)
-        if any(f_sb > s_sb):
-            params[s_sb_name] = f_sb - s_sb
-            # childs[1], _ = quant_helper(childs[1], F=mx.sym, shift_bits=s_sym)
-        else:
-            params[f_sb_name] = s_sb - f_sb
-            # childs[0], _ = quant_helper(childs[0], F=mx.sym, shift_bits=f_sym)
-
-        node = get_mxnet_op(op_name)(*childs, **attr, name=name)
-    elif op_name in ['FullyConnected', 'Convolution']:
-        assert attr['no_bias'] == 'True'
-
-    return node, params
 
 def _calib_sym_requant(sym, params, graph, inputs_ext,
         in_sbits, out_sbits, target_bits):
@@ -175,7 +136,7 @@ def _calib_sym_requant(sym, params, graph, inputs_ext,
     elif op_name in ['sum']:
         assert len(inputs_sb) == 1
         params[requant_sb_name] = out_sb - inputs_sb[0]
-    elif op_name in ['Activation', 'Pooling', 'clip']:
+    elif op_name in ['Activation', 'Pooling', 'clip', 'slice', 'Flatten']:
         pass
     else:
         logger.critical('Unrecognized op:%s(%s)', op_name, name)
@@ -197,9 +158,6 @@ def sym_calib_quant(symbol, params, inputs_ext, calib_data, ctx):
     logger = logging.getLogger("log.calib.sym")
     params = examine_parameters(symbol, params, inputs_ext)
 
-    # infer_shapes = sym_infer_shape(symbol, params, inputs_ext)
-    # ops = sym_collect_ops(symbol, params, inputs_ext)
-
     in_sbits, out_sbits, target_bits = {}, {}, {}
     sym, params = topo_visit(symbol, params, get_op=get_mxnet_op,
             logger=logger, inputs_ext=inputs_ext,
@@ -208,12 +166,6 @@ def sym_calib_quant(symbol, params, inputs_ext, calib_data, ctx):
             target_bits=target_bits,
             calib_data=calib_data, ctx=ctx)
     params = examine_parameters(sym, params, inputs_ext)
-
-    # sym, params = topo_visit(sym, params, get_op=get_mxnet_op,
-            # logger=logger, inputs_ext=inputs_ext,
-            # callback=_calib_sym_rewrite,
-            # in_sbits=in_sbits, out_sbits=out_sbits)
-    # params = examine_parameters(sym, params, inputs_ext)
 
     sym, params = topo_visit(sym, params, get_op=get_mxnet_op,
             logger=logger, inputs_ext=inputs_ext,

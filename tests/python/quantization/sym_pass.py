@@ -216,31 +216,16 @@ def nnvm_realize(symbol, params, quant_flag):
 # matrix decomposition
 MATRIX_MAXIMUM_SIZE = 65536 # 2 ** 16
 def _matrix_decomposition(sym, params, graph, inputs_ext, infer_shapes):
-    logger = logging.getLogger('log.quant.op.rewrite.matrix_decomposition')
+    logger = logging.getLogger('log.sym.pass.matrix_decomposition')
     name = sym.attr('name')
     op_name = sym.attr('op_name')
     childs = sym_iter(sym.get_children())
     attr = sym.list_attr()
 
-    # Infer internal symbol output shape and save it in infer_shapes.
-    args = sym.list_inputs()
-    inputs_shape = {k:v['shape'] for k,v in inputs_ext.items() if k in args}
-    if op_name != 'null':
-        _, out_shapes, _ = sym.infer_shape(**inputs_shape)
-        if name in infer_shapes:
-            logger.warn("Symbol:%s has been infered shape in graph", out_shapes)
-            assert infer_shapes[name] == out_shapes
-
-        assert len(out_shapes) == 1
-        infer_shapes[name] = out_shapes[0]
-
     node = sym
     if op_name == 'Convolution':
-        logger.info('Convolution: %s', name)
         childs_name = [c.attr('name') for c in childs]
         childs_shape = [infer_shapes[n] for n in childs_name]
-
-        print (childs_name, childs_shape)
 
         for idx, cshape in enumerate(childs_shape):
             cname = childs_name[idx]
@@ -258,10 +243,9 @@ def _matrix_decomposition(sym, params, graph, inputs_ext, infer_shapes):
         channel = data_shape[1] # channel
         kernel = [weight_shape[2], weight_shape[3]] # kernel size
         matrix_len = channel * kernel[0] * kernel[1]
-        print (data_shape, weight_shape, matrix_len)
+        # print (data_shape, weight_shape, matrix_len)
 
     elif op_name == 'FullyConnected':
-        logger.info('FullyConnected: %s', name)
         childs_name = [c.attr('name') for c in childs]
         childs_shape = [infer_shapes[n] for n in childs_name]
 
@@ -273,27 +257,17 @@ def _matrix_decomposition(sym, params, graph, inputs_ext, infer_shapes):
                     with params dict(%s)",
                     cshape, params[cname].shape)
 
-        if '_weight' not in childs_name[1]:
-            logger.warn("'_weight' not in symbol(%s) weight parameter(%s), \
-                    may be wrong",
-                    childs_name[1])
-        if attr['no_bias'] == 'False' and '_bias' not in childs_name[2]:
-            logger.warn("'_bias' not in symbol(%s) bias parameter(%s), \
-                    may be wrong",
-                    childs_name[2])
-
-        weight_shape = childs_shape[1]
-        matrix_len = weight_shape[1]
-        print (matrix_len, weight_shape, childs_shape[2])
+        batch, matrix_len = childs_shape[1]
         if matrix_len > MATRIX_MAXIMUM_SIZE:
             weight_name_prefix = childs[1].attr('name')
             bias = childs[2] if attr['no_bias']=='False' else None
 
             X, W = childs[0], childs[1]
-            out = mx.sym.flatten(X)
+            if X.attr('op_name') != 'Flatten':
+                X = mx.sym.flatten(X)
             weight_params = params[weight_name_prefix]
 
-            node = None
+            nodes = []
             start, step, idx = 0, MATRIX_MAXIMUM_SIZE, 0
             while start < matrix_len:
                 stop = min(start + step, matrix_len)
@@ -303,32 +277,25 @@ def _matrix_decomposition(sym, params, graph, inputs_ext, infer_shapes):
                 weight = mx.sym.var(weight_name)
                 graph[weight_name] = weight
 
-                tmp = mx.sym.slice(out,
-                        begin=(None, start), end=(None, stop))
+                tmp = mx.sym.slice(X, begin=(0, start), end=(batch, stop))
                 tmp = mx.sym.FullyConnected(tmp, weight, bias, **attr)
-                node = tmp if node is None else (node + tmp)
-                params[weight_name] = weight_params.slice(
-                        begin=(None, start), end=(None, stop))
+                nodes.append(tmp)
 
+                params[weight_name] = weight_params.slice(
+                        begin=(0, start), end=(batch, stop))
                 start, idx = stop, idx+1
 
-            del params[weight_name_prefix]
+            while len(nodes) > 1:
+                a, b = nodes.pop(0), nodes.pop(0)
+                tmp = a + b
+                nodes.append(tmp)
+            node = nodes[0]
 
+            logger.info("split %s(%s) with shape (%s, %s -> %s(%s)) array",
+                    op_name, name, batch, matrix_len, idx, step)
+
+    infer_shapes[node.attr('name')] = infer_shapes[name]
     return node, params
-
-def mx_sym_rewrite(symbol, params, quant_flag, inputs_ext):
-    logger = logging.getLogger('log.calib.rewrite.op')
-
-    inputs_shape = {k:v['shape'] for k, v in inputs_ext.items()}
-    shapes, _, _ = symbol.infer_shape(**inputs_shape)
-    args = symbol.list_arguments()
-    infer_shapes = {args[i]:shapes[i] for i in range(len(args))}
-
-    sym, params = topo_visit(symbol, params, get_op=get_mxnet_op,
-            logger=logger, inputs_ext=inputs_ext,
-            callback=_matrix_decomposition, infer_shapes=infer_shapes)
-
-    return sym, params
 
 def sym_infer_shape(symbol, params, inputs_ext):
     logger = logging.getLogger('log.symbol.infer_shape')
@@ -404,7 +371,7 @@ def _sym_rewrite(sym, params, graph, inputs_ext, infer_shapes):
                     (input_shape[2] * input_shape[3])])
 
             node = mx.sym.sum(childs[0], axis=(2, 3))
-            # node = mx.sym.broadcast_mul(node, scale_sym)
+            node = mx.sym.broadcast_mul(node, scale_sym)
         else:
             assert pool_type == 'max', "Unsupported Pooling \
                     %s(%s, pool_type=%s)"%(op_name, name, pool_type)
@@ -458,7 +425,7 @@ def _fuse_bias(sym, params, graph, inputs_ext, infer_shapes):
     node = sym
     if op_name in ['FullyConnected', 'Convolution']:
         if attr['no_bias'] == 'False':
-            attr['no_bias'] = True
+            attr['no_bias'] = 'True'
 
             bias_name = childs[2].attr('name')
             bias = params[bias_name]
@@ -489,6 +456,11 @@ def sym_quant_prepare(symbol, params, inputs_ext):
     sym, params = topo_visit(sym, params, get_op=get_mxnet_op,
             logger=logger, inputs_ext=inputs_ext,
             callback=_fuse_bias, infer_shapes=infer_shapes)
+
+    infer_shapes = sym_infer_shape(sym, params, inputs_ext)
+    sym, params = topo_visit(sym, params, get_op=get_mxnet_op,
+            logger=logger, inputs_ext=inputs_ext,
+            callback=_matrix_decomposition, infer_shapes=infer_shapes)
 
     return sym, params
 

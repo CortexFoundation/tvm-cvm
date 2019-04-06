@@ -342,7 +342,7 @@ def test_sym_pass(quant_flag, batch_size=10, iter_num=10):
         return data.data[0], data.label[0]
 
     symbol_file, params_file = resnet.SYMBOL_FILE, resnet.PARAMS_FILE
-    sym = mx.sym.load(symbol_file)
+    sym, params = mx.sym.load(symbol_file), nd.load(params_file)
 
     qsym, qparams = sym_quant_prepare(sym, nd.load(params_file), inputs_ext)
     dump_sym, dump_params = get_dump_fname('sym.prepare')
@@ -369,15 +369,16 @@ def test_sym_pass(quant_flag, batch_size=10, iter_num=10):
         nd.save('./in_sbits', inputs_sb)
 
     print ('graph')
-    graph = nn.SymbolBlock(mx.sym.load(dump_sym), inputs)
-    load_parameters(graph, nd.load(dump_params), ctx=ctx)
+    qsym, qparams = mx.sym.load(dump_sym), nd.load(dump_params)
+    qgraph = nn.SymbolBlock(qsym, inputs)
+    load_parameters(qgraph, qparams, ctx=ctx)
     inputs_sb = nd.load('./in_sbits')
 
     print ('eval')
     def graph_func(data):
         data, _ = sim.nd_quant(data, shift_bits=inputs_sb['data'],
                 target_bit=8)
-        return graph.forward(data.as_in_context(ctx))
+        return qgraph.forward(data.as_in_context(ctx))
 
     eval_accuracy(graph_func, data_iter_func, iter_num,
             graph_comp_func, logger)
@@ -408,7 +409,7 @@ if __name__ == "__main__":
     #     gluon_quant_resnet(quant_flag, batch_size=16, iter_num=10, need_requant=True)
 
     # test_nnvm_load(batch_size=16, iter_num=10)
-    test_sym_pass(quant_flag, batch_size=16, iter_num=10)
+    test_sym_pass(quant_flag, batch_size=16, iter_num=10000000)
     # test_sym_nnvm(batch_size=100, iter_num=10)
 
 

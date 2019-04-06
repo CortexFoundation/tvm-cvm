@@ -12,6 +12,8 @@ from quant_utils import *
 from quant_op import *
 import quant_pass as qpass
 from sym_pass import *
+import sym_calib as calib
+import sim_quant_helper as sim
 from utils import *
 
 
@@ -67,8 +69,6 @@ def test_load_simplenet(quant_flag, batch_size=10, iter_num=10):
     symbol_file, params_file = "./data/simplenet.json", "./data/simplenet.params"
     sym = mx.sym.load(symbol_file)
     qparams = nd.load(params_file)
-    # qsym, qparams = mx_sym_rewrite(sym, qparams, quant_flag, inputs_ext=inputs_ext)
-    # exit()
 
     logger.info("quantization")
     scope_graph = nn.HybridSequential(prefix='calib_')
@@ -191,11 +191,6 @@ def test_sym_pass(quant_flag, batch_size=10, iter_num=10):
     symbol_file, params_file = "./data/simplenet.json", "./data/simplenet.params"
     sym = mx.sym.load(symbol_file)
 
-    graph_comp = nn.SymbolBlock(sym, inputs)
-    load_parameters(graph_comp, nd.load(params_file), ctx=ctx)
-    def graph_comp_func(data):
-        return graph_comp.forward(data.as_in_context(ctx))
-
     # quantization
     qsym, qparams = sym_quant_prepare(sym, nd.load(params_file), inputs_ext)
     dump_sym, dump_params = get_dump_fname('sym.pass')
@@ -203,9 +198,24 @@ def test_sym_pass(quant_flag, batch_size=10, iter_num=10):
     with open(dump_sym, 'w') as fout:
         fout.write(qsym.tojson())
 
+    graph_comp = nn.SymbolBlock(qsym, inputs)
+    load_parameters(graph_comp, qparams, ctx=ctx)
+    def graph_comp_func(data):
+        return graph_comp.forward(data.as_in_context(ctx))
+
+    calib_data, _ = data_iter_func()
+    qsym, qparams, inputs_sb = calib.sym_calib_quant(qsym,
+            qparams, inputs_ext, calib_data, ctx)
+    dump_sym, dump_params = get_dump_fname('sym.quant')
+    nd.save(dump_params, qparams)
+    with open(dump_sym, 'w') as fout:
+        fout.write(qsym.tojson())
+
     graph = nn.SymbolBlock(qsym, inputs)
     load_parameters(graph, qparams, ctx=ctx)
     def graph_func(data):
+        data, _ = sim.nd_quant(data, shift_bits=inputs_sb['data'],
+                target_bit=8)
         return graph.forward(data.as_in_context(ctx))
 
     eval_accuracy(graph_func, data_iter_func, iter_num,
