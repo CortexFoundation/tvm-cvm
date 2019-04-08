@@ -16,6 +16,11 @@ import sim_quant_helper as sim
 default_target_bit = 8 # INT8
 bias_target_bit = default_target_bit * 4 - 1
 
+disable_requant_ops = [
+    'Activation', 'Pooling', 'Flatten',
+    'slice', 'clip',
+    'null',
+]
 
 def _calib_sym_real_shift_bits(sym, params, graph, inputs_ext,
         in_sbits, out_sbits, target_bits, calib_data, ctx=mx.gpu()):
@@ -136,7 +141,7 @@ def _calib_sym_requant(sym, params, graph, inputs_ext,
     elif op_name in ['sum']:
         assert len(inputs_sb) == 1
         params[requant_sb_name] = out_sb - inputs_sb[0]
-    elif op_name in ['Activation', 'Pooling', 'clip', 'slice', 'Flatten']:
+    elif op_name in disable_requant_ops:
         pass
     else:
         logger.critical('Unrecognized op:%s(%s)', op_name, name)

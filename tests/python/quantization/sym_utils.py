@@ -150,6 +150,9 @@ def topo_sort(symbol, logger=logging):
             del dep_cnts[name]
     return order
 
+def sym_collect_attr(symbol, attr_name='op_name'):
+    return {sym.attr(attr_name) for sym in topo_sort(symbol)}
+
 def get_node(sym, graph):
     name = sym.attr('name')
     if name not in graph:
@@ -285,7 +288,7 @@ nnvm_identity_ext = {
     'broadcast_left_shift': OpExt('broadcast_left_shift', [INT32_TYPE], [INT8_TYPE]),
     'broadcast_div': OpExt('broadcast_div', [INT32_TYPE], [INT32_TYPE]),
     'broadcast_mul': OpExt('broadcast_mul', [INT32_TYPE], [INT32_TYPE]),
-    'broadcast_add': OpExt('broadcast_mul', [INT32_TYPE], [INT32_TYPE]),
+    'broadcast_add': OpExt('broadcast_add', [INT32_TYPE], [INT32_TYPE]),
 
     'clip': OpExt('clip', [INT32_TYPE], [INT8_TYPE]),
 }

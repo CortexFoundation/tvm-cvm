@@ -122,12 +122,18 @@ def test_nnvm_load(quant_flag, batch_size=10, iter_num=10):
     in_shape= (batch_size, 1, 28, 28)
 
     data_iter = load_dataset(batch_size)
-    data, label = next(data_iter)
+    def data_iter_func():
+        return next(data_iter)
+    data_iter_func()
 
-    dump_sym, dump_params = get_dump_fname("matrix")
+    dump_sym, dump_params = get_dump_fname("sym.quant")
     sym, params = mx.sym.load(dump_sym), nd.load(dump_params)
+    logger.info("Mxnet graph operators: %s", sym_collect_attr(sym))
+
     nnvm_sym, _ = nnvm.frontend.from_mxnet(sym)
-    nnvm_sym, params = nnvm_realize(nnvm_sym, params, quant_flag)
+    nnvm_sym, params = nnvm_realize(nnvm_sym, params, ['data'])
+    logger.info("NNVM  graph operators: %s", sym_collect_attr(nnvm_sym))
+
 
     nnvm_graph = nnvm.graph.create(nnvm_sym)
     tmp_sym, tmp_params = get_dump_fname("nnvm.realize")
@@ -147,30 +153,13 @@ def test_nnvm_load(quant_flag, batch_size=10, iter_num=10):
 
     module = graph_runtime.create(deploy_graph, lib, ctx)
     module.load_params(param_bytes)
+    def graph_func(data):
+        data, _ = sim.nd_quant(data, target_bit=8, logger=None)
+        data = tvm.nd.array(data.asnumpy(), ctx)
+        module.run(data=data.asnumpy())
+        return nd.array(module.get_output(0).asnumpy())
 
-    out_shape = (1000,)
-    qacc, total = 0, 0
-    for i in range(iter_num):
-        quant_data, _ = quant_helper(data)
-        quant_data = tvm.nd.array(quant_data.asnumpy(), ctx)
-
-        module.run(data=quant_data.asnumpy())
-        qres = module.get_output(0).asnumpy()
-
-        for idx in range(qres.shape[0]):
-            qres_label = qres[idx].argmax()
-            data_label = label[idx].asnumpy()
-
-            qacc += 1 if qres_label == data_label else 0
-            total += 1
-
-        try:
-            data, label = next(data_iter)
-        except:
-            exit()
-
-        logger.info("Iteration: %5d | Quant Acc: %.2f%% | Total Sample: %5d",
-                i, 100.*qacc/total, total)
+    eval_accuracy(graph_func, data_iter_func, iter_num, logger=logger)
 
 def test_sym_pass(quant_flag, batch_size=10, iter_num=10):
     logger = logging.getLogger("log.test.sym.pass")
@@ -215,7 +204,7 @@ def test_sym_pass(quant_flag, batch_size=10, iter_num=10):
     load_parameters(graph, qparams, ctx=ctx)
     def graph_func(data):
         data, _ = sim.nd_quant(data, shift_bits=inputs_sb['data'],
-                target_bit=8)
+                target_bit=8, logger=None)
         return graph.forward(data.as_in_context(ctx))
 
     eval_accuracy(graph_func, data_iter_func, iter_num,
@@ -248,5 +237,5 @@ if __name__ == "__main__":
             disabled_layers=["relu", "pool0", "activation"])
 
     # test_load_simplenet(quant_flag, batch_size=10, iter_num=10)
-    # test_nnvm_load(quant_flag, batch_size=10, iter_num=10)
     test_sym_pass(quant_flag, batch_size=10, iter_num=10)
+    test_nnvm_load(quant_flag, batch_size=10, iter_num=10)

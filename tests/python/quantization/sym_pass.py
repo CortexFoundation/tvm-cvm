@@ -120,7 +120,7 @@ def fold_cond_op(symbol, params, graph, quant_flag):
 
     return ret_sym, params
 
-def nnvm_realize(symbol, params, quant_flag):
+def nnvm_realize(symbol, params, inputs_ext):
     """Transform Sim-Quant(Float32 Simulate Int8) to Int8-Inference Graph
         Works:
         *) Remove floor layer in Int8 graph
@@ -192,13 +192,7 @@ def nnvm_realize(symbol, params, quant_flag):
         return node, params
 
     ret_sym, params = topo_visit(symbol, params, {}, get_op=get_nnvm_op,
-            logger=logger, inputs_ext={'data':{}}, callback=_realize)
-
-    ops = set()
-    for sym in topo_sort(ret_sym):
-        op_name = sym.attr('op_name')
-        ops.add(op_name)
-    logger.info("Created graph operators: %s", sorted(ops))
+            logger=logger, inputs_ext=inputs_ext, callback=_realize)
 
     args = ret_sym.list_input_names()
     ret_params = {}
@@ -213,7 +207,6 @@ def nnvm_realize(symbol, params, quant_flag):
 
     return ret_sym, ret_params
 
-# matrix decomposition
 MATRIX_MAXIMUM_SIZE = 65536 # 2 ** 16
 def _matrix_decomposition(sym, params, graph, inputs_ext, infer_shapes):
     logger = logging.getLogger('log.sym.pass.matrix_decomposition')
@@ -224,6 +217,7 @@ def _matrix_decomposition(sym, params, graph, inputs_ext, infer_shapes):
 
     node = sym
     if op_name == 'Convolution':
+        # TODO: do matrix decomposition for conv op
         childs_name = [c.attr('name') for c in childs]
         childs_shape = [infer_shapes[n] for n in childs_name]
 
@@ -443,6 +437,7 @@ def _fuse_bias(sym, params, graph, inputs_ext, infer_shapes):
                     **attr, name=name)
             node = mx.sym.broadcast_add(node, bias_sym, name=name+'_add')
 
+    infer_shapes[node.attr('name')] = infer_shapes[name]
     return node, params
 
 def sym_quant_prepare(symbol, params, inputs_ext):
@@ -457,24 +452,11 @@ def sym_quant_prepare(symbol, params, inputs_ext):
             logger=logger, inputs_ext=inputs_ext,
             callback=_fuse_bias, infer_shapes=infer_shapes)
 
-    infer_shapes = sym_infer_shape(sym, params, inputs_ext)
     sym, params = topo_visit(sym, params, get_op=get_mxnet_op,
             logger=logger, inputs_ext=inputs_ext,
             callback=_matrix_decomposition, infer_shapes=infer_shapes)
 
     return sym, params
-
-def sym_collect_attr(symbol, params, inputs_ext, attr_name='op_name'):
-    def _collect_ops(sym, params, graph, inputs_ext, attrs):
-        attrs.append(sym.attr(attr_name))
-        return sym, params
-
-    attrs = []
-    _, _ = topo_visit(symbol, params, get_op=get_mxnet_op,
-            inputs_ext=inputs_ext,
-            callback=_collect_ops, attrs=attrs)
-
-    return attrs
 
 
 
