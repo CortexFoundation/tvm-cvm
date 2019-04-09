@@ -25,10 +25,10 @@ import nnvm.symbol as sym
 # and creates a nnvm graph from the description.
 # We can print out the graph ir to check the graph content.
 
-x = sym.Variable("x")
-y = sym.Variable("y")
-z = sym.elemwise_add(x, sym.sqrt(y))
-compute_graph = nnvm.graph.create(z)
+x = sym.Variable("data")
+y = sym.dense(x, units=16, use_bias=False)
+out = sym.dense(y, units=10, use_bias=False)
+compute_graph = nnvm.graph.create(out)
 print("-------compute graph-------")
 print(compute_graph.ir())
 
@@ -44,9 +44,13 @@ print(compute_graph.ir())
 # the final compiled graph structure. ``lib`` is a :any:`tvm.module.Module`
 # that contains compiled CUDA functions. We do not need the ``params``
 # in this case.
-shape = (4,)
+shape = (1, 28)
 deploy_graph, lib, params = nnvm.compiler.build(
-    compute_graph, target="cuda", shape={"x": shape}, dtype="float32")
+    compute_graph, target="cuda", shape={"data": shape}, dtype="int32")
+
+with open('/tmp/start_cuda.json', "w") as fout:
+    fout.write(deploy_graph.json())
+exit()
 
 ######################################################################
 # We can print out the IR of ``deploy_graph`` to understand what just
@@ -64,8 +68,8 @@ print(deploy_graph.ir())
 # We print out the the generated device code here.
 # This is exactly a fused CUDA version of kernel that the graph points to.
 #
-print("-------deploy library-------")
-print(lib.imported_modules[0].get_source())
+# print("-------deploy library-------")
+# print(lib.imported_modules[0].get_source())
 
 ######################################################################
 # Deploy and Run
