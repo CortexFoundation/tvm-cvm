@@ -234,6 +234,7 @@ class CvmRuntime : public ModuleNode {
     std::vector<int> storage_id;
     std::vector<int> device_index;
     std::vector<std::string> dltype;
+    std::vector<int> precision;
     std::vector<std::vector<int64_t> > shape;
     // The graph attribute fields.
     void Load(dmlc::JSONReader *reader) {
@@ -326,6 +327,8 @@ class CvmRuntime : public ModuleNode {
       }
       CHECK_EQ(bitmask, 1|2|4|8|16) << "invalid format";
   }
+   /*! \brief Setup the shape, type, and precision */
+  void SetupAttr();
   /*! \brief Setup the temporal storage */
   void SetupStorage();
   /*! \brief Setup the executors. */
