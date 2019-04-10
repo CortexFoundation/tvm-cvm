@@ -336,7 +336,7 @@ std::function<void()> CvmRuntime::CreateCVMOp(
   if (param.func_name.size() > 9 && param.func_name.substr(0, 9) == "fuse_conv") {
 	  return [](){};
   }
-  if (param.func_name.size() > 9 && param.func_name.substr(0, 9) == "fuse_dens") {
+  if (param.func_name.size() >= 5 && param.func_name.substr(0, 5) == "dense") {
 	  std::cout << "param.func_name = " << param.func_name <<  " "
                 << param.func_name.substr(0, 9) << "size = " << arg_ptr->arg_values.size() << "\n";
       return [arg_ptr](){
