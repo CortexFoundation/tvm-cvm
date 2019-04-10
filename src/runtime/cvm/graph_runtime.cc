@@ -256,12 +256,12 @@ void CvmRuntime::SetupOpExecs() {
     }
     CHECK(inode.op_type == "cvm_op") << "Can only take tvm_op as op";
 
-    op_execs_[nid] = CreateTVMOp(inode.param, args, inode.inputs.size());
+    op_execs_[nid] = CreateCVMOp(inode.param, args, inode.inputs.size());
   }
 }
 
-std::function<void()> CvmRuntime::CreateTVMOp(
-    const TVMOpParam& param,
+std::function<void()> CvmRuntime::CreateCVMOp(
+    const CVMOpParam& param,
     const std::vector<DLTensor>& args,
     size_t num_inputs) {
   struct OpArgs {
@@ -336,13 +336,15 @@ std::function<void()> CvmRuntime::CreateTVMOp(
   if (param.func_name.size() > 9 && param.func_name.substr(0, 9) == "fuse_conv") {
 	  return [](){};
   }
-  if (param.func_name.size() > 9 && param.func_name.substr(0, 9) == "fuse_dens") {
+  if (param.func_name.size() >= 5 && param.func_name.substr(0, 5) == "dense") {
 	  std::cout << "param.func_name = " << param.func_name <<  " "
                 << param.func_name.substr(0, 9) << "size = " << arg_ptr->arg_values.size() << "\n";
       return [arg_ptr](){
+
           TVMArgs args(arg_ptr->arg_values.data(),
                   arg_ptr->arg_tcodes.data(),
                   static_cast<int>(arg_ptr->arg_values.size()));
+
           std::cout << "fuse_dens = " <<  args.size() << "\n";
           DLTensor *x = args[0];
           DLTensor *w = args[1];

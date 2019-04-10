@@ -50,6 +50,7 @@ deploy_graph, lib, params = nnvm.compiler.build(
 
 with open('/tmp/start_cuda.json', "w") as fout:
     fout.write(deploy_graph.json())
+print (lib.imported_modules[0].get_source())
 exit()
 
 ######################################################################

@@ -181,12 +181,12 @@ class CompileEngine {
     }
 
     std::ostringstream readable_name_os;
-    readable_name_os << "fuse";
+    readable_name_os << "";
     for (uint32_t nid = 0; nid < idx.num_nodes(); ++nid) {
       const auto& inode = idx[nid];
       if (inode.source->is_variable()) continue;
       Array<Tensor> op_inputs, out_info;
-      readable_name_os << "_" << inode.source->op()->name;
+      readable_name_os << inode.source->op()->name;
       // input array
       for (const IndexedGraph::NodeEntry& e : inode.inputs) {
         const tvm::Tensor& t = tensor_vec[idx.entry_id(e)];

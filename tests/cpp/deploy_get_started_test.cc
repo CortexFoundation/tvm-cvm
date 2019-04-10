@@ -10,10 +10,11 @@
 int main()
 {
     // tvm module for compiled functions
-    tvm::runtime::Module mod_syslib = tvm::runtime::Module::LoadFromFile("/tmp/imagenet.so");
+    //tvm::runtime::Module mod_syslib = tvm::runtime::Module::LoadFromFile("/tmp/imagenet.so");
+    tvm::runtime::Module mod_syslib = (*tvm::runtime::Registry::Get("module._GetSystemLib"))();
 
     // json graph
-    std::ifstream json_in("/tmp/start_relay_cuda.json", std::ios::in);
+    std::ifstream json_in("/tmp/start_cuda.json", std::ios::in);
     std::string json_data((std::istreambuf_iterator<char>(json_in)), std::istreambuf_iterator<char>());
     json_in.close();
 

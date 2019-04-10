@@ -34,7 +34,7 @@ namespace runtime {
 constexpr uint64_t kTVMNDArrayListMagic = 0xF7E58D4F05049CB7;
 
 /*! \brief operator attributes about tvm op */
-struct TVMOpParam {
+struct CVMOpParam {
   std::string func_name;
   uint32_t num_inputs;
   uint32_t num_outputs;
@@ -175,13 +175,13 @@ class CvmRuntime : public ModuleNode {
     // name of the op
     std::string name;
     // parameters
-    TVMOpParam param;
+    CVMOpParam param;
     // inputs
     std::vector<NodeEntry> inputs;
     // control deps
     std::vector<uint32_t> control_deps;
     // JSON Loader
-    void LoadAttrs(dmlc::JSONReader *reader, TVMOpParam* param) {
+    void LoadAttrs(dmlc::JSONReader *reader, CVMOpParam* param) {
       int bitmask = 0;
       std::string key, value;
       reader->BeginObject();
@@ -337,7 +337,7 @@ class CvmRuntime : public ModuleNode {
    * \param num_inputs Number of inputs.
    * \return The created executor.
    */
-  std::function<void()> CreateTVMOp(const TVMOpParam& attrs,
+  std::function<void()> CreateCVMOp(const CVMOpParam& attrs,
                                     const std::vector<DLTensor>& args,
                                     size_t num_inputs);
   // Get node entry index.
