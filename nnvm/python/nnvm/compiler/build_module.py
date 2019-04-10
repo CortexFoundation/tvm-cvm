@@ -313,7 +313,7 @@ def build(graph, target=None, shape=None, dtype="float32",
         with target:
             graph = graph.apply("GraphCompile")
         libmod = graph_attr._move_out_module(graph, "module")
-        # Write variable initial values into params
+        #Write variable initial values into params
         if init_var:
             if params is None:
                 params = {}
