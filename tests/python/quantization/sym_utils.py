@@ -1,5 +1,6 @@
 from mxnet.symbol import _internal
 from mxnet import symbol as _sym
+from mxnet import ndarray as nd
 import mxnet as mx
 import nnvm
 import logging
@@ -49,6 +50,13 @@ class GraphHelper(object):
 
         self.graph[name] = default
         return default
+
+def get_nd_op(op_name):
+    op = getattr(nd, op_name)
+
+    if not op:
+        raise RuntimeError("Unable to map op_name {} to mxnet.ndarray".format(op_name))
+    return op
 
 def get_mxnet_op(op_name):
     try:

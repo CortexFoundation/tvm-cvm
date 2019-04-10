@@ -1,7 +1,40 @@
 import logging
+import math
 
 import mxnet as mx
 from mxnet import ndarray as nd
+
+def get_zero_symmetric(threshold):
+    min_range, max_range = threshold
+
+    if max_range == min_range:
+        return 0
+    else:
+        return (max_range + min_range) / 2
+
+def get_threshold_requant_parameter(threshold, sbit=None, target_bit=8,
+        is_symmetric=True, is_sign=True):
+    min_range, max_range = threshold
+    real_bit = target_bit - (1 if is_sign else 0)
+
+    offset = None
+    if is_symmetric:
+        alpha = max(abs(min_range), abs(max_range))
+    else:
+        if max_range == min_range:
+            alpha = abs(max_range)
+        else:
+            alpha = (max_range - min_range) / 2
+        offset = (alpha - max_range)
+
+    if alpha != 0 and sbit is None:
+        alpha_bit = math.ceil(math.log2(alpha))
+        sbit = alpha_bit - real_bit
+
+    if offset:
+        offset = int(offset / (2**sbit) + 0.5)
+
+    return (sbit, offset)
 
 def nd_quant(data, shift_bits=None, target_bit=8,
         logger=logging):

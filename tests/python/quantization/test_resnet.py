@@ -331,6 +331,7 @@ def test_sym_pass(quant_flag, batch_size=10, iter_num=10):
     inputs_ext = {
         'data': {
             'shape': (batch_size, 3, 224, 224),
+            'zero_point': 0,
         }
     }
     inputs = [mx.sym.var(name) for name in inputs_ext]
@@ -340,11 +341,14 @@ def test_sym_pass(quant_flag, batch_size=10, iter_num=10):
     def data_iter_func():
         data = data_iter.next()
         return data.data[0], data.label[0]
+    calib_data, _ = data_iter_func()
 
     symbol_file, params_file = resnet.SYMBOL_FILE, resnet.PARAMS_FILE
     sym, params = mx.sym.load(symbol_file), nd.load(params_file)
 
     qsym, qparams = sym_quant_prepare(sym, nd.load(params_file), inputs_ext)
+    # qsym, qparams = calib.sym_calib_quantize(qsym,
+            # qparams, inputs_ext, calib_data, ctx)
     dump_sym, dump_params = get_dump_fname('sym.prepare')
     nd.save(dump_params, qparams)
     with open(dump_sym, 'w') as fout:
@@ -357,7 +361,6 @@ def test_sym_pass(quant_flag, batch_size=10, iter_num=10):
 
     # quantization
     dump_sym, dump_params = get_dump_fname('sym.quant')
-    calib_data, _ = data_iter_func()
     if True:
         qsym, qparams, inputs_sb = calib.sym_calib_quant(qsym,
                 qparams, inputs_ext, calib_data, ctx)
@@ -366,20 +369,17 @@ def test_sym_pass(quant_flag, batch_size=10, iter_num=10):
         nd.save(dump_params, qparams)
         with open(dump_sym, 'w') as fout:
             fout.write(qsym.tojson())
-        nd.save('./in_sbits', inputs_sb)
 
     print ('graph')
     qsym, qparams = mx.sym.load(dump_sym), nd.load(dump_params)
     qgraph = nn.SymbolBlock(qsym, inputs)
     load_parameters(qgraph, qparams, ctx=ctx)
-    inputs_sb = nd.load('./in_sbits')
-
-    print ('eval')
     def graph_func(data):
         data, _ = sim.nd_quant(data, shift_bits=inputs_sb['data'],
                 target_bit=8)
         return qgraph.forward(data.as_in_context(ctx))
 
+    print ('eval')
     eval_accuracy(graph_func, data_iter_func, iter_num,
             graph_comp_func, logger)
 
@@ -404,12 +404,15 @@ if __name__ == "__main__":
     quant_flag = QuantFlag(is_fuse_bn=True, calib_mode=CalibMode.NAIVE,
             log_level=logging.DEBUG, use_scalar=False,
             disabled_layers=["relu", "pool0", "activation"])
+
+    # resnet.save_graph(mx.gpu())
+
     # enable quantization
     # if True:
-    #     gluon_quant_resnet(quant_flag, batch_size=16, iter_num=10, need_requant=True)
+        # gluon_quant_resnet(quant_flag, batch_size=16, iter_num=10000, need_requant=False)
 
     # test_nnvm_load(batch_size=16, iter_num=10)
-    test_sym_pass(quant_flag, batch_size=16, iter_num=10000000)
+    test_sym_pass(quant_flag, batch_size=16, iter_num=10000)
     # test_sym_nnvm(batch_size=100, iter_num=10)
 
 

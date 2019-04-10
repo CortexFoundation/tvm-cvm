@@ -288,7 +288,6 @@ def _matrix_decomposition(sym, params, graph, inputs_ext, infer_shapes):
             logger.info("split %s(%s) with shape (%s, %s -> %s(%s)) array",
                     op_name, name, batch, matrix_len, idx, step)
 
-    infer_shapes[node.attr('name')] = infer_shapes[name]
     return node, params
 
 def sym_infer_shape(symbol, params, inputs_ext):
@@ -407,7 +406,6 @@ def _sym_rewrite(sym, params, graph, inputs_ext, infer_shapes):
         node = mx.sym.Convolution(conv_childs[0], conv_childs[1],
                 bias_sym, **conv_attr, name=conv_name)
 
-    infer_shapes[node.attr('name')] = infer_shapes[name]
     return node, params
 
 def _fuse_bias(sym, params, graph, inputs_ext, infer_shapes):
@@ -437,21 +435,22 @@ def _fuse_bias(sym, params, graph, inputs_ext, infer_shapes):
                     **attr, name=name)
             node = mx.sym.broadcast_add(node, bias_sym, name=name+'_add')
 
-    infer_shapes[node.attr('name')] = infer_shapes[name]
     return node, params
 
 def sym_quant_prepare(symbol, params, inputs_ext):
     logger = logging.getLogger('log.sym.pass.prepare')
-    infer_shapes = sym_infer_shape(symbol, params, inputs_ext)
 
+    infer_shapes = sym_infer_shape(symbol, params, inputs_ext)
     sym, params = topo_visit(symbol, params, get_op=get_mxnet_op,
             logger=logger, inputs_ext=inputs_ext,
             callback=_sym_rewrite, infer_shapes=infer_shapes)
 
-    sym, params = topo_visit(sym, params, get_op=get_mxnet_op,
-            logger=logger, inputs_ext=inputs_ext,
-            callback=_fuse_bias, infer_shapes=infer_shapes)
+    # infer_shapes = sym_infer_shape(sym, params, inputs_ext)
+    # sym, params = topo_visit(sym, params, get_op=get_mxnet_op,
+            # logger=logger, inputs_ext=inputs_ext,
+            # callback=_fuse_bias, infer_shapes=infer_shapes)
 
+    infer_shapes = sym_infer_shape(sym, params, inputs_ext)
     sym, params = topo_visit(sym, params, get_op=get_mxnet_op,
             logger=logger, inputs_ext=inputs_ext,
             callback=_matrix_decomposition, infer_shapes=infer_shapes)
