@@ -176,6 +176,8 @@ class CvmRuntime : public ModuleNode {
     std::string name;
     // parameters
     CVMOpParam param;
+    // precision
+    int precision;
     // inputs
     std::vector<NodeEntry> inputs;
     // control deps
@@ -222,6 +224,8 @@ class CvmRuntime : public ModuleNode {
           this->LoadAttrs(reader, &param);
         } else if (key == "control_deps") {
           reader->Read(&control_deps);
+        } else if (key == "precision") {
+          reader->Read(&precision);
         } else {
           LOG(FATAL) << "do not support key " << key;
         }

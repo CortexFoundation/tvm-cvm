@@ -58,6 +58,7 @@ void CvmRuntime::Init(const std::string& graph_json,
   this->Load(&reader);
   module_ = module;
   ctxs_ = ctxs;
+  this->SetupAttr();
   this->SetupStorage();
   this->SetupOpExecs();
 }
@@ -172,6 +173,10 @@ void CvmRuntime::LoadParams(dmlc::Stream* strm) {
     temp.Load(strm);
     data_entry_[eid].CopyFrom(temp);
   }
+}
+
+void CvmRuntime::SetupAttr() {
+
 }
 
 void CvmRuntime::SetupStorage() {
