@@ -118,6 +118,7 @@ nnvm::Graph GraphCompile(const nnvm::Graph& g) {
     }
     CHECK_NE(sub_master_idx, -1) << "A master node not found in the subgraph.";
     fe.compiled_func = GraphLower(fe.subgraph, inputs, target, sub_master_idx);
+    // fe.compiled_func->func_name = fe.compiled_func->func_name.substr(5);
     for (LoweredFunc f : fe.compiled_func->funcs) {
       if (!func_set.count(f.get())) {
         func_set.insert(f.get());
@@ -127,6 +128,7 @@ nnvm::Graph GraphCompile(const nnvm::Graph& g) {
   }
 
   const nnvm::Op* tvm_op = nnvm::Op::Get("tvm_op");
+  const nnvm::Op* cvm_op = nnvm::Op::Get("cvm_op");
 
   std::unordered_map<uint32_t, nnvm::NodePtr> old_new;
   for (uint32_t nid = 0; nid < idx.num_nodes(); ++nid) {
@@ -145,10 +147,11 @@ nnvm::Graph GraphCompile(const nnvm::Graph& g) {
     FuseEntry& fe = fuse_entries[root_id];
     const IndexedGraph& subidx = fe.subgraph.indexed_graph();
     nnvm::NodePtr np = nnvm::Node::Create();
-    np->attrs.op = tvm_op;
+    np->attrs.op = cvm_op;
     np->attrs.name = inode.source->attrs.name;
-    TVMOpParam param;
+    CVMOpParam param;
     param.func_name = fe.compiled_func->func_name;
+    std::cout << "param.func_name = " << param.func_name << "\n";
     param.num_inputs = static_cast<uint32_t>(fe.imap.size());
     param.num_outputs = static_cast<uint32_t>(fe.subgraph.outputs.size());
     param.flatten_data = fe.flatten_data;
@@ -218,7 +221,7 @@ nnvm::Graph GraphCompile(const nnvm::Graph& g) {
           !(idx[rhs.node_id].source->is_variable()) &&
           pattern_vec[group_vec[rhs.node_id]] <= kBroadcast) {
         assign_flag[new_nid] = 2;
-        TVMOpParam& param = dmlc::get<TVMOpParam>(kv.second->attrs.parsed);
+        CVMOpParam& param = dmlc::get<CVMOpParam>(kv.second->attrs.parsed);
         param.func_name = "__nop";
         param.UpdateDict(&(kv.second->attrs.dict));
       } else {

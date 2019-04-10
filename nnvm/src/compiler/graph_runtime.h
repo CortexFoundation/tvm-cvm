@@ -35,6 +35,19 @@ struct TVMOpParam : public dmlc::Parameter<TVMOpParam> {
   }
 };
 
+struct CVMOpParam : public dmlc::Parameter<CVMOpParam> {
+  std::string func_name;
+  uint32_t num_inputs;
+  uint32_t num_outputs;
+  uint32_t flatten_data;
+
+  DMLC_DECLARE_PARAMETER(CVMOpParam) {
+    DMLC_DECLARE_FIELD(func_name);
+    DMLC_DECLARE_FIELD(num_inputs).set_default(1);
+    DMLC_DECLARE_FIELD(num_outputs).set_default(1);
+    DMLC_DECLARE_FIELD(flatten_data).set_default(0);
+  }
+};
 
 /*!
  * \brief wrapper node container for exchange.
