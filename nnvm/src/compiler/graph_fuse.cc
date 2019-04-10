@@ -303,13 +303,14 @@ NNVM_REGISTER_PASS(GraphFindFusibleGroups)
 nnvm::Graph GraphFuse(nnvm::Graph g) {
   CHECK(g.HasAttr("group_root") && g.HasAttr("pattern"))
       << "GraphFindFusibleGroups pass hasn't been applied yet.";
-
   const IndexedGraph& idx = g.indexed_graph();
   // Get attributes from the graph
   const ShapeVector& shape_vec = g.GetAttr<ShapeVector>("shape");
   const DTypeVector& dtype_vec = g.GetAttr<DTypeVector>("dtype");
   const GroupVec& group_vec = g.GetAttr<GroupVec>("group_root");
   const PatternVec& pattern_vec = g.GetAttr<PatternVec>("pattern");
+  std::cout << group_vec.size() << " " << idx.num_nodes() << "\n";
+  std::cout << pattern_vec.size() << " " << idx.num_nodes() << "\n";
 
   // Specially handle assign op.
   const nnvm::Op* assign_op = nnvm::Op::Get("_assign");
