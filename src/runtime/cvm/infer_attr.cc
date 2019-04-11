@@ -1,112 +1,17 @@
 /*!
  *  Copyright (c) 2016 by Contributors
- * \file infer_prec.cc
- * \brief Inference the shapes given existin information.
+ * \file infer_attr.cc
+ * \brief Inference the attrs given existin information.
  */
 #include "graph_runtime.h"
+#include "infer_precision.h"
 #include <nnvm/op.h>
 #include <nnvm/op_attr_types.h>
 #include <nnvm/graph_attr_types.h>
-/*
- * add
- * mul
- * sub
- * add
- * assign
- * avg_pool2d
- * batch_norm
- * broadcast_add
- * broadcast_sub
- * broadcast_to
- * cast
- * clip
- * concatenate
- * conv2d
- * conv2d_transpose
- * dense
- * dropout
- * elemwise_add
- * exp
- * expand_dims
- * expand_like
- * flatten
- * flip
- * gather_nd
- * global_avg_pool2d
- * global_max_pool2d
- * l2_normalize
- * leaky_relu
- * log_softmax
- * lrn
- * matmul
- * max_pool2d
- * multibox_prior
- * multibox_transform_loc
- * non_max_suppression
- * pad
- * prelu
- * relu
- * reshape
- * reshape_like
- * resize
- * slice_like
- * softmax
- * split
- * squeeze
- * strided_slice
- * take
- * transpose
- * upsampling
- * where
- * yolo_reorg
- * broadcast_add
- * broadcast_sub
- * broadcast_mul
- * broadcast_div
- * broadcast_mod
- * broadcast_max
- * broadcast_min
- * broadcast_pow
- * broadcast_left_shift
- * broadcast_right_shift
- * broadcast_greater
- * broadcast_less
- * broadcast_equal
- * broadcast_not_equal
- * broadcast_greater_equal
- * broadcast_less_equal
- * floor
- * ceil
-* trunc
-* round
-* abs
-* sigmoid
-* tanh
-* exp
-* log2
-* log
-* sqrt
-* negative
-* logical_not
-* copy
-* elemwise_add
-* elemwise_sub
-* elemwise_mul
-* elemwise_div
-* elemwise_mod
-* elemwise_pow
-* logical_and
-* logical_or
-* full
-* zeros
-* ones
-* elemwise_sum
-* greater
-* less
- * */
 
 using nnvm::Op;
 using nnvm::TShape;
+using FInferPrecision = nnvm::FInferNodeEntryAttr<int>;
 
 namespace tvm {
 namespace runtime {
@@ -354,6 +259,104 @@ void CvmRuntime::SetupType() {
     infer_type(nid);
   }
 }
+/*
+ * add
+ * mul
+ * sub
+ * add
+ * assign
+ * avg_pool2d
+ * batch_norm
+ * broadcast_add
+ * broadcast_sub
+ * broadcast_to
+ * cast
+ * clip
+ * concatenate
+ * conv2d
+ * conv2d_transpose
+ * dense
+ * dropout
+ * elemwise_add
+ * exp
+ * expand_dims
+ * expand_like
+ * flatten
+ * flip
+ * gather_nd
+ * global_avg_pool2d
+ * global_max_pool2d
+ * l2_normalize
+ * leaky_relu
+ * log_softmax
+ * lrn
+ * matmul
+ * max_pool2d
+ * multibox_prior
+ * multibox_transform_loc
+ * non_max_suppression
+ * pad
+ * prelu
+ * relu
+ * reshape
+ * reshape_like
+ * resize
+ * slice_like
+ * softmax
+ * split
+ * squeeze
+ * strided_slice
+ * take
+ * transpose
+ * upsampling
+ * where
+ * yolo_reorg
+ * broadcast_add
+ * broadcast_sub
+ * broadcast_mul
+ * broadcast_div
+ * broadcast_mod
+ * broadcast_max
+ * broadcast_min
+ * broadcast_pow
+ * broadcast_left_shift
+ * broadcast_right_shift
+ * broadcast_greater
+ * broadcast_less
+ * broadcast_equal
+ * broadcast_not_equal
+ * broadcast_greater_equal
+ * broadcast_less_equal
+ * floor
+ * ceil
+* trunc
+* round
+* abs
+* sigmoid
+* tanh
+* exp
+* log2
+* log
+* sqrt
+* negative
+* logical_not
+* copy
+* elemwise_add
+* elemwise_sub
+* elemwise_mul
+* elemwise_div
+* elemwise_mod
+* elemwise_pow
+* logical_and
+* logical_or
+* full
+* zeros
+* ones
+* elemwise_sum
+* greater
+* less
+ * */
+
 
 }
 }

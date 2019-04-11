@@ -59,6 +59,7 @@ include_directories("3rdparty/dmlc-core/include")
 include_directories("3rdparty/rang/include")
 include_directories("3rdparty/compiler-rt")
 include_directories("nnvm/include")
+include_directories("3rdparty/HalideIR/src")
 
 # initial variables
 set(TVM_LINKER_LIBS "")
@@ -171,6 +172,8 @@ if(USE_CVM_RUNTIME)
     message(STATUS "Build with CVM runtime support...")
     file(GLOB RUNTIME_CVM_SRCS src/runtime/cvm/*.cc)
     list(APPEND RUNTIME_SRCS ${RUNTIME_CVM_SRCS})
+    #list(APPEND RUNTIME_SRCS ${NNVM_COMPILER_SRCS})
+    #list(APPEND RUNTIME_SRCS ${TOPI_SRCS})
 endif(USE_CVM_RUNTIME)
 
 if(USE_GRAPH_RUNTIME)

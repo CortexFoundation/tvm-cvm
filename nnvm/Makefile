@@ -49,13 +49,19 @@ else
 	NO_WHOLE_ARCH= --no-whole-archive
 endif
 
-all: lib/libnnvm.a lib/libnnvm_compiler.$(SHARED_LIBRARY_SUFFIX)
+all: lib/libnnvm.a lib/libnnvm_compiler.$(SHARED_LIBRARY_SUFFIX) lib/libnnvm_rt.a
 
 SRC = $(wildcard src/*.cc src/c_api/*.cc src/core/*.cc src/pass/*.cc)
 SRC_COMPILER = $(wildcard src/top/*/*.cc wildcard src/top/vision/*/*.cc src/compiler/*.cc src/compiler/*/*.cc)
 ALL_OBJ = $(patsubst %.cc, build/%.o, $(SRC))
 TOP_OBJ = $(patsubst %.cc, build/%.o, $(SRC_COMPILER))
 ALL_DEP = $(ALL_OBJ)
+
+NNVM_RT_OBJ	 = build/src/compiler/simplify_inference.o build/src/compiler/compile_engine.o build/src/compiler/precompute_prune.o build/src/compiler/graph_fuse.o build/src/compiler/packed_func_ext.o build/src/compiler/alter_op_layout.o build/src/compiler/graph_compile.o build/src/compiler/graph_hash.o build/src/compiler/graph_runtime.o build/src/compiler/fold_scale_axis.o 
+
+lib/libnnvm_rt.a: $(NNVM_RT_OBJ)
+	@mkdir -p $(@D)
+	$(AR) crv $@ $(filter %.o, $?)
 
 include tests/cpp/unittest.mk
 
@@ -67,6 +73,10 @@ build/src/%.o: src/%.cc
 	$(CXX) -c $(CFLAGS) -c $< -o $@
 
 lib/libnnvm.a: $(ALL_DEP)
+	@mkdir -p $(@D)
+	$(AR) crv $@ $(filter %.o, $?)
+
+lib/libnnvm_rt.a: $(ALL_DEP)
 	@mkdir -p $(@D)
 	$(AR) crv $@ $(filter %.o, $?)
 

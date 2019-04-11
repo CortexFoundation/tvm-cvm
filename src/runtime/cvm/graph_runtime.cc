@@ -175,10 +175,6 @@ void CvmRuntime::LoadParams(dmlc::Stream* strm) {
   }
 }
 
-void CvmRuntime::SetupAttr() {
-
-}
-
 void CvmRuntime::SetupStorage() {
   // Grab saved optimization plan from graph.
   std::vector<TVMType> vtype;
