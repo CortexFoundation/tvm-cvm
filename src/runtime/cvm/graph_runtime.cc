@@ -3,6 +3,8 @@
  * \file graph_runtime.cc
  */
 #include "graph_runtime.h"
+#include "op.h"
+#include "op_attr_types.h"
 
 #include <tvm/runtime/ndarray.h>
 #include <tvm/runtime/packed_func.h>
@@ -389,17 +391,9 @@ std::function<void()> CvmRuntime::CreateCVMOp(
 	  };
 	  return fexec;
   }
-  tvm::runtime::PackedFunc pf = module_.GetFunction(param.func_name, false);
-  CHECK(pf != nullptr) << "no such function in module: " << param.func_name;
 
-  auto fexec = [arg_ptr, pf]() {
-    TVMRetValue rv;
-    TVMArgs targs(arg_ptr->arg_values.data(),
-                  arg_ptr->arg_tcodes.data(),
-                  static_cast<int>(arg_ptr->arg_values.size()));
-    pf.CallPacked(targs, &rv);
-  };
-  return fexec;
+  CHECK(false) << "Use module_ func:" << param.func_name << std::endl;
+  return nullptr;
 }
 
 PackedFunc CvmRuntime::GetFunction(
@@ -460,7 +454,7 @@ Module CvmRuntimeCreate(const std::string& sym_json,
 }
 
 // Get all context for the host and other runtime devices.
-std::vector<TVMContext> CvmGetAllContext(const TVMArgs& args) {
+std::vector<TVMContext> CVMGetAllContext(const TVMArgs& args) {
   // Reserve the first item as the fallback device.
   std::vector<TVMContext> ret;
   TVMContext ctx;
@@ -484,7 +478,9 @@ TVM_REGISTER_GLOBAL("tvm.cvm_runtime.create")
         << "The expected number of arguments for graph_runtime.create is "
            "at least 4, but it has "
         << args.num_args;
-    const auto& contexts = GetAllContext(args);
+    const auto& contexts = CVMGetAllContext(args);
+	std::cout << "args: " << args.num_args << std::endl;
+
     *rv = CvmRuntimeCreate(args[0], args[1], contexts);
   });
 
@@ -495,7 +491,7 @@ TVM_REGISTER_GLOBAL("tvm.cvm_runtime.remote_create")
                                   "at least 4, but it has "
                                << args.num_args;
     void* mhandle = args[1];
-    const auto& contexts = GetAllContext(args);
+    const auto& contexts = CVMGetAllContext(args);
     *rv = CvmRuntimeCreate(
         args[0], *static_cast<tvm::runtime::Module*>(mhandle), contexts);
   });

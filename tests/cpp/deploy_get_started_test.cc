@@ -7,11 +7,13 @@
 #include <iterator>
 #include <algorithm>
 
+using namespace tvm::runtime;
+
 int main()
 {
     // tvm module for compiled functions
     //tvm::runtime::Module mod_syslib = tvm::runtime::Module::LoadFromFile("/tmp/imagenet.so");
-    tvm::runtime::Module mod_syslib = (*tvm::runtime::Registry::Get("module._GetSystemLib"))();
+	tvm::runtime::Module mod_syslib = (*tvm::runtime::Registry::Get("module._GetSystemLib"))();
 
     // json graph
     std::ifstream json_in("/tmp/start_cuda.json", std::ios::in);
@@ -25,7 +27,8 @@ int main()
     int device_id = 0;
 
     // get global function module for graph runtime
-    tvm::runtime::Module mod = (*tvm::runtime::Registry::Get("tvm.cvm_runtime.create"))(json_data, mod_syslib, device_type, device_id);
+	const PackedFunc& cvm_runtime = *(Registry::Get("tvm.cvm_runtime.create"));
+	Module mod = cvm_runtime(json_data, mod_syslib, device_type, device_id);
 
     DLTensor* x;
     int in_ndim = 2;

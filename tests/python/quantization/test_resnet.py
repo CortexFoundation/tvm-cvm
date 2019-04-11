@@ -281,6 +281,9 @@ def test_sym_nnvm(batch_size=10, iter_num=10):
         params = nd.load(load_params_fname)
         sym = mx.sym.load(load_symbol_fname)
         nnvm_sym, _ = nnvm.frontend.from_mxnet(sym)
+        ops = sym_collect_attr(sym)
+        print (ops)
+        exit()
         # nnvm_sym, params = nnvm_realize(nnvm_sym, params, quant_flag)
 
         nnvm_graph = nnvm.graph.create(nnvm_sym)
@@ -373,6 +376,7 @@ def test_sym_pass(quant_flag, batch_size=10, iter_num=10):
 
     print ('graph')
     qsym, qparams = mx.sym.load(dump_sym), nd.load(dump_params)
+    nn.Conv2D
     qgraph = nn.SymbolBlock(qsym, inputs)
     load_parameters(qgraph, qparams, ctx=ctx)
     def graph_func(data):
@@ -422,7 +426,7 @@ if __name__ == "__main__":
     # save_data()
 
     # test_nnvm_load(batch_size=16, iter_num=10)
-    test_sym_pass(quant_flag, batch_size=16, iter_num=10000)
-    # test_sym_nnvm(batch_size=100, iter_num=10)
+    #  test_sym_pass(quant_flag, batch_size=16, iter_num=10000)
+    test_sym_nnvm(batch_size=100, iter_num=10)
 
 
