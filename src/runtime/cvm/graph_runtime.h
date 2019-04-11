@@ -39,6 +39,7 @@ struct CVMOpParam {
   uint32_t num_inputs;
   uint32_t num_outputs;
   uint32_t flatten_data;
+  std::string attrs;
 };
 
 /*!
@@ -337,7 +338,7 @@ class CvmRuntime : public ModuleNode {
    * \param num_inputs Number of inputs.
    * \return The created executor.
    */
-  std::function<void()> CreateCVMOp(const CVMOpParam& attrs,
+  std::function<void()> CreateCVMOp(const CVMOpParam& attrs, std::string op_attrs,
                                     const std::vector<DLTensor>& args,
                                     size_t num_inputs);
   // Get node entry index.

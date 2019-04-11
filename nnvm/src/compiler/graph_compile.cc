@@ -3,7 +3,7 @@
  * \file graph_compile.cc
  * \brief Compile a graph. It lowers the graph nodes into low level IR.
  */
-
+#include <sstream>
 #include <dmlc/parameter.h>
 #include <nnvm/compiler/packed_func_ext.h>
 #include <nnvm/graph.h>
@@ -20,6 +20,7 @@
 #include "graph_fuse.h"
 #include "graph_runtime.h"
 #include "pattern_util.h"
+
 
 namespace nnvm {
 namespace compiler {
@@ -93,6 +94,10 @@ nnvm::Graph GraphCompile(const nnvm::Graph& g) {
 
   for (uint32_t nid = 0; nid < idx.num_nodes(); ++nid) {
     const auto& inode = idx[nid];
+    std::cout << inode.source->attrs.name << " attrs.dict.size = " << inode.source->attrs.dict.size() << "\n";
+    for (auto& item: inode.source->attrs.dict) {
+        std::cout << item.first << " " << item.second << "\n";
+    }
     if (inode.source->is_variable()) continue;
     int root_id = group_vec[nid];
         if (static_cast<int>(nid) != root_id) continue;
@@ -156,6 +161,23 @@ nnvm::Graph GraphCompile(const nnvm::Graph& g) {
     param.num_outputs = static_cast<uint32_t>(fe.subgraph.outputs.size());
     param.flatten_data = fe.flatten_data;
     param.UpdateDict(&(np->attrs.dict));
+    std::vector<std::string> attr_vec;
+    for (auto& item: inode.source->attrs.dict) {
+        std::stringstream tss;
+        tss << "'" << item.first << "': " << "'" << item.second << "'";
+        attr_vec.push_back(tss.str());
+    }
+
+    std::stringstream ss;
+    ss << "{";
+    for (int i = 0; i < attr_vec.size(); i++) {
+        if (i != 0)
+            ss << ", ";
+        ss << attr_vec[i];
+    }
+    ss << "}";
+    param.op_attrs = ss.str();
+    std::cout << "param.attrs" << ss.str() << "\n";
     np->attrs.parsed = std::move(param);
 
     for (uint32_t sub_input_id : subidx.input_nodes()) {
@@ -207,11 +229,17 @@ nnvm::Graph GraphCompile(const nnvm::Graph& g) {
   ShapeVector new_shape_vec = ShapeVector(new_idx.num_node_entries(), TShape());
   DTypeVector new_dtype_vec = DTypeVector(new_idx.num_node_entries());
   std::vector<std::string> new_dltype_vec(new_idx.num_node_entries());
-
+  std::vector<std::string>  new_op_attrs(new_idx.num_node_entries());
+  std::cout << "old_new\n";
   for (const auto& kv : old_new) {
     uint32_t nid = kv.first;
     const auto& inode = idx[nid];
     uint32_t new_nid = new_idx.node_id(kv.second.get());
+    if (!inode.source->is_variable()) {
+        CVMOpParam& param = dmlc::get<CVMOpParam>(kv.second->attrs.parsed);
+        std::cout << param.op_attrs << "\n";
+        new_op_attrs[new_nid] = param.op_attrs;
+    }
     if (inode.source->op() == assign_op) {
       // Check if rhs of assign can be computed inplace.
       // If yes, we can simply set that memory to be assign target
@@ -240,6 +268,7 @@ nnvm::Graph GraphCompile(const nnvm::Graph& g) {
   ret.attrs["shape"] = std::make_shared<any>(std::move(new_shape_vec));
   ret.attrs["dtype"] = std::make_shared<any>(std::move(new_dtype_vec));
   ret.attrs["dltype"] = std::make_shared<any>(std::move(new_dltype_vec));
+  ret.attrs["op_attrs"] = std::make_shared<any>(std::move(new_op_attrs));
 
   // Setup module
   static const PackedFunc& fbuild = GetPackedFunc("nnvm.compiler.build_target");
@@ -258,6 +287,7 @@ NNVM_REGISTER_PASS(GraphCompile)
     .depend_graph_attr("group_root")
     .depend_graph_attr("pattern")
     .depend_graph_attr("group_master");
+
 
 }  // namespace compiler
 }  // namespace nnvm

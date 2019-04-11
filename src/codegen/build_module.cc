@@ -407,10 +407,12 @@ runtime::Module build(const Array<LoweredFunc>& funcs,
                       const Target& target,
                       const Target& target_host,
                       const BuildConfig& config) {
+  std::cout << "build\n";
   std::unordered_set<std::string> all_names;
   for (const auto &x : funcs) {
     CHECK(all_names.count(x->name) == 0) << "Duplicate function name " << x->name;
     all_names.insert(x->name);
+    std::cout << "x = " << x->name << "\n";
   }
 
   auto target_host_val = target_host.defined() ? target_host : DefaultTargetHost(target);
@@ -461,6 +463,7 @@ runtime::Module build(const Array<LoweredFunc>& funcs,
   }
 
 
+    std::cout << "fdevice [0] = " << fdevice << "\n";
   for (size_t i = 0; i < fdevice.size(); ++i) {
     auto func = fdevice[i];
     func = ir::LowerIntrin(func, target->target_name);
@@ -477,6 +480,7 @@ runtime::Module build(const Array<LoweredFunc>& funcs,
   auto mhost = codegen::Build(fhost, target_host_val->str());
 
   if (fdevice.size() > 0) {
+      std::cout << "fdevice = " << fdevice << "\n";
     auto mdev = codegen::Build(fdevice, target->str());
     mhost.Import(mdev);
   }
