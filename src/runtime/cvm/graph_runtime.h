@@ -331,7 +331,10 @@ class CvmRuntime : public ModuleNode {
       }
       CHECK_EQ(bitmask, 1|2|4|8|16) << "invalid format";
   }
-   /*! \brief Setup the shape, type, and precision */
+  /*! \brief Setup the shape, type, and precision */
+  void SetupShape();
+  void SetupType();
+  void SetupPrecision();
   void SetupAttr();
   /*! \brief Setup the temporal storage */
   void SetupStorage();

@@ -58,6 +58,7 @@ include_directories("3rdparty/dlpack/include")
 include_directories("3rdparty/dmlc-core/include")
 include_directories("3rdparty/rang/include")
 include_directories("3rdparty/compiler-rt")
+include_directories("nnvm/include")
 
 # initial variables
 set(TVM_LINKER_LIBS "")
@@ -166,11 +167,10 @@ else()
   list(APPEND COMPILER_SRCS ${STACKVM_RUNTIME_SRCS})
 endif(USE_STACKVM_RUNTIME)
 
-if(USE_GRAPH_RUNTIME)
+if(USE_CVM_RUNTIME)
     message(STATUS "Build with CVM runtime support...")
     file(GLOB RUNTIME_CVM_SRCS src/runtime/cvm/*.cc)
     list(APPEND RUNTIME_SRCS ${RUNTIME_CVM_SRCS})
-
 endif(USE_CVM_RUNTIME)
 
 if(USE_GRAPH_RUNTIME)
@@ -186,12 +186,6 @@ if(USE_GRAPH_RUNTIME)
       PROPERTIES COMPILE_DEFINITIONS "TVM_GRAPH_RUNTIME_DEBUG")
   endif(USE_GRAPH_RUNTIME_DEBUG)
 endif(USE_GRAPH_RUNTIME)
-
-if(USE_CVM_GRAPH_RUNTIME)
-  message(STATUS "Build with CVM Graph runtime support...")
-  file(GLOB CVM_RUNTIME_GRAPH_SRCS cvm/runtime/*.cc)
-  list(APPEND CVM_RUNTIME_SRCS ${CVM_RUNTIME_GRAPH_SRCS})
-endif(USE_CVM_GRAPH_RUNTIME)
 
 
 # Module rules
@@ -214,8 +208,6 @@ include(cmake/modules/contrib/HybridDump.cmake)
 add_library(tvm SHARED ${COMPILER_SRCS} ${RUNTIME_SRCS})
 add_library(tvm_topi SHARED ${TOPI_SRCS})
 add_library(tvm_runtime SHARED ${RUNTIME_SRCS})
-add_library(tvm_runtime_static ${RUNTIME_STATIC_SRCS})
-add_library(cvm_runtime SHARED ${CVM_RUNTIME_SRCS})
 if(NOT USE_SGX STREQUAL "OFF")
   add_dependencies(tvm sgx_edl)
   add_dependencies(tvm_runtime sgx_edl tvm_t)
@@ -226,7 +218,6 @@ add_library(nnvm_compiler SHARED ${NNVM_COMPILER_SRCS})
 target_link_libraries(tvm ${TVM_LINKER_LIBS} ${TVM_RUNTIME_LINKER_LIBS})
 target_link_libraries(tvm_topi tvm ${TVM_LINKER_LIBS} ${TVM_RUNTIME_LINKER_LIBS})
 target_link_libraries(tvm_runtime ${TVM_RUNTIME_LINKER_LIBS})
-target_link_libraries(tvm_runtime_static ${TVM_RUNTIME_LINKER_LIBS})
 target_link_libraries(nnvm_compiler tvm)
 
 # Related headers
@@ -268,9 +259,7 @@ add_custom_target(runtime DEPENDS tvm_runtime)
 install(TARGETS tvm DESTINATION lib${LIB_SUFFIX})
 install(TARGETS tvm_topi DESTINATION lib${LIB_SUFFIX})
 install(TARGETS tvm_runtime DESTINATION lib${LIB_SUFFIX})
-install(TARGETS cvm_runtime DESTINATION lib${LIB_SUFFIX})
 install(TARGETS nnvm_compiler DESTINATION lib${LIB_SUFFIX})
-install(TARGETS tvm_runtime_static DESTINATION lib${LIB_SUFFIX})
 
 if (INSTALL_DEV)
   install(
