@@ -163,11 +163,10 @@ else()
   list(APPEND COMPILER_SRCS ${STACKVM_RUNTIME_SRCS})
 endif(USE_STACKVM_RUNTIME)
 
-if(USE_GRAPH_RUNTIME)
+if(USE_CVM_RUNTIME)
     message(STATUS "Build with CVM runtime support...")
     file(GLOB RUNTIME_CVM_SRCS src/runtime/cvm/*.cc)
     list(APPEND RUNTIME_SRCS ${RUNTIME_CVM_SRCS})
-
 endif(USE_CVM_RUNTIME)
 
 if(USE_GRAPH_RUNTIME)

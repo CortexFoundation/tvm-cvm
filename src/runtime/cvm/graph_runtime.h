@@ -377,8 +377,11 @@ class CvmRuntime : public ModuleNode {
 std::vector<TVMContext> GetAllContext(const TVMArgs& args);
 
 
-void CVMClip(TVMArgs args, TVMRetValue* rv);
-void CVMAdd(TVMArgs args, TVMRetValue* rv);
+// void CVMClip(TVMArgs args, TVMRetValue* rv);
+// void CVMAdd(TVMArgs args, TVMRetValue* rv);
+// void CVMDense(TVMArgs args, TVMRetValue* rv);
+// void CVMFlat(TVMArgs args, TVMRetValue* rv);
+// void CVMConv(TVMArgs args, TVMRetValue* rv);
 
 }  // namespace runtime
 }  // namespace tvm
