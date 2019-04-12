@@ -22,6 +22,7 @@ runtime::Module Build(const Array<LoweredFunc>& funcs,
     mode = mode.substr(0, pos);
   }
   std::string build_f_name = "codegen.build_" + mode;
+  std::cout << "build_f_name = " << build_f_name << "\n";
   // the build function.
   const PackedFunc* bf = runtime::Registry::Get(build_f_name);
   CHECK(bf != nullptr)

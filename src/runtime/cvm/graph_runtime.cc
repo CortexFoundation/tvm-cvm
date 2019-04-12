@@ -256,12 +256,13 @@ void CvmRuntime::SetupOpExecs() {
     }
     CHECK(inode.op_type == "cvm_op") << "Can only take tvm_op as op";
 
-    op_execs_[nid] = CreateCVMOp(inode.param, args, inode.inputs.size());
+    op_execs_[nid] = CreateCVMOp(inode.param, attrs_.op_attrs[nid], args, inode.inputs.size());
   }
 }
 
 std::function<void()> CvmRuntime::CreateCVMOp(
     const CVMOpParam& param,
+    const std::string op_attrs,
     const std::vector<DLTensor>& args,
     size_t num_inputs) {
   struct OpArgs {
@@ -276,7 +277,6 @@ std::function<void()> CvmRuntime::CreateCVMOp(
   if (param.flatten_data) {
     arg_ptr->shape_data.resize(arg_ptr->args.size());
   }
-  std::cout << " size = " << arg_ptr->args.size() << "\n";
   for (size_t i = 0; i < arg_ptr->args.size(); ++i) {
     TVMValue v;
     DLTensor* t = &(arg_ptr->args[i]);
@@ -289,6 +289,24 @@ std::function<void()> CvmRuntime::CreateCVMOp(
       t->ndim = 1;
       t->shape = &(arg_ptr->shape_data[i]);
     }
+  }
+  std::stringstream ss; ss << op_attrs;
+// std::cout << "op_attr = " << op_attrs << "\n";
+  dmlc::JSONReader reader(&ss);
+  std::string kv;
+  reader.BeginObject();
+// std::cout << param.func_name << std::endl;
+  while (reader.NextObjectItem(&kv)) {
+      std::string val;
+      reader.Read(&val);
+  //    std::cout << kv << " " << val << "\n";
+      TVMValue v;
+      //TODO leak
+	  auto tmp = new char[val.size()  + 1];
+	  strcpy(tmp, val.c_str());
+      v.v_str = const_cast<const char*>(tmp);
+      arg_ptr->arg_values.push_back(v);
+      arg_ptr->arg_tcodes.push_back(kStr);
   }
 
   if (param.func_name == "__nop") {
@@ -315,9 +333,7 @@ std::function<void()> CvmRuntime::CreateCVMOp(
 		  TVMArgs targs(arg_ptr->arg_values.data(),
 				  arg_ptr->arg_tcodes.data(),
 				  static_cast<int>(arg_ptr->arg_values.size()));
-		  //PackedFunc conv = PackedFunc(CVMConv);
-		  // conv.CallPacked(targs, &rv);
-          std::cout << "tvm.runtime.cvm." + op << std::endl;
+          //std::cout << "tvm.runtime.cvm." + op << std::endl;
           auto func = tvm::runtime::Registry::Get("tvm.runtime.cvm." + op);
           assert(func != NULL);
           func->CallPacked(targs, &rv);
@@ -326,163 +342,7 @@ std::function<void()> CvmRuntime::CreateCVMOp(
     }
   }
 
-  /*if (param.func_name.size() >= 6 && param.func_name.substr(0, 6) == "conv2d") {
-	  return [arg_ptr](){
-		  TVMRetValue rv;
-		  TVMArgs targs(arg_ptr->arg_values.data(),
-				  arg_ptr->arg_tcodes.data(),
-				  static_cast<int>(arg_ptr->arg_values.size()));
-		  //PackedFunc conv = PackedFunc(CVMConv);
-		  // conv.CallPacked(targs, &rv);
-          tvm::runtime::Registry::Get("tvm.runtime.cvm.conv2d")->CallPacked(args, &rv);
-
-      };
-  }
-  if (param.func_name.size() >= 5 && param.func_name.substr(0, 5) == "dense") {
-      return [arg_ptr](){
-		  TVMRetValue rv;
-          TVMArgs args(arg_ptr->arg_values.data(),
-                  arg_ptr->arg_tcodes.data(),
-                  static_cast<int>(arg_ptr->arg_values.size()));
-
-          tvm::runtime::Registry::Get("tvm.runtime.cvm.dense")->CallPacked(args, &rv);
-      };
-  }
-  if (param.func_name.size() >= 7 && param.func_name.substr(0, 7) == "flatten") {
-      return [arg_ptr](){
-		  TVMRetValue rv;
-          TVMArgs args(arg_ptr->arg_values.data(),
-                  arg_ptr->arg_tcodes.data(),
-                  static_cast<int>(arg_ptr->arg_values.size()));
-          // PackedFunc flat = PackedFunc(CVMFlat);
-          // flat.CallPacked(args, &rv);
-          tvm::runtime::Registry::Get("tvm.runtime.cvm.flat")->CallPacked(args, &rv);
-      };
-  }
-  std::cout << "h2\n";
-  if (param.func_name.size() >= 13 && param.func_name.substr(0, 13) == "broadcast_add") {
-      return [arg_ptr](){
-    	  TVMRetValue rv;
-          TVMArgs args(arg_ptr->arg_values.data(),
-                  arg_ptr->arg_tcodes.data(),
-                  static_cast<int>(arg_ptr->arg_values.size()));
-          // PackedFunc broadcast_add = PackedFunc(broadcast_add);
-          // broadcast_add.CallPacked(args, &rv);
-          tvm::runtime::Registry::Get("tvm.runtime.cvm.broadcast_add")->CallPacked(args, &rv);
-      };
-  }
-  if (param.func_name.size() >= 13 && param.func_name.substr(0, 13) == "broadcast_sub") {
-      return [arg_ptr](){
-    	  TVMRetValue rv;
-          TVMArgs args(arg_ptr->arg_values.data(),
-                  arg_ptr->arg_tcodes.data(),
-                  static_cast<int>(arg_ptr->arg_values.size()));
-          // PackedFunc broadcast_sub = PackedFunc(broadcast_sub);
-          // broadcast_sub.CallPacked(args, &rv);
-      };
-  }
-  if (param.func_name.size() >= 13 && param.func_name.substr(0, 13) == "broadcast_mul") {
-      return [arg_ptr](){
-    	  TVMRetValue rv;
-          TVMArgs args(arg_ptr->arg_values.data(),
-                  arg_ptr->arg_tcodes.data(),
-                  static_cast<int>(arg_ptr->arg_values.size()));
-          // PackedFunc broadcast_mul = PackedFunc(broadcast_mul);
-          // broadcast_mul.CallPacked(args, &rv);
-      };
-  }
-  std::cout << "h3\n";
-  if (param.func_name.size() >= 13 && param.func_name.substr(0, 13) == "broadcast_div") {
-      return [arg_ptr](){
-    	  TVMRetValue rv;
-          TVMArgs args(arg_ptr->arg_values.data(),
-                  arg_ptr->arg_tcodes.data(),
-                  static_cast<int>(arg_ptr->arg_values.size()));
-          // PackedFunc broadcast_div = PackedFunc(broadcast_div);
-          // broadcast_div.CallPacked(args, &rv);
-      };
-  }
-  if (param.func_name.size() >= 21 && param.func_name.substr(0, 21) == "broadcast_right_shift") {
-      return [arg_ptr](){
-    	  TVMRetValue rv;
-          TVMArgs args(arg_ptr->arg_values.data(),
-                  arg_ptr->arg_tcodes.data(),
-                  static_cast<int>(arg_ptr->arg_values.size()));
-          // PackedFunc broadcast_right_shift = PackedFunc(broadcast_right_shift);
-          // broadcast_right_shift.CallPacked(args, &rv);
-      };
-  }
-  if (param.func_name.size() >= 20 && param.func_name.substr(0, 20) == "broadcast_left_shift") {
-      return [arg_ptr](){
-    	  TVMRetValue rv;
-          TVMArgs args(arg_ptr->arg_values.data(),
-                  arg_ptr->arg_tcodes.data(),
-                  static_cast<int>(arg_ptr->arg_values.size()));
-          // PackedFunc broadcast_left_shift = PackedFunc(broadcast_left_shift);
-          // broadcast_left_shift.CallPacked(args, &rv);
-      };
-  }
-  std::cout << "h4\n";
-  if (param.func_name.size() >= 4 && param.func_name.substr(0, 4) == "clip") {
-      std::cout << "h4 = == " << arg_ptr << "\n";
-      return [arg_ptr]() -> void{
-    	  // TVMRetValue rv;
-          // TVMArgs args(arg_ptr->arg_values.data(),
-          //        arg_ptr->arg_tcodes.data(),
-          //        static_cast<int>(arg_ptr->arg_values.size()));
-          // PackedFunc clip = PackedFunc(CVMClip);
-          // clip.CallPacked(args, &rv);
-          return ;
-      };
-  }
-  std::cout << "h4.1\n";
-  if (param.func_name.size() >= 4 && param.func_name.substr(0, 4) == "relu") {
-      return [arg_ptr](){
-    	  TVMRetValue rv;
-          TVMArgs args(arg_ptr->arg_values.data(),
-                  arg_ptr->arg_tcodes.data(),
-                  static_cast<int>(arg_ptr->arg_values.size()));
-          PackedFunc relu = PackedFunc([](TVMArgs args, TVMRetValue* rv){
-          });
-          relu.CallPacked(args, &rv);
-      };
-  }
-  std::cout << "h4.2\n";
-  if (param.func_name.size() >= 10 && param.func_name.substr(0, 10) == "max_pool2d") {
-      return [arg_ptr](){
-    	  TVMRetValue rv;
-          TVMArgs args(arg_ptr->arg_values.data(),
-                  arg_ptr->arg_tcodes.data(),
-                  static_cast<int>(arg_ptr->arg_values.size()));
-      };
-  }
-  std::cout << "h5\n";
-  if (param.func_name.size() >= 12 && param.func_name.substr(0, 12) == "elemwise_add") {
-      return [arg_ptr](){
-    	  TVMRetValue rv;
-          TVMArgs args(arg_ptr->arg_values.data(),
-                  arg_ptr->arg_tcodes.data(),
-                  static_cast<int>(arg_ptr->arg_values.size()));
-      };
-  }
-  if (param.func_name.size() >= 3 && param.func_name.substr(0, 3) == "sum") {
-      return [arg_ptr](){
-    	  TVMRetValue rv;
-          TVMArgs args(arg_ptr->arg_values.data(),
-                  arg_ptr->arg_tcodes.data(),
-                  static_cast<int>(arg_ptr->arg_values.size()));
-      };
-  }
-  if (param.func_name.size() >= 7 && param.func_name.substr(0, 7) == "reshape") {
-      return [arg_ptr](){
-    	  TVMRetValue rv;
-          TVMArgs args(arg_ptr->arg_values.data(),
-                  arg_ptr->arg_tcodes.data(),
-                  static_cast<int>(arg_ptr->arg_values.size()));
-      };
-  }
-  */
-  std::cout << "h6\n";
+//  std::cout << param.func_name << " " << param.attrs << "\n";
   return [](){};
 }
 

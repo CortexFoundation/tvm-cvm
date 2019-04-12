@@ -18,6 +18,16 @@ int main()
     std::string json_data((std::istreambuf_iterator<char>(json_in)), std::istreambuf_iterator<char>());
     json_in.close();
 
+    // parameters in binary
+    std::ifstream params_in("/tmp/imagenet.params", std::ios::binary);
+    std::string params_data((std::istreambuf_iterator<char>(params_in)), std::istreambuf_iterator<char>());
+    params_in.close();
+
+    // parameters need to be TVMByteArray type to indicate the binary data
+    TVMByteArray params_arr;
+    params_arr.data = params_data.c_str();
+    params_arr.size = params_data.length();
+
     int dtype_code = kDLInt;
     int dtype_bits = 32;
     int dtype_lanes = 1;

@@ -276,6 +276,15 @@ class GraphRuntime : public ModuleNode {
           CHECK(reader->NextArrayItem());
           reader->Read(&device_index);
           CHECK(!reader->NextArrayItem());
+        } else if (key == "op_attrs") {
+          reader->BeginArray();
+          CHECK(reader->NextArrayItem());
+          reader->Read(&type);
+          CHECK_EQ(type, "list_str");
+          CHECK(reader->NextArrayItem());
+          std::vector<std::string> dummy;
+          reader->Read(&dummy);
+          CHECK(!reader->NextArrayItem());
         } else {
           reader->BeginArray();
           CHECK(reader->NextArrayItem());
