@@ -11,7 +11,6 @@
 
 using nnvm::Op;
 using nnvm::TShape;
-using FInferPrecision = nnvm::FInferNodeEntryAttr<int>;
 
 namespace tvm {
 namespace runtime {
