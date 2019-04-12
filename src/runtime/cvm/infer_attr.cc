@@ -15,11 +15,18 @@ using nnvm::TShape;
 namespace tvm {
 namespace runtime {
 
+void CvmRuntime::SetupAttr() {
+  SetupShape();
+  SetupType();
+  SetupPrecision();
+}
+
 void CvmRuntime::SetupPrecision() {
   std::vector<Node> &idx = nodes_;
   std::vector<int> &precision = attrs_.precision;
   // Temp space for shape inference.
   std::vector<int> iprec, oprec;
+	auto finfer_prec = FInferPrecisionMap::getInstance();
 
   // inference step function for nid
   auto infer_prec = [&](uint32_t nid) {
@@ -43,8 +50,7 @@ void CvmRuntime::SetupPrecision() {
       // TODO: pre-check or try-catch is needed.
       auto opname = inode.param.func_name;
       auto op = Op::Get(opname);
-/*
-      auto finfer = finfer_shape.get(op, nullptr);
+      auto finfer = finfer_prec.get(opname);
       if (!forward_known) {
         if (finfer != nullptr) {
           // Call inference function of the operator.
@@ -52,25 +58,25 @@ void CvmRuntime::SetupPrecision() {
             nnvm::NodeAttrs attrs;
             attrs.op = op;
             attrs.name = opname;
-            forward_known = finfer(attrs, &iprec, &oprec);
+            forward_known = finfer(opname, &iprec, &oprec, nullptr);
           } catch (const std::exception& e) {
             throw dmlc::Error(e.what() + std::string(" with ") + opname);
           }
         } else {
           // TODO: Error
         }
-      }*/
+      }
       // Save to the result map.
       for (uint32_t i = 0; i < num_inputs; ++i) {
         CHECK_EQ(iprec[i], precision[inode.inputs[i].node_id])
           << "Check type failed, "
           << "expected to be " << iprec[i]
           << " but " << precision[inode.inputs[i].node_id];
+			}
        CHECK_EQ(oprec[0], precision[nid])
           << "Check type failed, "
           << "expected to be " << oprec[0]
           << " but " << precision[nid];
-      }
     }
   };
 
@@ -246,11 +252,11 @@ void CvmRuntime::SetupType() {
           << "Check type failed, "
           << "expected to be " << itype[i]
           << " but " << rtype[inode.inputs[i].node_id];
-       CHECK_EQ(otype[0], rtype[nid])
-          << "Check type failed, "
-          << "expected to be " << otype[0]
-          << " but " << rtype[nid];
-      }
+			}
+      CHECK_EQ(otype[0], rtype[nid])
+        << "Check type failed, "
+        << "expected to be " << otype[0]
+        << " but " << rtype[nid];
     }
   };
 
@@ -259,16 +265,9 @@ void CvmRuntime::SetupType() {
   }
 }
 /*
- * add
- * mul
- * sub
- * add
  * assign
  * avg_pool2d
  * batch_norm
- * broadcast_add
- * broadcast_sub
- * broadcast_to
  * cast
  * clip
  * concatenate
