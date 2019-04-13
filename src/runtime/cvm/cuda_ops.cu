@@ -69,8 +69,8 @@ __global__ void kernel_conv2d(
         shared_i[l_y][l_x] = input[i_y * i_w + i_x];
 
         if(l_y < F_H-1){
-            printf("%d,%d\n", l_y, min_s_y);
-            shared_i[l_y + min_s_y][l_x] = input[(i_y + min_s_y) * i_w + i_x];     
+            for(int i = l_y; i < F_H-1; i+=o_h%BS)
+               shared_i[l_y + min_s_y][l_x] = input[(i_y + min_s_y) * i_w + i_x];     
         }
         if(l_x < F_W-1){
             shared_i[l_y][l_x + min_s_x] = input[i_y * i_w + i_x + min_s_x];
@@ -81,7 +81,9 @@ __global__ void kernel_conv2d(
 //        }
         //load filter to shared;
         if(l_y < F_H && l_x < F_W){
-            shared_f[l_y][l_x] = filter[l_o_c * F_H * F_W * f_c + c * F_H * F_W + l_y * F_W + l_x];
+            for(int i = l_y; i < F_H; i+= o_h%BS)
+                for(int j = l_x; j < F_W; j+=o_w%BS)
+                    shared_f[i][j] = filter[l_o_c * F_H * F_W * f_c + c * F_H * F_W + i * F_W + j];
         }
         __syncthreads();
 

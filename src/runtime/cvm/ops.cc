@@ -12,6 +12,9 @@
 #include <string>
 #include <memory>
 #include <utility>
+
+#include "cuda_ops.h"
+
 namespace tvm {
 namespace runtime {
 
@@ -185,15 +188,27 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.conv2d").set_body([]
 		return y_sum;
 
 	};
-    for (int n = 0; n < n_batch; ++n) {
-        for (int k = 0; k < out_channels; ++k) {
-            for (int p = 0; p < o_h; ++p) {
-                for (int q = 0; q < o_w; ++q) {
-                    GETY(n, k, p, q) = b_data[k] + calc_func(n, k, p, q);
+    if (filter_h == 3) {
+        cuda_conv2d(x_data, n_batch, in_channels, x_h, x_w,
+                w_data, out_channels, in_channels, filter_h, filter_w,
+                b_data,
+                padding[0],
+                stride_h,
+                dilation[0],
+                groups,
+                y_data, n_batch, out_channels, o_h, o_w);
+    } else {
+        for (int n = 0; n < n_batch; ++n) {
+            for (int k = 0; k < out_channels; ++k) {
+                for (int p = 0; p < o_h; ++p) {
+                    for (int q = 0; q < o_w; ++q) {
+                        GETY(n, k, p, q) = b_data[k] + calc_func(n, k, p, q);
+                    }
                 }
             }
         }
     }
+
  });
 
  inline int32_t getSize(DLTensor *dlTensor){
@@ -417,6 +432,7 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.sum")
 		}
     });
 
+
 TVM_REGISTER_GLOBAL("tvm.runtime.cvm.elemwise_add")
     .set_body([](TVMArgs args, TVMRetValue *ret){
         DLTensor *args0 = args[0];
@@ -426,10 +442,24 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.elemwise_add")
         int32_t *b = static_cast<int32_t*>(args1->data);
         int32_t *c = static_cast<int32_t*>(args2->data);
 
-        for(int i = 0; i < getSize(args0); i++){
-            c[i] = a[i] + b[i];
-        }
+       // for(int i = 0; i < getSize(args0); i++){
+       //     c[i] = a[i] + b[i];
+       // }
+        cuda_elemwise_add(a, b, c, getSize(args0));
     });
+
+TVM_REGISTER_GLOBAL("tvm.runtime.cvm.cuda_elemwise_add")
+.set_body([](tvm::runtime::TVMArgs args, tvm::runtime::TVMRetValue *rv){
+    DLTensor *a = args[0];
+    DLTensor *b = args[1];
+    DLTensor *c = args[2];
+    int32_t *a_data = static_cast<int32_t*>(a->data);
+    int32_t *b_data = static_cast<int32_t*>(b->data);
+    int32_t *c_data = static_cast<int32_t*>(c->data);
+    int32_t n = getSize(a);
+    cuda_elemwise_add(a_data, b_data, c_data, n);
+});
+
 TVM_REGISTER_GLOBAL("tvm.runtime.cvm.reshap")
     .set_body([](TVMArgs args, TVMRetValue *ret){
          DLTensor *x = args[0];
@@ -439,3 +469,4 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.reshap")
     });
 }
 }
+

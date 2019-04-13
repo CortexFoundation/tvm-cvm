@@ -44,8 +44,8 @@ void conv_cpu(int* x_data, int n_batch, int x_h, int x_w, int in_channels,
 int main(){
     int i_n = 1;
     int i_c = 1;
-    int i_h = 4;
-    int i_w = 4;
+    int i_h = 3;
+    int i_w = 3;
     int f_h = 3;
     int f_w = 3;
     int o_c = 1;
