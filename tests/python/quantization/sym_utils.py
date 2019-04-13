@@ -10,7 +10,6 @@ INT8_MIN, INT8_MAX = -127, 127
 
 INT8_TYPE, INT32_TYPE= ('int8', 'int32')
 
-
 class OpExt():
     def __init__(self, op_name='null',
             in_types=[], out_types=[]):
@@ -84,7 +83,7 @@ def sym_iter(sym):
 
     return sym
 
-def examine_parameters(symbol, params, inputs_ext, callback=None):
+def examine_parameters(symbol, params, inputs_ext, allows=[], callback=None):
     args, new_params = symbol.list_inputs(), {}
     for arg in args:
         if arg not in inputs_ext:
@@ -95,6 +94,10 @@ def examine_parameters(symbol, params, inputs_ext, callback=None):
                 callback(params, arg)
 
             new_params[arg] = params[arg]
+
+    for name in allows:
+        if name in params:
+            new_params[name] = params[name]
     return new_params
 
 def topo_sort(symbol, logger=logging):
@@ -167,9 +170,10 @@ def get_node(sym, graph):
         assert False, "Unrecognized layer:%s in graph"%name
     return graph[name]
 
-def topo_visit(symbol, params, graph={}, get_op=get_mxnet_op,
+def topo_visit(symbol, params, get_op=get_mxnet_op,
         logger=logging, callback=None, inputs_ext={}, **kwargs):
-
+    graph = {}
+    params = {k:v[:] for k,v in params.items()}
     for sym in topo_sort(symbol, logger):
         name = sym.attr('name')
         op_name = sym.attr('op_name')

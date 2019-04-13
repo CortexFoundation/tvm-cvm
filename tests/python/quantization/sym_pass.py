@@ -391,21 +391,21 @@ def _sym_rewrite(sym, params, graph, inputs_ext, infer_shapes):
         params[weight_name] = weight * weight_scale
 
         bias_name = conv_sym.attr('name') + '_conv_bias'
-        assert bias_name not in graph
+        assert bias_name not in graph, "bias name %s has existed in graph %s" \
+            % (name, graph.keys())
         bias = beta - scale * data_mean
         if conv_attr['no_bias'] == 'False':
             bias += params[conv_childs[2].attr('name')]
         params[bias_name] = bias
 
         conv_name = conv_sym.attr('name') + '_' + name
-
         conv_attr['no_bias'] = 'False'
-        bias_sym = mx.sym.var(bias_name, shape=bias.shape)
-        graph[bias_name] = bias_sym
-
+        bias_sym = graph[bias_name] = mx.sym.var(bias_name, shape=bias.shape)
         node = mx.sym.Convolution(conv_childs[0], conv_childs[1],
                 bias_sym, **conv_attr, name=conv_name)
 
+        logger.info("fuse Convolution=%-40s and batchnorm=%-40s",
+                conv_sym.attr('name'), name)
     return node, params
 
 def _fuse_bias(sym, params, graph, inputs_ext, infer_shapes):
@@ -447,8 +447,8 @@ def sym_quant_prepare(symbol, params, inputs_ext):
 
     # infer_shapes = sym_infer_shape(sym, params, inputs_ext)
     # sym, params = topo_visit(sym, params, get_op=get_mxnet_op,
-            # logger=logger, inputs_ext=inputs_ext,
-            # callback=_fuse_bias, infer_shapes=infer_shapes)
+    #         logger=logger, inputs_ext=inputs_ext,
+    #         callback=_fuse_bias, infer_shapes=infer_shapes)
 
     infer_shapes = sym_infer_shape(sym, params, inputs_ext)
     sym, params = topo_visit(sym, params, get_op=get_mxnet_op,

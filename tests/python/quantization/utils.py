@@ -124,6 +124,34 @@ def load_dataset(batch_size=10):
                                 **mean_args,
                                 **std_args)
 
+def multi_eval_accuracy(base_func, data_iter_func, *comp_funcs,
+        iter_num=10, logger=logging):
+    log_str = "Iteration: %3d | Accuracy: %5.2f%% | "
+    for idx in range(len(comp_funcs)):
+        log_str += comp_funcs[idx].__name__ + ": %5.2f%%, diff: %5.2f%% | "
+    log_str += "Total Sample: %5d"
+
+    acc, total = 0, 0
+    comp_accs = [0 for _ in range(len(comp_funcs) * 2)]
+    for i in range(iter_num):
+        data, label = data_iter_func()
+
+        res = base_func(data)
+        res_comp = [func(data) for func in comp_funcs]
+
+        for idx in range(res.shape[0]):
+            res_label = res[idx].asnumpy().argmax()
+            data_label = label[idx].asnumpy()
+            acc += 1 if res_label == data_label else 0
+
+            for fidx in range(len(comp_funcs)):
+                res_comp_label = res_comp[fidx][idx].asnumpy().argmax()
+                comp_accs[2*fidx] += 1 if res_comp_label == data_label else 0
+                comp_accs[2*fidx+1] += 0 if res_label == res_comp_label else 1
+            total += 1
+        logger.info(log_str, i, 100.*acc/total,
+                *[100.*acc/total for acc in comp_accs], total)
+
 def eval_accuracy(graph_func, data_iter_func, iter_num=10,
         graph_comp_func=None, logger=logging):
 

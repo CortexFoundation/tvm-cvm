@@ -12,29 +12,68 @@ def get_zero_symmetric(threshold):
     else:
         return (max_range + min_range) / 2
 
-def get_threshold_requant_parameter(threshold, sbit=None, target_bit=8,
-        is_symmetric=True, is_sign=True):
+def save_data_scale(name, scale, params):
+    params[name+'_scale'] = nd.array([scale])
+
+def load_quant_data(data, name, params):
+    data_name = name + '_scale'
+    assert data_name in params, "data scale %s not in params dict %s" \
+            % (data_name, params.keys())
+    return int_realize(data*params[data_name], 8)
+
+def get_simple_sim_scale(threshold, target_bit):
     min_range, max_range = threshold
-    real_bit = target_bit - (1 if is_sign else 0)
+    alpha = max(abs(min_range), abs(max_range))
 
-    offset = None
-    if is_symmetric:
-        alpha = max(abs(min_range), abs(max_range))
-    else:
-        if max_range == min_range:
-            alpha = abs(max_range)
-        else:
-            alpha = (max_range - min_range) / 2
-        offset = (alpha - max_range)
+    bit = math.ceil(math.log2(alpha))
+    shift_bit = target_bit - 1 - bit
+    return 2 ** shift_bit
 
-    if alpha != 0 and sbit is None:
-        alpha_bit = math.ceil(math.log2(alpha))
-        sbit = alpha_bit - real_bit
+def get_sim_scale(threshold, target_bit):
+    min_range, max_range = threshold
+    alpha = max(abs(min_range), abs(max_range))
 
-    if offset:
-        offset = int(offset / (2**sbit) + 0.5)
+    sim_max = 2 ** (target_bit - 1) - 1
+    scale = sim_max / alpha
+    return scale
 
-    return (sbit, offset)
+def int_realize(data, target_bit, logger=logging):
+    out = data.round()
+    clip_range = 2 ** (target_bit - 1) - 1
+    if logger and out.abs().max() > clip_range:
+        logger.warn("quant out of range int%d with data=<%s,%s,%s>, sb=%s",
+                target_bit,
+                out.asnumpy().flatten()[0],
+                out.max().asnumpy(),
+                out.min().asnumpy())
+
+    out = out.clip(a_min=-clip_range, a_max=clip_range)
+
+    return out
+
+def extract_float(number):
+    sign, binary = float_bin(number, 24)
+    dot_idx = binary.find('.')
+    binary = binary.replace('.', '')
+    use_idx = binary.rfind('1') + 1
+    sb = dot_idx - use_idx
+    frac = sign * int(binary[:use_idx], 2)
+    return frac, sb
+
+def float_bin(number, places = 24):
+    """Single precision float convert into binary
+    """
+    sign = 1 if number >= 0 else -1
+    number = abs(number)
+    whole, dec = int(number), number - int(number)
+    res = bin(whole).lstrip('0b') + '.'
+    if len(res) > places:
+        return res
+    for x in range(places - len(res) + 1):
+        dec *= 2
+        whole, dec = int(dec), dec - int(dec)
+        res += str(whole)
+    return sign, res
 
 def nd_quant(data, shift_bits=None, target_bit=8,
         logger=logging):

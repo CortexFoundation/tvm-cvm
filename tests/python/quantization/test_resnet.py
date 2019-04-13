@@ -23,9 +23,9 @@ import quant_pass as qpass
 import sym_calib as calib
 import sim_quant_helper as sim
 
-# import resnet18 as resnet
+import resnet18 as resnet
 # import resnet152 as resnet
-import resnet50 as resnet
+#  import resnet50 as resnet
 
 from sym_pass import *
 
@@ -335,7 +335,6 @@ def test_sym_pass(quant_flag, batch_size=10, iter_num=10):
     inputs_ext = {
         'data': {
             'shape': (batch_size, 3, 224, 224),
-            'zero_point': 0,
         }
     }
     inputs = [mx.sym.var(name) for name in inputs_ext]
@@ -349,44 +348,42 @@ def test_sym_pass(quant_flag, batch_size=10, iter_num=10):
 
     symbol_file, params_file = resnet.SYMBOL_FILE, resnet.PARAMS_FILE
     sym, params = mx.sym.load(symbol_file), nd.load(params_file)
+    sym, params = sym_quant_prepare(sym, params, inputs_ext)
+    graph = nn.SymbolBlock(sym, inputs)
+    load_parameters(graph, params, ctx=ctx)
+    def graph_func(data):
+        return graph.forward(data.as_in_context(ctx))
 
-    qsym, qparams = sym_quant_prepare(sym, nd.load(params_file), inputs_ext)
-    # qsym, qparams = calib.sym_calib_quantize(qsym,
-            # qparams, inputs_ext, calib_data, ctx)
+    th_dict = {}
+    sim_sym, sim_params, th_dict = calib.sym_calib_sim_quant(sym,
+            params, inputs_ext, calib_data, ctx)
     dump_sym, dump_params = get_dump_fname('sym.prepare')
+    nd.save(dump_params, sim_params)
+    with open(dump_sym, 'w') as fout:
+        fout.write(sim_sym.tojson())
+
+    graph_sim = nn.SymbolBlock(sim_sym, inputs)
+    load_parameters(graph_sim, sim_params, ctx=ctx)
+    def simulate(data):
+        data = sim.load_quant_data(data, 'data', sim_params)
+        return graph_sim.forward(data.as_in_context(ctx))
+
+    qsym, qparams = calib.sym_calib_simple_sim_quant(sym, params, inputs_ext,
+           calib_data=calib_data, th_dict=th_dict, ctx=ctx)
+    dump_sym, dump_params = get_dump_fname('sym.quant')
     nd.save(dump_params, qparams)
     with open(dump_sym, 'w') as fout:
-        fout.write(qsym.tojson())
-
-    graph_comp = nn.SymbolBlock(qsym, inputs)
-    load_parameters(graph_comp, qparams, ctx=ctx)
-    def graph_comp_func(data):
-        return graph_comp.forward(data.as_in_context(ctx))
-
-    # quantization
-    dump_sym, dump_params = get_dump_fname('sym.quant')
-    if True:
-        qsym, qparams, inputs_sb = calib.sym_calib_quant(qsym,
-                qparams, inputs_ext, calib_data, ctx)
-
-        print ('dump')
-        nd.save(dump_params, qparams)
-        with open(dump_sym, 'w') as fout:
-            fout.write(qsym.tojson())
-
-    print ('graph')
+       fout.write(qsym.tojson())
     qsym, qparams = mx.sym.load(dump_sym), nd.load(dump_params)
-    nn.Conv2D
     qgraph = nn.SymbolBlock(qsym, inputs)
     load_parameters(qgraph, qparams, ctx=ctx)
-    def graph_func(data):
-        data, _ = sim.nd_quant(data, shift_bits=inputs_sb['data'],
-                target_bit=8)
+    def sb_quant(data):
+        data = sim.load_quant_data(data, 'data', qparams)
         return qgraph.forward(data.as_in_context(ctx))
 
     print ('eval')
-    eval_accuracy(graph_func, data_iter_func, iter_num,
-            graph_comp_func, logger)
+    multi_eval_accuracy(graph_func, data_iter_func, simulate, sb_quant, # simulate,
+            iter_num=iter_num, logger=logger)
 
 def save_data():
     batch_size = 1024
@@ -421,12 +418,12 @@ if __name__ == "__main__":
     # resnet.save_graph(mx.gpu())
 
     # enable quantization
-    # if True:
-        # gluon_quant_resnet(quant_flag, batch_size=16, iter_num=10000, need_requant=False)
+    if False:
+        gluon_quant_resnet(quant_flag, batch_size=16, iter_num=10000, need_requant=False)
     # save_data()
 
     # test_nnvm_load(batch_size=16, iter_num=10)
-    #  test_sym_pass(quant_flag, batch_size=16, iter_num=10000)
-    test_sym_nnvm(batch_size=100, iter_num=10)
+    test_sym_pass(quant_flag, batch_size=16, iter_num=10)
+    #  test_sym_nnvm(batch_size=100, iter_num=10)
 
 
