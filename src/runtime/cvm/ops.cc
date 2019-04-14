@@ -12,6 +12,7 @@
 #include <string>
 #include <memory>
 #include <utility>
+
 namespace tvm {
 namespace runtime {
 
@@ -119,6 +120,7 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.conv2d").set_body([]
     DLTensor *w = args[1];
 	DLTensor *b = args[2];
     DLTensor *y = args[3];
+    auto time_start = clock();
 	std::string groups_str = args[4];
 	std::string dilation_str = args[5];
 	std::string channels_str = args[6];
@@ -166,34 +168,138 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.conv2d").set_body([]
 //              << (x_w + 2 * padding[1] - filter_w) / strides[1] + 1 << "\n";
 //    std::cout << "dim = " << b->ndim << " shape = " << b->shape[0] << "\n";
 //    std::cout << "padding = " << padding[0] << " " << padding[1] << "\n";
-	#define GETX(n, c, h, w) x_data[(n) * in_channels * x_h * x_w + (c) * x_h * x_w + (h) * x_w + (w)]
-	#define GETW(o, i, h, w) w_data[(o) * in_channels * filter_h * filter_w + (i) * filter_h * filter_w + (h) * filter_w + (w)]
-	#define GETY(n, c, h, w) y_data[(n) * out_channels * o_h * o_w + (c) * o_h * o_w + (h) * o_w + (w)]
+
+    const int y_n_offset = out_channels * o_h * o_w;
+    const int y_c_offset = o_h * o_w;
+    const int y_h_offset = o_w;
+    const int x_n_offset = in_channels * x_h * x_w;
+    const int x_c_offset = x_h * x_w;
+    const int x_h_offset = x_w;
+    const int w_o_offset = in_channels * filter_h * filter_w;
+    const int w_i_offset = filter_h * filter_w;
+    const int w_h_offset = filter_w;
+	#define CONV2d_X(n, c, h, w) x_data[(n) * y_n_offset + (c) * x_c_offset + (h) * x_h_offset + (w)]
+	#define CONV2d_W(o, i, h, w) w_data[(o) * w_o_offset + (i) * w_i_offset + (h) * w_h_offset + (w)]
+	#define CONV2d_Y(n, c, h, w) y_data[(n) * y_n_offset + (c) * y_c_offset + (h) * y_h_offset + (w)]
 	auto calc_func = [&](int n, int k, int p, int q) {
 		int y_sum = 0;
 		for (int c = 0; c < in_channels; ++c) {
 			for (int r = 0; r < filter_h; ++r) {
-				for (int s = 0; s < filter_w; ++s) {
-					auto tp = p * stride_h + r - padding[0];
-					auto tq = q * stride_w + s - padding[1];
-					if (tp < 0 || tq < 0 || tp >= x_h || tq >= x_w)
-						continue;
-					y_sum += GETX(n, c, tp, tq) * GETW(k, c, r, s);
+				auto tp = p * stride_h + r - padding[0];
+				if (tp < 0 || tp >= x_h)
+                    continue;
+				auto tq_start = q * stride_w - padding[1];
+				auto tq_end = q * stride_w - padding[1] + filter_w;
+				for (auto tq = std::max(tq_start, 0); tq < std::min(tq_end, x_h); ++tq) {
+                    auto s = tq - tq_start;
+                    y_sum += CONV2d_X(n, c, tp, tq) * CONV2d_W(k, c, r, s);
 				}
 			}
 		}
 		return y_sum;
 
 	};
-    for (int n = 0; n < n_batch; ++n) {
-        for (int k = 0; k < out_channels; ++k) {
-            for (int p = 0; p < o_h; ++p) {
-                for (int q = 0; q < o_w; ++q) {
-                    GETY(n, k, p, q) = b_data[k] + calc_func(n, k, p, q);
+	auto calc_func1x1 = [&](int n, int k, int p, int q, int r = 0, int s = 0) {
+		int y_sum = 0;
+		for (int c = 0; c < in_channels; ++c) {
+            y_sum += CONV2d_X(n, c, p, q) * CONV2d_W(k, c, r, s);
+		}
+		return y_sum;
+	};
+    if (filter_w == 1) {
+        for (int n = 0; n < n_batch; ++n) {
+            for (int k = 0; k < out_channels; ++k) {
+                for (int p = 0; p < o_h; ++p) {
+                    auto tp = p * stride_h - padding[0];
+                    if (tp < 0 || tp >= x_h)
+                        continue;
+                    for (int q = 0; q < o_w; ++q) {
+                        auto tq = q * stride_w - padding[1];
+                        if (tq < 0 || tq >= x_w)
+                            continue;
+                        CONV2d_Y(n, k, p, q) = b_data[k] + calc_func1x1(n, k, tp, tq);
+                    }
+                }
+            }
+        }
+    } else if (filter_w == 3) {
+        std::vector<int32_t> y_sum(in_channels * o_h * o_w, 0);
+        std::cout << "buff " << y_sum.size() << "\n";
+        for (int n = 0; n < n_batch; ++n) {
+            for (int k = 0; k < out_channels; ++k) {
+                std::fill(y_sum.begin(), y_sum.end(), 0);
+                for (int c = 0; c < in_channels; ++c) {
+                    auto conv2d_w_kc = w_data + (k) * w_o_offset + (c) * w_i_offset;
+                    for (int p = 0; p < o_h; ++p) {
+                        for (int q = 0; q < o_w; ++q) {
+                            const int y_idx = c * o_w * o_h + p * o_w + q;
+                            auto tq_start = q * stride_w - padding[1];
+                            auto tq_begin = std::max(tq_start, 0);
+                            auto tq_end = std::min(q * stride_w - padding[1] + filter_w, x_w);
+                            {
+                                int r = 0;
+                                auto tp = p * stride_h + r - padding[0];
+                                if (tp >= 0) {
+                                    if (tp >= x_h)
+                                        continue;
+                                    for (auto tq = tq_begin; tq < tq_end; ++tq) {
+                                        auto s = tq - tq_start;
+                                        y_sum[y_idx] += CONV2d_X(n, c, tp, tq) * conv2d_w_kc[r * filter_h + s];
+                                    }
+                                }
+                            }
+                            {
+                                int r = 1;
+                                auto tp = p * stride_h + r - padding[0];
+                                if (tp >= 0) {
+                                    if (tp >= x_h)
+                                        continue;
+                                    for (auto tq = tq_begin; tq < tq_end; ++tq) {
+                                        auto s = tq - tq_start;
+                                        y_sum[y_idx] += CONV2d_X(n, c, tp, tq) * conv2d_w_kc[r * filter_h + s];
+                                    }
+                                }
+                            }
+                            {
+                                int r = 2;
+                                auto tp = p * stride_h + r - padding[0];
+                                if (tp >= 0) {
+                                    if (tp >= x_h)
+                                        continue;
+                                    for (auto tq = tq_begin; tq < tq_end; ++tq) {
+                                        auto s = tq - tq_start;
+                                        y_sum[y_idx] += CONV2d_X(n, c, tp, tq) * conv2d_w_kc[r * filter_h + s];
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                for (int p = 0; p < o_h; ++p) {
+                    for (int q = 0; q < o_w; ++q) {
+                        uint32_t tmp = 0;
+                        for (int c = 0; c < in_channels; ++c) {
+                            tmp += y_sum[c * o_h * o_w + p * o_h + q];
+                        }
+                        CONV2d_Y(n, k, p, q) = b_data[k] + tmp;
+                    }
+                }
+            }
+        }
+    } else {
+        for (int n = 0; n < n_batch; ++n) {
+            for (int k = 0; k < out_channels; ++k) {
+                for (int p = 0; p < o_h; ++p) {
+                    for (int q = 0; q < o_w; ++q) {
+                        CONV2d_Y(n, k, p, q) = b_data[k] + calc_func(n, k, p, q);
+                    }
                 }
             }
         }
     }
+    std::cout << o_h << " " << o_w << " (" << filter_h << "," << " " << filter_w << ")"
+              << in_channels << " " << out_channels << " "
+              << (clock() - time_start + .0) / CLOCKS_PER_SEC << "\n";
  });
 
  inline int32_t getSize(DLTensor *dlTensor){

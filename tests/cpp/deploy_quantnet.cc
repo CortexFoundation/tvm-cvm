@@ -102,6 +102,6 @@ int main()
     //TVMArrayFree(y_cpu);
     TVMArrayFree(x);
 
-    std::cout << (std::memcmp(y1->data, y2->data, 1000*sizeof(int32_t)) == 0 ? "pass" : "failed") << std::endl;
+    std::cout << (std::memcmp(y1->data, y2->data, out_shape[1]*sizeof(int32_t)) == 0 ? "pass" : "failed") << std::endl;
     return 0;
 }
