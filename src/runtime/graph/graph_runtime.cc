@@ -296,17 +296,147 @@ std::function<void()> GraphRuntime::CreateTVMOp(
 
   // Get compiled function from the module that contains both host and device
   // code.
-  tvm::runtime::PackedFunc pf = module_.GetFunction(param.func_name, false);
-  CHECK(pf != nullptr) << "no such function in module: " << param.func_name;
 
-  auto fexec = [arg_ptr, pf]() {
-    TVMRetValue rv;
-    TVMArgs targs(arg_ptr->arg_values.data(),
+  if(param.func_name == "fuse_conv2d_1****"){
+      std::cout << "param.func_name = " << param.func_name << "\n";
+       // "{\"groups\": \"1\", \"dilation\": \"(1, 1)\", \"channels\": \"64\",
+// \"layout\": \"NCHW\", \"kernel_layout\": \"OIHW\", \"kernel_size\": \"[7, 7]\",
+//\"padding\": \"(3, 3)\", \"use_bias\": \"True\", \"strides\": \"(2, 2)\"}",
+      return [arg_ptr](){
+          {
+              TVMValue v;
+              v.v_str = const_cast<const char*>("1\0");
+              arg_ptr->arg_values.push_back(v);
+          }
+          {
+              TVMValue v;
+              v.v_str = const_cast<const char*>("(1,1)\0");
+              arg_ptr->arg_values.push_back(v);
+          }
+          {
+              TVMValue v;
+              v.v_str = const_cast<const char*>("256\0");
+              arg_ptr->arg_values.push_back(v);
+          }
+          {
+              TVMValue v;
+              v.v_str = const_cast<const char*>("NCHW\0");
+              arg_ptr->arg_values.push_back(v);
+          }
+          {
+              TVMValue v;
+              v.v_str = const_cast<const char*>("OIHW\0");
+              arg_ptr->arg_values.push_back(v);
+          }
+          {
+              TVMValue v;
+              v.v_str = const_cast<const char*>("(1,1)\0");
+              arg_ptr->arg_values.push_back(v);
+          }
+          {
+              TVMValue v;
+              v.v_str = const_cast<const char*>("(0,0)\0");
+              arg_ptr->arg_values.push_back(v);
+          }
+          {
+              TVMValue v;
+              v.v_str = const_cast<const char*>("True\0");
+              arg_ptr->arg_values.push_back(v);
+          }
+          {
+              TVMValue v;
+              v.v_str = const_cast<const char*>("(1,1)\0");
+              arg_ptr->arg_values.push_back(v);
+          }
+          for(int i = 0; i < 9; i++)
+              arg_ptr->arg_tcodes.push_back(kStr);
+          TVMRetValue rv;
+          TVMArgs targs(arg_ptr->arg_values.data(),
                   arg_ptr->arg_tcodes.data(),
                   static_cast<int>(arg_ptr->arg_values.size()));
-    pf.CallPacked(targs, &rv);
-  };
-  return fexec;
+          auto func = tvm::runtime::Registry::Get("tvm.runtime.cvm.conv2d");
+          func->CallPacked(targs, &rv);
+      };
+    }
+  else if(param.func_name == "fuse_dense***"){
+      std::cout << "param.func_name = " << param.func_name << "\n";
+      return [arg_ptr](){
+          {
+              TVMValue v;
+              v.v_str = const_cast<const char*>("1000\0");
+              arg_ptr->arg_values.push_back(v);
+          }
+          {
+              TVMValue v;
+              v.v_str = const_cast<const char*>("True\0");
+              arg_ptr->arg_values.push_back(v);
+          }
+          arg_ptr->arg_tcodes.push_back(kStr);
+          arg_ptr->arg_tcodes.push_back(kStr);
+          TVMRetValue rv;
+          TVMArgs targs(arg_ptr->arg_values.data(),
+                  arg_ptr->arg_tcodes.data(),
+                  static_cast<int>(arg_ptr->arg_values.size()));
+          auto func = tvm::runtime::Registry::Get("tvm.runtime.cvm.dense");
+          func->CallPacked(targs, &rv);
+      };
+  }
+  else if(param.func_name == "fuse_reshap"){
+      std::cout << "param.func_name = " << param.func_name << "\n";
+      return [arg_ptr](){
+          TVMRetValue rv;
+          TVMArgs targs(arg_ptr->arg_values.data(),
+                  arg_ptr->arg_tcodes.data(),
+                  static_cast<int>(arg_ptr->arg_values.size()));
+          auto func = tvm::runtime::Registry::Get("tvm.runtime.cvm.reshap");
+          func->CallPacked(targs, &rv);
+      };
+  }
+  else if(param.func_name == "fuse_max_pool2d*****"){
+      std::cout << "param.func_name = " << param.func_name << "\n";
+      return [arg_ptr](){
+          {
+              TVMValue v;
+              v.v_str = const_cast<const char*>("(2,2)\0");
+              arg_ptr->arg_values.push_back(v);
+          }
+          {
+              TVMValue v;
+              v.v_str = const_cast<const char*>("(3,3)\0");
+              arg_ptr->arg_values.push_back(v);
+          }
+          {
+              TVMValue v;
+              v.v_str = const_cast<const char*>("False\0");
+              arg_ptr->arg_values.push_back(v);
+          }
+          {
+              TVMValue v;
+              v.v_str = const_cast<const char*>("(1,1)\0");
+              arg_ptr->arg_values.push_back(v);
+          }
+          for(int i = 0; i < 4; i++)
+              arg_ptr->arg_tcodes.push_back(kStr);
+          TVMRetValue rv;
+          TVMArgs targs(arg_ptr->arg_values.data(),
+                  arg_ptr->arg_tcodes.data(),
+                  static_cast<int>(arg_ptr->arg_values.size()));
+          auto func = tvm::runtime::Registry::Get("tvm.runtime.cvm.max_pool2d");
+          func->CallPacked(targs, &rv);
+      };
+  }else{
+      tvm::runtime::PackedFunc pf = module_.GetFunction(param.func_name, false);
+      CHECK(pf != nullptr) << "no such function in module: " << param.func_name;
+
+      auto fexec = [arg_ptr, pf]() {
+          TVMRetValue rv;
+          TVMArgs targs(arg_ptr->arg_values.data(),
+                  arg_ptr->arg_tcodes.data(),
+                  static_cast<int>(arg_ptr->arg_values.size()));
+          pf.CallPacked(targs, &rv);
+      };
+      return fexec;
+  }
 }
 
 PackedFunc GraphRuntime::GetFunction(

@@ -35,11 +35,11 @@ NNVM_REGISTER_OP(cvm_op)
 .set_num_inputs([](const NodeAttrs& attrs) {
     const CVMOpParam& param = nnvm::get<CVMOpParam>(attrs.parsed);
     return param.num_inputs;
-  })
+})
 .set_num_outputs([](const NodeAttrs& attrs) {
     const CVMOpParam& param = nnvm::get<CVMOpParam>(attrs.parsed);
     return param.num_outputs;
-  });
+});
 
 
 NNVM_REGISTER_OP(tvm_op)

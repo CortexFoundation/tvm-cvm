@@ -257,12 +257,13 @@ void CvmRuntime::SetupOpExecs() {
     }
     CHECK(inode.op_type == "cvm_op") << "Can only take tvm_op as op";
 
-    op_execs_[nid] = CreateCVMOp(inode.param, args, inode.inputs.size());
+    op_execs_[nid] = CreateCVMOp(inode.param, attrs_.op_attrs[nid], args, inode.inputs.size());
   }
 }
 
 std::function<void()> CvmRuntime::CreateCVMOp(
     const CVMOpParam& param,
+    const std::string op_attrs,
     const std::vector<DLTensor>& args,
     size_t num_inputs) {
   struct OpArgs {
@@ -290,6 +291,24 @@ std::function<void()> CvmRuntime::CreateCVMOp(
       t->shape = &(arg_ptr->shape_data[i]);
     }
   }
+  std::stringstream ss; ss << op_attrs;
+// std::cout << "op_attr = " << op_attrs << "\n";
+  dmlc::JSONReader reader(&ss);
+  std::string kv;
+  reader.BeginObject();
+// std::cout << param.func_name << std::endl;
+  while (reader.NextObjectItem(&kv)) {
+      std::string val;
+      reader.Read(&val);
+  //    std::cout << kv << " " << val << "\n";
+      TVMValue v;
+      //TODO leak
+	  auto tmp = new char[val.size()  + 1];
+	  strcpy(tmp, val.c_str());
+      v.v_str = const_cast<const char*>(tmp);
+      arg_ptr->arg_values.push_back(v);
+      arg_ptr->arg_tcodes.push_back(kStr);
+  }
 
   if (param.func_name == "__nop") {
     return [](){};
@@ -306,101 +325,26 @@ std::function<void()> CvmRuntime::CreateCVMOp(
 
   // Get compiled function from the module that contains both host and device
   // code.
-  if (param.func_name.size() > 9 && param.func_name.substr(0, 9) == "fuse_elem") {
-	  std::cout << "param.func_name = " << param.func_name <<  " "
-                << param.func_name.substr(0, 9) << "size = " << arg_ptr->arg_values.size() << "\n";
-	  auto fexec = [arg_ptr]() {
-		  std::cout << "tcode: " << arg_ptr->arg_tcodes[0] << " " << arg_ptr->arg_tcodes[1] << "\n";
+  auto ops = std::vector<std::string>{"dense", "conv2d", "flatten", "broadcast_add", "broadcast_sub", "broadcast_mul", "broadcast_div",
+      "broadcast_right_shift", "broadcast_left_shift", "clip", "relu", "max_pool2d", "sum", "elemwise_add", "reshap"};
+  for (auto& op : ops) {
+    if (param.func_name.size() >= op.size() && param.func_name.substr(0, op.size()) == op) {
+	  return [arg_ptr, op](){
 		  TVMRetValue rv;
 		  TVMArgs targs(arg_ptr->arg_values.data(),
 				  arg_ptr->arg_tcodes.data(),
 				  static_cast<int>(arg_ptr->arg_values.size()));
-		  PackedFunc clip = PackedFunc(CVMAdd);
-		  clip.CallPacked(targs, &rv);
-	  };
-	  return fexec;
-  }
-  if (param.func_name.size() > 9 && param.func_name.substr(0, 9) == "fuse_clip") {
-	  std::cout << "param.func_name = " << param.func_name <<  " "
-                << param.func_name.substr(0, 9) << "size = " << arg_ptr->arg_values.size() << "\n";
-	  auto fexec = [arg_ptr]() {
-		  std::cout << "tcode: " << arg_ptr->arg_tcodes[0] << " " << arg_ptr->arg_tcodes[1] << "\n";
-		  TVMRetValue rv;
-		  TVMArgs targs(arg_ptr->arg_values.data(),
-				  arg_ptr->arg_tcodes.data(),
-				  static_cast<int>(arg_ptr->arg_values.size()));
-		  PackedFunc clip = PackedFunc(CVMClip);
-		  clip.CallPacked(targs, &rv);
-	  };
-	  return fexec;
-  }
-  if (param.func_name.size() > 9 && param.func_name.substr(0, 9) == "fuse_conv") {
-	  return [](){};
-  }
-  if (param.func_name.size() >= 5 && param.func_name.substr(0, 5) == "dense") {
-	  std::cout << "param.func_name = " << param.func_name <<  " "
-                << param.func_name.substr(0, 9) << "size = " << arg_ptr->arg_values.size() << "\n";
-      return [arg_ptr](){
+          //std::cout << "tvm.runtime.cvm." + op << std::endl;
+          auto func = tvm::runtime::Registry::Get("tvm.runtime.cvm." + op);
+          assert(func != NULL);
+          func->CallPacked(targs, &rv);
 
-          TVMArgs args(arg_ptr->arg_values.data(),
-                  arg_ptr->arg_tcodes.data(),
-                  static_cast<int>(arg_ptr->arg_values.size()));
-
-          std::cout << "fuse_dens = " <<  args.size() << "\n";
-          DLTensor *x = args[0];
-          DLTensor *w = args[1];
-          DLTensor *y = args[2];
-          CVMPrint(std::vector<uint32_t>(x->shape, x->shape + x->ndim), "xshape");
-          CVMPrint(std::vector<uint32_t>(y->shape, y->shape + y->ndim), "yshape");
-          CVMPrint(std::vector<uint32_t>(w->shape, w->shape + w->ndim), "wshape");
-          auto dx = static_cast<int32_t*>(x->data);
-          auto dy = static_cast<int32_t*>(y->data);
-          auto dw = static_cast<int32_t*>(w->data);
-          CVMPrint(std::vector<int32_t>(dx, dx + x->shape[0] * x->shape[1]), "x");
-          assert(y->shape[0] == 1); // not tested yet
-          for (uint32_t di = 0; di < y->shape[0]; di++) {
-              for (uint32_t oi = 0; oi < y->shape[1]; oi++) {
-                  int32_t sum = 0;
-                  for (uint32_t xi = 0; xi < x->shape[1]; xi++) {
-                      sum += dx[di * y->shape[1] + xi] * dw[oi * w->shape[1] + xi];
-                  }
-                  dy[di * y->shape[1] + oi] = sum;
-              }
-          }
       };
+    }
   }
-  if (param.func_name.size() > 9 && param.func_name.substr(0, 9) == "fuse_flat") {
-	  std::cout << "param.func_name = " << param.func_name <<  " "
-                << param.func_name.substr(0, 9) << "size = " << arg_ptr->arg_values.size() << "\n";
-      return [arg_ptr](){
-          TVMArgs args(arg_ptr->arg_values.data(),
-                  arg_ptr->arg_tcodes.data(),
-                  static_cast<int>(arg_ptr->arg_values.size()));
-          DLTensor *x = args[0];
-          DLTensor *y = args[1];
-          for (uint32_t i = 0; i < x->shape[0]; i++) {
-              static_cast<int32_t*>(y->data)[i] = static_cast<int32_t*>(x->data)[i];
-          }
-      };
-  }
-  if (param.func_name.size() > 9 && param.func_name.substr(0, 9) == "fuse_sqrt") {
-	  std::cout << "param.func_name = " << param.func_name <<  " "
-                << param.func_name.substr(0, 9) << "size = " << arg_ptr->arg_values.size() << "\n";
-	  auto fexec = [arg_ptr]() {
-	  };
-	  return fexec;
-  }
-  tvm::runtime::PackedFunc pf = module_.GetFunction(param.func_name, false);
-  CHECK(pf != nullptr) << "no such function in module: " << param.func_name;
 
-  auto fexec = [arg_ptr, pf]() {
-    TVMRetValue rv;
-    TVMArgs targs(arg_ptr->arg_values.data(),
-                  arg_ptr->arg_tcodes.data(),
-                  static_cast<int>(arg_ptr->arg_values.size()));
-    pf.CallPacked(targs, &rv);
-  };
-  return fexec;
+//  std::cout << param.func_name << " " << param.attrs << "\n";
+  return [](){};
 }
 
 PackedFunc CvmRuntime::GetFunction(

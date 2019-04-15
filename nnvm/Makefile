@@ -56,6 +56,14 @@ SRC_COMPILER = $(wildcard src/top/*/*.cc wildcard src/top/vision/*/*.cc src/comp
 ALL_OBJ = $(patsubst %.cc, build/%.o, $(SRC))
 TOP_OBJ = $(patsubst %.cc, build/%.o, $(SRC_COMPILER))
 ALL_DEP = $(ALL_OBJ)
+RT_DEP = build/src/top/nn/pooling.o build/src/top/nn/convolution.o build/src/top/nn/upsampling.o\
+		 build/src/top/vision/nms.o build/src/top/image/resize.o build/src/top/tensor/broadcast.o build/src/top/tensor/matrix_op.o build/src/top/tensor/elemwise.o\
+		 build/src/top/tensor/transform.o build/src/top/tensor/reduce.o build/src/top/tensor/state_op.o build/src/top/vision/yolo/reorg.o build/src/top/vision/ssd/mutibox_op.o\
+		 build/src/compiler/simplify_inference.o build/src/compiler/compile_engine.o build/src/compiler/precompute_prune.o build/src/compiler/graph_fuse.o build/src/compiler/packed_func_ext.o\
+		 build/src/compiler/graph_compile.o build/src/compiler/alter_op_layout.o build/src/compiler/graph_hash.o build/src/compiler/graph_runtime.o build/src/compiler/fold_scale_axis.o\
+		 build/src/c_api/c_api_symbolic.o build/src/c_api/c_api_graph.o build/src/c_api/c_api_error.o build/src/core/pass.o build/src/core/symbolic.o build/src/core/node.o build/src/core/op.o\
+		 build/src/core/graph.o build/src/pass/gradient.o build/src/pass/infer_shape_type.o build/src/pass/correct_layout.o\
+		 build/src/pass/order_mutation.o build/src/pass/plan_memory.o build/src/pass/print_graph_ir.o build/src/pass/saveload_json.o build/src/pass/place_device.o build/src/top/nn/nn.o 
 
 NNVM_RT_OBJ	 = build/src/compiler/simplify_inference.o build/src/compiler/compile_engine.o\
 							 build/src/compiler/precompute_prune.o build/src/compiler/graph_fuse.o\
@@ -84,6 +92,9 @@ lib/libnnvm.a: $(ALL_DEP)
 	@mkdir -p $(@D)
 	$(AR) crv $@ $(filter %.o, $?)
 
+lib/libnnvm_rt.a: $(RT_DEP)
+	@mkdir -p $(@D)
+	$(AR) crv $@ $(filter %.o, $?)
 
 lib/libnnvm_compiler.$(SHARED_LIBRARY_SUFFIX): lib/libnnvm.a ${TOP_OBJ}
 	@mkdir -p $(@D)
