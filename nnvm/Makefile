@@ -57,11 +57,19 @@ ALL_OBJ = $(patsubst %.cc, build/%.o, $(SRC))
 TOP_OBJ = $(patsubst %.cc, build/%.o, $(SRC_COMPILER))
 ALL_DEP = $(ALL_OBJ)
 
-NNVM_RT_OBJ	 = build/src/compiler/simplify_inference.o build/src/compiler/compile_engine.o build/src/compiler/precompute_prune.o build/src/compiler/graph_fuse.o build/src/compiler/packed_func_ext.o build/src/compiler/alter_op_layout.o build/src/compiler/graph_compile.o build/src/compiler/graph_hash.o build/src/compiler/graph_runtime.o build/src/compiler/fold_scale_axis.o 
+NNVM_RT_OBJ	 = build/src/compiler/simplify_inference.o build/src/compiler/compile_engine.o\
+							 build/src/compiler/precompute_prune.o build/src/compiler/graph_fuse.o\
+							 build/src/compiler/packed_func_ext.o build/src/compiler/alter_op_layout.o\
+							 build/src/compiler/graph_compile.o build/src/compiler/graph_hash.o\
+							 build/src/compiler/graph_runtime.o build/src/compiler/fold_scale_axis.o\
+							 build/src/core/op.o build/src/core/graph.o build/src/core/pass.o build/src/core/symbolic.o build/src/top/nn/nn.o
 
 lib/libnnvm_rt.a: $(NNVM_RT_OBJ)
 	@mkdir -p $(@D)
 	$(AR) crv $@ $(filter %.o, $?)
+
+
+#NNVM_RT_OBJ = $(build/src/core/*.o build/src/top/*.o build/src/compiler/*.o)
 
 include tests/cpp/unittest.mk
 
@@ -76,9 +84,6 @@ lib/libnnvm.a: $(ALL_DEP)
 	@mkdir -p $(@D)
 	$(AR) crv $@ $(filter %.o, $?)
 
-lib/libnnvm_rt.a: $(ALL_DEP)
-	@mkdir -p $(@D)
-	$(AR) crv $@ $(filter %.o, $?)
 
 lib/libnnvm_compiler.$(SHARED_LIBRARY_SUFFIX): lib/libnnvm.a ${TOP_OBJ}
 	@mkdir -p $(@D)

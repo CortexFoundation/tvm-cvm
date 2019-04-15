@@ -8,6 +8,7 @@
 #include <nnvm/op.h>
 #include <nnvm/op_attr_types.h>
 #include <nnvm/graph_attr_types.h>
+#include <iostream>
 
 using nnvm::Op;
 using nnvm::TShape;
@@ -16,14 +17,34 @@ namespace tvm {
 namespace runtime {
 
 void CvmRuntime::SetupAttr() {
+  std::cout << "try to setup shape" << std::endl;
   SetupShape();
+  std::cout << "try to setup type" << std::endl;
   SetupType();
+  std::cout << "try to setup prec" << std::endl;
   SetupPrecision();
+  for (auto p:  attrs_.precision) {
+    std::cout << p << ' ';
+  }
+  std::cout << std::endl;
+}
+
+std::string GetOpName(std::string name) {
+  bool has_underline = false;
+  for (int i = name.size() - 1; i >= 0; --i) {
+    if (name[i] >= '0' && name[i] <= '9') continue;
+    if (name[i] == '_') has_underline = true;
+    else if (has_underline) {
+      return name.substr(0, i + 1);
+    }
+  }
+  return name;
 }
 
 void CvmRuntime::SetupPrecision() {
   std::vector<Node> &idx = nodes_;
   std::vector<int> &precision = attrs_.precision;
+  precision.resize(nodes_.size(), -1);
   // Temp space for shape inference.
   std::vector<int> iprec, oprec;
 	auto finfer_prec = FInferPrecisionMap::getInstance();
@@ -32,6 +53,9 @@ void CvmRuntime::SetupPrecision() {
   auto infer_prec = [&](uint32_t nid) {
     const auto& inode = idx[nid];
     if (inode.op_type == "null") {
+      if (precision[nid] == -1) {
+         precision[nid] = 8;
+      }
       // Variable node. No operator. Only one output entry.
     } else {
       const uint32_t num_inputs = inode.param.num_inputs;
@@ -48,7 +72,8 @@ void CvmRuntime::SetupPrecision() {
       if (oprec[0] == -1) forward_known = false;
       // which raise an error if the op has bit been registered.
       // TODO: pre-check or try-catch is needed.
-      auto opname = inode.param.func_name;
+      auto opname = GetOpName(inode.param.func_name);
+      std::cout << opname << std::endl;
       auto op = Op::Get(opname);
       auto finfer = finfer_prec.get(opname);
       if (!forward_known) {
@@ -68,15 +93,16 @@ void CvmRuntime::SetupPrecision() {
       }
       // Save to the result map.
       for (uint32_t i = 0; i < num_inputs; ++i) {
-        CHECK_EQ(iprec[i], precision[inode.inputs[i].node_id])
-          << "Check type failed, "
-          << "expected to be " << iprec[i]
-          << " but " << precision[inode.inputs[i].node_id];
+        if (precision[inode.inputs[i].node_id] == -1) {
+          precision[inode.inputs[i].node_id] = iprec[i];
+        } else {
+          CHECK_EQ(precision[inode.inputs[i].node_id], iprec[i])
+             << "Check precision failed, "
+            << "expected to be " << iprec[i]
+            << " but " << precision[inode.inputs[i].node_id];
+        }
 			}
-       CHECK_EQ(oprec[0], precision[nid])
-          << "Check type failed, "
-          << "expected to be " << oprec[0]
-          << " but " << precision[nid];
+      precision[nid] = oprec[0];
     }
   };
 
@@ -133,7 +159,7 @@ void CvmRuntime::SetupShape() {
       if (oshape[0].ndim() == 0) forward_known = false;
       // which raise an error if the op has not been registered.
       // TODO: pre-check or try-catch is needed.
-      auto opname = inode.param.func_name;
+      auto opname = GetOpName(inode.param.func_name);
       auto op = nnvm::Op::Get(opname);
       auto finfer = finfer_shape.get(op, nullptr);
       if (!forward_known) {
@@ -204,7 +230,6 @@ void CvmRuntime::SetupType() {
   static auto& finfer_type =
       Op::GetAttr<nnvm::FInferNodeEntryAttr<int> >("FInferType");
   // reshape shape vector
-
   // Temp space for shape inference.
   std::vector<int> itype, otype;
 
@@ -228,7 +253,7 @@ void CvmRuntime::SetupType() {
       if (otype[0] == -1) forward_known = false;
       // which raise an error if the op has bit been registered.
       // TODO: pre-check or try-catch is needed.
-      auto opname = inode.param.func_name;
+      auto opname = GetOpName(inode.param.func_name);
       auto op = nnvm::Op::Get(opname);
       auto finfer = finfer_type.get(op, nullptr);
       if (!forward_known) {

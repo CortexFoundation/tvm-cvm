@@ -52,6 +52,11 @@ Op& Op::add_alias(const std::string& alias) {  // NOLINT(*)
 // find operator by name
 const Op* Op::Get(const std::string& name) {
   const Op* op = dmlc::Registry<Op>::Find(name);
+  auto allnames = dmlc::Registry<Op>::ListAllNames();
+  std::cout << allnames.size() << std::endl;
+  for (auto s:allnames) {
+    std::cout << s << std::endl;
+  }
   CHECK(op != nullptr)
       << "Operator " << name << " is not registered";
   return op;

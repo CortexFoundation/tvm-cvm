@@ -18,10 +18,10 @@ using FInferPrecision = std::function<bool (const string& op,
 																						vector<int>* oattr,
 																						vector<int>* attr)>;
 
-#define REGISTER_OP_INFER_PREC(OpName, ComputeRule)                   \
+#define REGISTER_OP_INFERPREC(OpName, ComputeRule)                   \
   RegisterAction g_creatorRegister##OpName(#OpName, ComputeRule)
 
-inline bool SamePrec(const string& op,
+inline bool Same_(const string& op,
 										 vector<int>* iattr,
                      vector<int>* oattr,
                      vector<int>* attr) {
@@ -51,7 +51,7 @@ public:
 	static FInferPrecisionMap& getInstance();
 };
 
-FInferPrecision FInferPrecisionMap::get(const string &key, FInferPrecision fdefault = SamePrec) {
+FInferPrecision FInferPrecisionMap::get(const string &key, FInferPrecision fdefault = Same_) {
 	auto it = map_.find(key);
 	if (it == map_.end())
 		return fdefault;
@@ -127,20 +127,40 @@ inline bool First_(const string& op,
   return true;
 }
 
-REGISTER_OP_INFER_PREC(add, MaxPlus_1_);
+REGISTER_OP_INFERPREC(add, MaxPlus_1_);
 
-REGISTER_OP_INFER_PREC(broadcast_add, MaxPlus_1_);
+REGISTER_OP_INFERPREC(broadcast_add, MaxPlus_1_);
 
-REGISTER_OP_INFER_PREC(sub, MaxPlus_1_);
+REGISTER_OP_INFERPREC(sub, MaxPlus_1_);
 
-REGISTER_OP_INFER_PREC(broadcast_sub, MaxPlus_1_);
+REGISTER_OP_INFERPREC(broadcast_sub, MaxPlus_1_);
 
-REGISTER_OP_INFER_PREC(mul, Sum_);
+REGISTER_OP_INFERPREC(mul, Sum_);
 
-REGISTER_OP_INFER_PREC(broadcast_mul, Sum_);
+REGISTER_OP_INFERPREC(broadcast_mul, Sum_);
 
-REGISTER_OP_INFER_PREC(div, First_);
+REGISTER_OP_INFERPREC(div, First_);
 
-REGISTER_OP_INFER_PREC(broadcast_div, First_);
+REGISTER_OP_INFERPREC(broadcast_div, First_);
 
+inline bool Dense_(const string& op,
+                   vector<int>* iattr, vector<int> *oattr, vector<int>* attr){
+  if (iattr->size() == 3) {
+    if (iattr->at(2) == 8) {
+      (*iattr)[2] = 31;
+    }
+  }
+  (*oattr)[0] = 32;
+  return true;
+}
+
+REGISTER_OP_INFERPREC(dense, Dense_);
+
+inline bool Clip_(const string& op,
+                  vector<int>* iattr, vector<int> *oattr, vector<int>* attr){
+  (*oattr)[0] = 8;
+  return true;
+}
+
+REGISTER_OP_INFERPREC(clip, Clip_);
 
