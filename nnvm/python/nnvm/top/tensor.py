@@ -88,6 +88,10 @@ reg.register_schedule("sqrt", _fschedule_broadcast)
 reg.register_pattern("log", OpPattern.ELEMWISE)
 reg.register_schedule("log", _fschedule_broadcast)
 
+# log2
+reg.register_pattern("log2", OpPattern.ELEMWISE)
+reg.register_schedule("log2", _fschedule_broadcast)
+
 # tanh
 reg.register_pattern("tanh", OpPattern.ELEMWISE)
 reg.register_schedule("tanh", _fschedule_broadcast)

@@ -458,6 +458,8 @@ TVM_DLL Expr round(Expr x);
  */
 TVM_DLL Expr trunc(Expr x);
 
+TVM_DLL Expr log2(Expr x);
+
 // Intrinsic operators
 #define TVM_DECLARE_INTRIN_UNARY(OpName)                                \
   inline Expr OpName(Expr x) {                                          \

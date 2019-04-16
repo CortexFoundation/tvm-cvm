@@ -438,4 +438,18 @@ Expr trunc(Expr x) {
   return ir::Call::make(x.type(), "trunc", {x}, ir::Call::PureIntrinsic);
 }
 
+Expr log2(Expr x) {
+	CHECK(x.type().is_int());
+
+	using ir::IntImm;
+	const IntImm* px = x.as<IntImm>();
+	if (px) {
+		CHECK(px->value > 0);
+		for (int i = 0; i < 64; i++) 
+			if (px->value <= (int64_t(1) << i)) return IntImm::make(x.type(), i);
+		return IntImm::make(x.type(), 64);
+	}
+	return ir::Call::make(x.type(), "log2", {x}, ir::Call::PureIntrinsic);
+}
+
 }  // namespace tvm

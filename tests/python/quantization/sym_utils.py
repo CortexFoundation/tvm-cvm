@@ -81,6 +81,7 @@ def sym_iter(sym):
     if isinstance(sym, mx.sym.Symbol):
         sym = [sym[i] for i in range(len(sym))]
 
+    sym = [s for s in sym]
     return sym
 
 def examine_parameters(symbol, params, inputs_ext, allows=[], callback=None):
@@ -99,6 +100,12 @@ def examine_parameters(symbol, params, inputs_ext, allows=[], callback=None):
         if name in params:
             new_params[name] = params[name]
     return new_params
+
+def op_const(number, graph, var=mx.sym.var):
+    name = 'const_var' + str(number)
+    if name not in graph:
+        graph[name] = var(name, shape=(1,))
+    return graph[name], name
 
 def topo_sort(symbol, logger=logging):
     """Sort all symbols in the mxnet graph in topological order.

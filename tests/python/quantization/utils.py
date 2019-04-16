@@ -85,6 +85,21 @@ class FilterList(logging.Filter):
 
         return rv
 
+def log_init():
+    logging.basicConfig(level=logging.NOTSET)
+    formatter = ColoredFormatter(
+            fmt="[ %(asctime)s %(name)s.%(levelname)s ] %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S")
+
+    log_filter = FilterList(
+                # allows=allows, disables=disables,
+                # keywords=["layer=pool", "calib_pool"],
+                log_level=logging.INFO,
+                default=False)
+    for handler in logging.root.handlers:
+        handler.addFilter(log_filter)
+        handler.setFormatter(formatter)
+
 def load_parameters(graph, params, prefix="", ctx=None):
     params_dict = graph.collect_params()
     params_dict.initialize(ctx=ctx)

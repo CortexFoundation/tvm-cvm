@@ -8,7 +8,7 @@ from mxnet.gluon import HybridBlock, nn
 from mxnet.contrib import quantization as mquant
 
 import tvm
-from tvm.contrib import graph_runtime, util
+from tvm.contrib import graph_runtime
 import nnvm
 
 import numpy as np
