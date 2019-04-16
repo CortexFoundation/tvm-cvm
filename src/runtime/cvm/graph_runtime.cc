@@ -325,7 +325,7 @@ std::function<void()> CvmRuntime::CreateCVMOp(
   // Get compiled function from the module that contains both host and device
   // code.
   auto ops = std::vector<std::string>{"dense", "conv2d", "flatten", "broadcast_add", "broadcast_sub", "broadcast_mul", "broadcast_div",
-      "broadcast_right_shift", "broadcast_left_shift", "clip", "relu", "max_pool2d", "sum", "elemwise_add", "reshap"};
+      "broadcast_right_shift", "broadcast_left_shift", "clip", "relu", "max_pool2d", "sum", "elemwise_add", "reshape"};
   for (auto& op : ops) {
     if (param.func_name.size() >= op.size() && param.func_name.substr(0, op.size()) == op) {
 	  return [arg_ptr, op](){
@@ -341,6 +341,7 @@ std::function<void()> CvmRuntime::CreateCVMOp(
       };
     }
   }
+  std::cout << "param.func_name not found : " << param.func_name << std::endl;
 
 //  std::cout << param.func_name << " " << param.attrs << "\n";
   return [](){};

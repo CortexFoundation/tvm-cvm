@@ -1,7 +1,7 @@
 #include <iostream>
 #include <string.h>
 #include <time.h>
-#include "cuda_ops.h"
+#include "../cuda_ops.h"
 
 void conv_cpu(int* x_data, int n_batch, int x_h, int x_w, int in_channels,
         int *w_data, int filter_h, int filter_w,
@@ -41,18 +41,28 @@ void conv_cpu(int* x_data, int n_batch, int x_h, int x_w, int in_channels,
 }
 
 
+void print(int* data, int c, int h, int w){
+    for(int i = 0; i < c; i++){
+        for(int j = 0; j < h; j++){
+            for(int k = 0; k < w; k++){
+                std::cout << data[i*h*w+j*w+k] << " ";
+            }
+            std::cout << std::endl;
+        }
+    }
+}
 int main(){
     int i_n = 1;
-    int i_c = 1;
-    int i_h = 3;
-    int i_w = 3;
+    int i_c = 10;
+    int i_h = 65;
+    int i_w = 65;
     int f_h = 3;
     int f_w = 3;
-    int o_c = 1;
-    int padding = 0;
+    int o_c = 1024;
+    int padding = 1;
     int stride = 1;
-    int o_h = i_h + 2 * padding - f_h + 1;
-    int o_w = i_w + 2 * padding - f_w + 1;
+    int o_h = (i_h + 2 * padding - f_h) / stride + 1;
+    int o_w = (i_w + 2 * padding - f_w) / stride + 1;
     size_t s_i = i_n * i_c * i_h * i_w;
     size_t s_f = o_c * i_c * f_h * f_w;
     size_t s_o = o_c * o_h * o_w;
@@ -61,11 +71,12 @@ int main(){
     int *b_data = new int[o_c];
     int *output = new int[s_o];
     for(int i = 0; i < s_i; i++)
-        input[i] = 1;
+        input[i] = i%10;
     for(int i = 0; i < s_f; i++)
         filter[i] = 1;
     for(int i = 0; i < o_c; i++)
-        b_data[i] = 0;
+        b_data[i] = 1;
+//    print(input, i_c, i_h, i_w);
     clock_t start = clock();
     conv_cpu(input, i_n, i_h, i_w, i_c,
         filter, f_h, f_w,
@@ -75,15 +86,7 @@ int main(){
         padding);
     clock_t end = clock();
     std::cout << "cpu time: " << end-start << std::endl;
-//    for(int c = 0; c < o_c; c++){
-//        for(int i = 0; i < o_h; i++){
-//            for(int j = 0; j < o_w; j++){
-//                std::cout << output[c* o_h * o_w + i * o_w + j] << " ";
-//            }
-//            std::cout << std::endl;
-//        }
-//        std::cout << std::endl;
-//    }
+//    print(output, o_c, o_h, o_w);
 
     int* output2 = new int[s_o];
     cuda_conv2d(
@@ -98,14 +101,7 @@ int main(){
 
     clock_t gpu_end = clock();
     std::cout << "gpu all time: " << gpu_end - end << std::endl;
-    for(int c = 0; c < o_c; c++){
-        for(int i = 0; i < o_h; i++){
-            for(int j = 0; j < o_w; j++){
-                std::cout << output2[c*o_h*o_w + i * o_w + j] << " ";
-            }
-            std::cout << std::endl;
-        }
-    }
+//    print(output2, o_c, o_h, o_w);
     int ret = memcmp(output, output2, sizeof(int) * s_o);
     std::cout << (ret == 0 ? "pass" : "failed") << std::endl;
     return 0;

@@ -7,6 +7,9 @@
 #include <iterator>
 #include <algorithm>
 
+#include <time.h>
+
+
 int dtype_code = kDLInt;
 int dtype_bits = 32;
 int dtype_lanes = 1;
@@ -14,9 +17,10 @@ int device_type = kDLCPU;
 int device_id = 0;
 
 void RunCVM(DLTensor* x, TVMByteArray& params_arr, std::string json_data,
-        tvm::runtime::Module &mod_syslib  ,  std::string runtime_name, DLTensor *y) {
+        tvm::runtime::Module &mod_syslib  ,  std::string runtime_name, DLTensor *y, int devicetype) {
     // get global function module for graph runtime
-    tvm::runtime::Module mod = (*tvm::runtime::Registry::Get("tvm." + runtime_name + ".create"))(json_data, mod_syslib, device_type, device_id);
+    auto mf =  (*tvm::runtime::Registry::Get("tvm." + runtime_name + ".create"));
+    tvm::runtime::Module mod = mf(json_data, mod_syslib, devicetype, device_id);
 
     // load image data saved in binary
     // std::ifstream data_fin("cat.bin", std::ios::binary);
@@ -72,7 +76,7 @@ int main()
     std::cout << "\n";
 
     // parameters in binary
-    std::ifstream params_in("/tmp/imagenet_cuda.params", std::ios::binary);
+    std::ifstream params_in("/tmp/imagenet_cuda_cvm.params", std::ios::binary);
     std::string params_data((std::istreambuf_iterator<char>(params_in)), std::istreambuf_iterator<char>());
     params_in.close();
 
@@ -90,18 +94,51 @@ int main()
     int out_ndim = 2;
     int64_t out_shape[2] = {1, 1000, };
     TVMArrayAlloc(out_shape, out_ndim, dtype_code, dtype_bits, dtype_lanes, device_type, device_id, &y1);
-    RunCVM(x, params_arr, json_data_org, mod_org, "graph_runtime", y1);
 
-    std::ifstream json_in("/tmp/imagenet_cuda.json", std::ios::in);
+//    DLTensor* gpu_x, *gpu_y;
+//    TVMArrayAlloc(in_shape, in_ndim, dtype_code, dtype_bits, dtype_lanes, kDLGPU, device_id, &gpu_x);
+//    TVMArrayAlloc(out_shape, out_ndim, dtype_code, dtype_bits, dtype_lanes, kDLGPU, device_id, &gpu_y);
+//    TVMStreamHandle stream;
+//    TVMStreamCreate(kDLGPU, device_id, &stream);
+//    TVMArrayCopyFromTo(x, gpu_x, stream);
+//
+    clock_t start = clock();
+    RunCVM(x, params_arr, json_data_org, mod_org, "graph_runtime", y1, device_type);
+    clock_t end = clock();
+    std::cout << "graph runtime : " << end-start << std::endl;
+    for(int i = 0; i < 10; i++){
+        std::cout << static_cast<int32_t*>(y1->data)[i] << " ";
+    }
+    std::cout << std::endl;
+
+
+    std::ifstream json_in("/tmp/imagenet_cuda_cvm.json", std::ios::in);
     std::string json_data((std::istreambuf_iterator<char>(json_in)), std::istreambuf_iterator<char>());
     json_in.close();
 
+    DLTensor* gpu_x, *gpu_y;
+    TVMArrayAlloc(in_shape, in_ndim, dtype_code, dtype_bits, dtype_lanes, kDLGPU, device_id, &gpu_x);
+    TVMArrayAlloc(out_shape, out_ndim, dtype_code, dtype_bits, dtype_lanes, kDLGPU, device_id, &gpu_y);
+    TVMStreamHandle stream;
+    TVMStreamCreate(kDLGPU, device_id, &stream);
+    TVMArrayCopyFromTo(x, gpu_x, stream);
+
     DLTensor* y2;
     TVMArrayAlloc(out_shape, out_ndim, dtype_code, dtype_bits, dtype_lanes, device_type, device_id, &y2);
-    RunCVM(x, params_arr, json_data, mod_syslib, "cvm_runtime", y2);
+    clock_t cvm_start = clock();
+    for (int i = 0; i < 100; i++) {
+        RunCVM(gpu_x, params_arr, json_data, mod_syslib, "cvm_runtime", gpu_y, (int)kDLGPU);
+    }
+    clock_t cvm_end = clock();
+    std::cout << "cvm runtime: " << cvm_end - cvm_start << std::endl;
+    TVMArrayCopyFromTo(gpu_y, y2, stream);
     //TVMArrayFree(y_cpu);
     TVMArrayFree(x);
 
+//    for(int i = 0; i < 10; i++){
+//        std::cout << static_cast<int32_t*>(y2->data)[i] << " ";
+//    }
+    std::cout << std::endl;
     std::cout << (std::memcmp(y1->data, y2->data, 1000*sizeof(int32_t)) == 0 ? "pass" : "failed") << std::endl;
     return 0;
 }

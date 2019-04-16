@@ -381,14 +381,14 @@ std::function<void()> GraphRuntime::CreateTVMOp(
           func->CallPacked(targs, &rv);
       };
   }
-  else if(param.func_name == "fuse_reshap"){
+  else if(param.func_name == "fuse_broadcast_add****"){
       std::cout << "param.func_name = " << param.func_name << "\n";
       return [arg_ptr](){
           TVMRetValue rv;
           TVMArgs targs(arg_ptr->arg_values.data(),
                   arg_ptr->arg_tcodes.data(),
                   static_cast<int>(arg_ptr->arg_values.size()));
-          auto func = tvm::runtime::Registry::Get("tvm.runtime.cvm.reshap");
+          auto func = tvm::runtime::Registry::Get("tvm.runtime.cvm.broadcast_add");
           func->CallPacked(targs, &rv);
       };
   }
