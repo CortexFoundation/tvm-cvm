@@ -99,6 +99,13 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.flatten").set_body([]
 
 });
 
+inline int32_t getSize(DLTensor *dlTensor){
+    int32_t size = 1;
+    for(int i = 0; i < dlTensor->ndim; i++){
+        size *= dlTensor->shape[i];
+    }
+    return size;
+}
 /*
 input
 weight
@@ -132,7 +139,7 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.conv2d").set_body([]
 	int groups = std::atoi(groups_str.c_str());
 	int dilation[2] = {0};
 	parseToIntPair(dilation_str, dilation);
-	int channels = std::atoi(channels_str.c_str());
+	//int channels = std::atoi(channels_str.c_str());
 	int kernel_size[2] = {0};
 	parseToIntPair(kernel_size_str, kernel_size);
 	int padding[2] = {0};
@@ -158,10 +165,10 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.conv2d").set_body([]
     int in_channels = static_cast<int>(x->shape[1]);
     int x_h = static_cast<int>(x->shape[2]);
     int x_w = static_cast<int>(x->shape[3]);
-//	int o_h = (x_h + 2 * padding[0] - filter_h) / strides[0] + 1;
-//	int o_w = (x_w + 2 * padding[1] - filter_w) / strides[1] + 1;
-	int o_h = static_cast<int>(y->shape[2]);
-	int o_w = static_cast<int>(y->shape[3]);
+	int o_h = (x_h + 2 * padding[0] - filter_h) / strides[0] + 1;
+	int o_w = (x_w + 2 * padding[1] - filter_w) / strides[1] + 1;
+//	int o_h = static_cast<int>(y->shape[2]);
+//	int o_w = static_cast<int>(y->shape[3]);
 //	std::cout << o_h << " " << o_w << " "
 //              << (x_h + 2 * padding[0] - filter_h) / strides[0] + 1 << " "
 //              << (x_w + 2 * padding[1] - filter_w) / strides[1] + 1 << "\n";
@@ -186,35 +193,17 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.conv2d").set_body([]
 		return y_sum;
 
 	};
-    if (filter_h == 3) {
-        cuda_conv2d(x_data, n_batch, in_channels, x_h, x_w,
-                w_data, out_channels, in_channels, filter_h, filter_w,
-                b_data,
-                padding[0],
-                stride_h,
-                dilation[0],
-                groups,
-                y_data, n_batch, out_channels, o_h, o_w, DEBUG_OP);
-    } else {
-        for (int n = 0; n < n_batch; ++n) {
-            for (int k = 0; k < out_channels; ++k) {
-                for (int p = 0; p < o_h; ++p) {
-                    for (int q = 0; q < o_w; ++q) {
-                        GETY(n, k, p, q) = b_data[k] + calc_func(n, k, p, q);
-                    }
+    for (int n = 0; n < n_batch; ++n) {
+        for (int k = 0; k < out_channels; ++k) {
+            for (int p = 0; p < o_h; ++p) {
+                for (int q = 0; q < o_w; ++q) {
+                    GETY(n, k, p, q) = b_data[k] + calc_func(n, k, p, q);
                 }
             }
         }
     }
  });
 
- inline int32_t getSize(DLTensor *dlTensor){
-     int32_t size = 1;
-     for(int i = 0; i < dlTensor->ndim; i++){
-         size *= dlTensor->shape[i];
-     }
-     return size;
- }
 
 TVM_REGISTER_GLOBAL("tvm.runtime.cvm.broadcast_add")
     .set_body([](TVMArgs args, TVMRetValue *ret){
@@ -475,16 +464,13 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.conv2d")
 	int groups = std::atoi(groups_str.c_str());
 	int dilation[2] = {0};
 	parseToIntPair(dilation_str, dilation);
-	int channels = std::atoi(channels_str.c_str());
+	//int channels = std::atoi(channels_str.c_str());
 	int kernel_size[2] = {0};
 	parseToIntPair(kernel_size_str, kernel_size);
 	int padding[2] = {0};
 	parseToIntPair(padding_str, padding);
 	int strides[2] = {0};
 	parseToIntPair(strides_str, strides);
-
-    int stride_h = strides[0];
-    int stride_w = strides[1];
 
     int32_t* x_data = (int32_t*)x->data;
     int32_t* w_data = (int32_t*)w->data;
@@ -501,10 +487,10 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.conv2d")
     int in_channels = static_cast<int>(x->shape[1]);
     int x_h = static_cast<int>(x->shape[2]);
     int x_w = static_cast<int>(x->shape[3]);
-//	int o_h = (x_h + 2 * padding[0] - filter_h) / strides[0] + 1;
-//	int o_w = (x_w + 2 * padding[1] - filter_w) / strides[1] + 1;
-	int o_h = static_cast<int>(y->shape[2]);
-	int o_w = static_cast<int>(y->shape[3]);
+	int o_h = (x_h + 2 * padding[0] - filter_h) / strides[0] + 1;
+	int o_w = (x_w + 2 * padding[1] - filter_w) / strides[1] + 1;
+//	int o_h = static_cast<int>(y->shape[2]);
+//	int o_w = static_cast<int>(y->shape[3]);
 
     cuda_conv2d(
             x_data, n_batch, in_channels, x_h, x_w,
@@ -531,9 +517,6 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.cuda_max_pool2d")
 	parseToIntPair(pool_size_str, pool_size);
 	int padding[2] = {0};
 	parseToIntPair(padding_str, padding);
-
-    int stride_h = strides[0];
-    int stride_w = strides[1];
 
     int32_t* x_data = (int32_t*)x->data;
     int32_t* y_data = (int32_t*)y->data;
@@ -709,9 +692,6 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.max_pool2d")
 	parseToIntPair(pool_size_str, pool_size);
 	int padding[2] = {0};
 	parseToIntPair(padding_str, padding);
-
-    int stride_h = strides[0];
-    int stride_w = strides[1];
 
     int32_t* x_data = (int32_t*)x->data;
     int32_t* y_data = (int32_t*)y->data;

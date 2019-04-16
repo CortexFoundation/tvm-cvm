@@ -53,6 +53,9 @@ __global__ void kernel_conv2d(
     int perBlockYOneImage = (tmp_o_h+BS-1) / BS;
     int perBlockXOneImage = (tmp_o_w+BS-1) / BS;
     int l_o_c = blockIdx.y / perBlockYOneImage;
+    int n = l_o_c / o_c;
+    int nsize = n * i_c * i_h * i_w; 
+    int l_f_c = l_o_c % o_c;
     int l_o_hi = blockIdx.y % perBlockYOneImage;
     int l_o_wi = blockIdx.x % perBlockXOneImage;
     int l_o_h = l_o_hi * BS + l_y;
@@ -81,14 +84,14 @@ __global__ void kernel_conv2d(
         if(l_i_h < 0 || i_x < 0 || l_i_h >= i_h || i_x >= i_w)
             shared_i[l_y*siw + l_x] = 0;
         else
-            shared_i[l_y*siw + l_x] = input[i_y * i_w + i_x];
+            shared_i[l_y*siw + l_x] = input[nsize + i_y * i_w + i_x];
 
         if(l_y < F_H-1){
             for(int i = l_y; i < F_H-1; i+=min_s_y){
                 if(l_i_h+min_s_y+i-l_y < 0 || i_x < 0 || l_i_h+min_s_y+i-l_y >= i_h || i_x >= i_w)
                     shared_i[(i+min_s_y)*siw + l_x] = 0;
                 else
-                    shared_i[(i + min_s_y)*siw + l_x] = input[(i_y + min_s_y + i - l_y) * i_w + i_x];     
+                    shared_i[(i + min_s_y)*siw + l_x] = input[nsize + (i_y + min_s_y + i - l_y) * i_w + i_x];     
             }
         }
         if(l_x < F_W-1){
@@ -96,7 +99,7 @@ __global__ void kernel_conv2d(
                 if(l_i_h < 0 || i_x+min_s_x+i-l_x < 0 || l_i_h >= i_h || i_x+min_s_x+i-l_x >= i_w)
                     shared_i[l_y * siw + i+min_s_x] = 0;
                 else
-                    shared_i[l_y * siw + i + min_s_x] = input[i_y * i_w + i_x + min_s_x + i - l_x];
+                    shared_i[l_y * siw + i + min_s_x] = input[nsize + i_y * i_w + i_x + min_s_x + i - l_x];
             }
         }
         if(l_y < F_H-1 && l_x < F_W-1){
@@ -105,7 +108,7 @@ __global__ void kernel_conv2d(
                     if(l_i_h+min_s_y+i-l_y < 0 || i_x+min_s_x+j-l_x < 0 || l_i_h+min_s_y+i-l_y >= i_h || i_x+min_s_x+j-l_x >= i_w)
                         shared_i[(i+min_s_y) * siw + j+min_s_x] = 0;
                     else
-                        shared_i[(i+min_s_y) * siw + j+min_s_x] = input[(i_y+min_s_y + i-l_y)*i_w + i_x + min_s_x + j - l_x];
+                        shared_i[(i+min_s_y) * siw + j+min_s_x] = input[nsize + (i_y+min_s_y + i-l_y)*i_w + i_x + min_s_x + j - l_x];
                 }
             }
         }
@@ -114,7 +117,7 @@ __global__ void kernel_conv2d(
         if(l_y < F_H && l_x < F_W){
             for(int i = l_y; i < F_H; i+= min_s_y)
                 for(int j = l_x; j < F_W; j+=min_s_x)
-                    shared_f[i*F_W + j] = filter[l_o_c * F_H * F_W * f_c + c * F_H * F_W + i * F_W + j];
+                    shared_f[i*F_W + j] = filter[l_f_c * F_H * F_W * f_c + c * F_H * F_W + i * F_W + j];
         }
         __syncthreads();
 

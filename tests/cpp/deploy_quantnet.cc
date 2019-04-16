@@ -65,15 +65,17 @@ int main()
     tvm::runtime::Module mod_org = tvm::runtime::Module::LoadFromFile("/tmp/imagenet_llvm.org.so");
     tvm::runtime::Module mod_syslib = (*tvm::runtime::Registry::Get("module._GetSystemLib"))();
 
+    for(int in = 0; in < 1; in++){
+
     DLTensor* x;
     int in_ndim = 4;
     int64_t in_shape[4] = {1, 3, 224, 224};
     TVMArrayAlloc(in_shape, in_ndim, dtype_code, dtype_bits, dtype_lanes, device_type, device_id, &x);
     auto x_iter = static_cast<int*>(x->data);
     for (auto i = 0; i < 1 * 3 * 224 * 224; i++) {
-        x_iter[i] = (i) % 255;
+        x_iter[i] = (i) % 255 - 127;
     }
-    std::cout << "\n";
+//    std::cout << "\n";
 
     // parameters in binary
     std::ifstream params_in("/tmp/imagenet_cuda_cvm.params", std::ios::binary);
@@ -133,12 +135,18 @@ int main()
     std::cout << "cvm runtime: " << cvm_end - cvm_start << std::endl;
     TVMArrayCopyFromTo(gpu_y, y2, stream);
     //TVMArrayFree(y_cpu);
-    TVMArrayFree(x);
 
     for(int i = 0; i < 10; i++){
         std::cout << static_cast<int32_t*>(y2->data)[i] << " ";
     }
     std::cout << std::endl;
+
     std::cout << (std::memcmp(y1->data, y2->data, 1000*sizeof(int32_t)) == 0 ? "pass" : "failed") << std::endl;
+    TVMArrayFree(x);
+    TVMArrayFree(gpu_x);
+    TVMArrayFree(gpu_y);
+    TVMArrayFree(y2);
+
+    }
     return 0;
 }
