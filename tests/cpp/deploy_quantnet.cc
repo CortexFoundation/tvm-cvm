@@ -126,7 +126,7 @@ int main()
     DLTensor* y2;
     TVMArrayAlloc(out_shape, out_ndim, dtype_code, dtype_bits, dtype_lanes, device_type, device_id, &y2);
     clock_t cvm_start = clock();
-    for (int i = 0; i < 100; i++) {
+    for (int i = 0; i < 1; i++) {
         RunCVM(gpu_x, params_arr, json_data, mod_syslib, "cvm_runtime", gpu_y, (int)kDLGPU);
     }
     clock_t cvm_end = clock();
@@ -135,9 +135,9 @@ int main()
     //TVMArrayFree(y_cpu);
     TVMArrayFree(x);
 
-//    for(int i = 0; i < 10; i++){
-//        std::cout << static_cast<int32_t*>(y2->data)[i] << " ";
-//    }
+    for(int i = 0; i < 10; i++){
+        std::cout << static_cast<int32_t*>(y2->data)[i] << " ";
+    }
     std::cout << std::endl;
     std::cout << (std::memcmp(y1->data, y2->data, 1000*sizeof(int32_t)) == 0 ? "pass" : "failed") << std::endl;
     return 0;

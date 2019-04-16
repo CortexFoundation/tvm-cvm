@@ -333,8 +333,8 @@ std::function<void()> CvmRuntime::CreateCVMOp(
 		  TVMArgs targs(arg_ptr->arg_values.data(),
 				  arg_ptr->arg_tcodes.data(),
 				  static_cast<int>(arg_ptr->arg_values.size()));
-          //std::cout << "tvm.runtime.cvm." + op << std::endl;
-          auto func = tvm::runtime::Registry::Get("tvm.runtime.cvm." + op);
+//          std::cout << "tvm.runtime.cvm_cuda." + op << std::endl;
+          auto func = tvm::runtime::Registry::Get("tvm.runtime.cvm_cuda." + op);
           assert(func != NULL);
           func->CallPacked(targs, &rv);
 
