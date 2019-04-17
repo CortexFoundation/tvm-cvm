@@ -40,6 +40,65 @@ void conv_cpu(int* x_data, int n_batch, int x_h, int x_w, int in_channels,
     }
 }
 
+//TODO padding != 0
+void conv_cpu_v2(int* x_data, int n_batch, int x_h, int x_w, int in_channels,
+        int *w_data, int filter_h, int filter_w,
+        int *b_data,
+        int *y_data, int o_h, int o_w, int out_channels,
+        int stride_h, int stride_w,
+        int padding
+        ){
+#define GETX(n, c, h, w) x_data[(n) * in_channels * x_h * x_w + (c) * x_h * x_w + (h) * x_w + (w)]
+#define GETW(o, i, h, w) w_data[(o) * in_channels * filter_h * filter_w + (i) * filter_h * filter_w + (h) * filter_w + (w)]
+    for(int n = 0; n < n_batch; ++n){
+        for(int oc = 0; oc < out_channels; ++oc){
+            for(int oh = 0; oh < o_h; oh += 32){
+                for(int ow = 0; ow < o_w; ow += 32){
+                    int32_t sum[32][32] = {0};
+                    for(int ic = 0; ic < in_channels; ++ic){
+                        int32_t bufX[40][40]; //filter_h <= 11
+                        int32_t bufF[11][11];
+                        for(int i = 0; i < 32; i++){
+                            for(int j = 0; j < 32; j++){
+                                if((oh+i)*stride_h-padding < 0 || (ow+j)*stride_h-padding<0 || (oh+i)*stride_h-padding>= x_h || (ow+j)*stride_h-padding>=x_w)
+                                    bufX[i][j] = 0;
+                                else
+                                    bufX[i][j] = x_data[n*in_channels*x_h*x_w + ic*x_h*x_w + (oh+i)*x_w + ow+j];
+                                if(i < filter_h-1){
+                                    for(int ti = oh+i; ti < filter_h-1; ti+=)
+                                    bufX[i+32][j] = x_data[n*in_channels*x_h*x_w + ic*x_h*x_w + (oh+i+32)*x_w + ow+j];
+                                }
+                                if(j < filter_w-1){
+                                    bufX[i][j+32] = x_data[n*in_channels*x_h*x_w + ic*x_h*x_w + (oh+i)*x_w + ow+j+32];
+                                }
+                                if(i < filter_h-1 && j < filter_w-1){
+                                    bufX[i+32][j+32] = x_data[n*in_channels*x_h*x_w + ic*x_h*x_w + (oh+i+32)*x_w + ow+j+32];
+                                }
+                                if(i < filter_h && j < filter_w){
+                                    bufF[i][j] = w_data[oc*in_channels*filter_h*filter_w + ic*filter_h*filter_w + i*filter_w + j];
+                                }
+                            }
+                        }
+                        for(int i = 0; i < 32; i++){
+                            for(int j = 0; j < 32; j++){
+                                for(int fh = 0; fh < filter_h; ++fh){
+                                    for(int fw = 0; fw < filter_w; ++fw){
+                                        sum[i][j] += bufX[i+fh][j+fw] * bufF[fh][fw];
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    for(int i = 0; i < 32; i++){
+                        for(int j = 0; j < 32; j++){
+                            y_data[n * out_channels * o_h * o_w + oc * o_h * o_w + (oh+i) * o_w + ow+j] = sum[i][j];
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
 void print(int* data, int n, int c, int h, int w){
     for(int in = 0; in < n; in++){
@@ -54,14 +113,14 @@ void print(int* data, int n, int c, int h, int w){
     }
 }
 int main(){
-    int i_n = 30;
-    int i_c = 10;
-    int i_h = 34;
-    int i_w = 32;
+    int i_n = 1;
+    int i_c = 1;
+    int i_h = 66;
+    int i_w = 66;
     int f_h = 3;
     int f_w = 3;
-    int o_c = 102;
-    int padding = 1;
+    int o_c = 256;
+    int padding = 0;
     int stride = 1;
     int o_h = (i_h + 2 * padding - f_h) / stride + 1;
     int o_w = (i_w + 2 * padding - f_w) / stride + 1;
@@ -80,31 +139,49 @@ int main(){
         b_data[i] = 0;
 //    print(input, i_c, i_h, i_w);
     clock_t start = clock();
-    conv_cpu(input, i_n, i_h, i_w, i_c,
-        filter, f_h, f_w,
-        b_data,
-        output, o_h, o_w, o_c,
-        stride, stride,
-        padding);
+    for(int i = 0; i < 10; i++){
+        conv_cpu(input, i_n, i_h, i_w, i_c,
+                filter, f_h, f_w,
+                b_data,
+                output, o_h, o_w, o_c,
+                stride, stride,
+                padding);
+    }
     clock_t end = clock();
-    std::cout << "cpu time: " << end-start << std::endl;
 //    print(output, i_n, o_c, o_h, o_w);
+    std::cout << "cpu time: " << end-start << std::endl;
 
-    int* output2 = new int[s_o];
-    cuda_conv2d(
-        input, i_n, i_c, i_h, i_w,
-        filter, o_c, i_c, f_h, f_w,
-        b_data,
-        padding,
-        stride,
-        1,
-        1,
-        output2, i_n, o_c, o_h, o_w, true);
-
-    clock_t gpu_end = clock();
-    std::cout << "gpu all time: " << gpu_end - end << std::endl;
-//    print(output2, i_n, o_c, o_h, o_w);
-    int ret = memcmp(output, output2, sizeof(int) * s_o);
+    int *output3 = new int[s_o];
+    clock_t start2 = clock();
+    for(int i = 0; i < 10; i++){
+        conv_cpu_v2(input, i_n, i_h, i_w, i_c,
+                filter, f_h, f_w,
+                b_data,
+                output3, o_h, o_w, o_c,
+                stride, stride,
+                padding);
+    }
+    clock_t end2 = clock();
+//    print(output3, i_n, o_c, o_h, o_w);
+    std::cout << "cpu time: " << end2-start2 << std::endl;
+    int ret = memcmp(output, output3, s_o*sizeof(int32_t));
     std::cout << (ret == 0 ? "pass" : "failed") << std::endl;
+
+//    int* output2 = new int[s_o];
+//    cuda_conv2d(
+//        input, i_n, i_c, i_h, i_w,
+//        filter, o_c, i_c, f_h, f_w,
+//        b_data,
+//        padding,
+//        stride,
+//        1,
+//        1,
+//        output2, i_n, o_c, o_h, o_w, true);
+//
+//    clock_t gpu_end = clock();
+//    std::cout << "gpu all time: " << gpu_end - end << std::endl;
+////    print(output2, i_n, o_c, o_h, o_w);
+//    int ret = memcmp(output, output2, sizeof(int) * s_o);
+//    std::cout << (ret == 0 ? "pass" : "failed") << std::endl;
     return 0;
 }

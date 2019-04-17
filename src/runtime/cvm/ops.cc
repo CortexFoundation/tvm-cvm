@@ -106,6 +106,72 @@ inline int32_t getSize(DLTensor *dlTensor){
     }
     return size;
 }
+inline void conv2d(
+        int32_t *x_data, int32_t n_batch, int32_t in_channels, int32_t x_h, int32_t x_w,
+        int32_t *w_data, int32_t filter_h, int32_t filter_w,
+        int32_t *y_data, int32_t out_channels, int32_t o_h, int32_t o_w,
+        int32_t *b_data,
+        int32_t padding[2], int32_t stride_h, int32_t stride_w){
+	#define GETX(n, c, h, w) x_data[(n) * in_channels * x_h * x_w + (c) * x_h * x_w + (h) * x_w + (w)]
+	#define GETW(o, i, h, w) w_data[(o) * in_channels * filter_h * filter_w + (i) * filter_h * filter_w + (h) * filter_w + (w)]
+	#define GETY(n, c, h, w) y_data[(n) * out_channels * o_h * o_w + (c) * o_h * o_w + (h) * o_w + (w)]
+	auto calc_func = [&](int n, int k, int p, int q) {
+		int y_sum = 0;
+		for (int c = 0; c < in_channels; ++c) {
+			for (int r = 0; r < filter_h; ++r) {
+				for (int s = 0; s < filter_w; ++s) {
+					auto tp = p * stride_h + r - padding[0];
+					auto tq = q * stride_w + s - padding[1];
+					if (tp < 0 || tq < 0 || tp >= x_h || tq >= x_w)
+						continue;
+					y_sum += GETX(n, c, tp, tq) * GETW(k, c, r, s);
+				}
+			}
+		}
+		return y_sum;
+
+	};
+    for (int n = 0; n < n_batch; ++n) {
+        for (int k = 0; k < out_channels; ++k) {
+            for (int p = 0; p < o_h; ++p) {
+                for (int q = 0; q < o_w; ++q) {
+                    GETY(n, k, p, q) = b_data[k] + calc_func(n, k, p, q);
+                }
+            }
+        }
+    }
+}
+inline void depthwise_conv2d(
+        int32_t *x_data, int32_t n_batch, int32_t in_channels, int32_t x_h, int32_t x_w,
+        int32_t *w_data, int32_t filter_h, int32_t filter_w,
+        int32_t *y_data, int32_t out_channels, int32_t o_h, int32_t o_w,
+        int32_t *b_data,
+        int32_t padding[2], int32_t stride_h, int32_t stride_w,
+        int32_t groups){
+    assert(in_channels == out_channels);
+    assert(in_channels == groups);
+
+    for(int n = 0; n < n_batch; ++n){
+        for(int c = 0; c < in_channels; ++c){
+            for(int h = 0; h < o_h; ++h){
+                for(int w = 0; w < o_w; ++w){
+                    int32_t sum = 0;
+                    for(int fh = 0; fh < filter_h; ++fh){
+                        for(int fw = 0; fw < filter_w; ++fw){
+                            int th = h * stride_h + fh - padding[0];
+                            int tw = w * stride_h + fw - padding[1];
+                            if(th < 0 || tw < 0 || th >= x_h || tw >= x_w)
+                                continue;
+                            sum += x_data[n * in_channels * x_h * x_w + c * x_h * x_w + th * x_w + tw]
+                                * w_data[c * filter_h * filter_w + fh * filter_w + fw];
+                        }
+                    }
+                    y_data[n * in_channels * o_h * o_w + c * o_h * o_w + h * o_w + w] = sum;
+                }
+            }
+        }
+    }
+}
 /*
 input
 weight
@@ -174,33 +240,22 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.conv2d").set_body([]
 //              << (x_w + 2 * padding[1] - filter_w) / strides[1] + 1 << "\n";
 //    std::cout << "dim = " << b->ndim << " shape = " << b->shape[0] << "\n";
 //    std::cout << "padding = " << padding[0] << " " << padding[1] << "\n";
-	#define GETX(n, c, h, w) x_data[(n) * in_channels * x_h * x_w + (c) * x_h * x_w + (h) * x_w + (w)]
-	#define GETW(o, i, h, w) w_data[(o) * in_channels * filter_h * filter_w + (i) * filter_h * filter_w + (h) * filter_w + (w)]
-	#define GETY(n, c, h, w) y_data[(n) * out_channels * o_h * o_w + (c) * o_h * o_w + (h) * o_w + (w)]
-	auto calc_func = [&](int n, int k, int p, int q) {
-		int y_sum = 0;
-		for (int c = 0; c < in_channels; ++c) {
-			for (int r = 0; r < filter_h; ++r) {
-				for (int s = 0; s < filter_w; ++s) {
-					auto tp = p * stride_h + r - padding[0];
-					auto tq = q * stride_w + s - padding[1];
-					if (tp < 0 || tq < 0 || tp >= x_h || tq >= x_w)
-						continue;
-					y_sum += GETX(n, c, tp, tq) * GETW(k, c, r, s);
-				}
-			}
-		}
-		return y_sum;
+    if(groups == 1){
+        conv2d(
+                x_data, n_batch, in_channels, x_h, x_w,
+                w_data, filter_h, filter_w,
+                y_data, out_channels, o_h, o_w,
+                b_data,
+                padding, stride_h, stride_w);
+    }else{
+        depthwise_conv2d(
+                x_data, n_batch, in_channels, x_h, x_w,
+                w_data, filter_h, filter_w,
+                y_data, out_channels, o_h, o_w,
+                b_data,
+                padding, stride_h, stride_w,
+                groups);
 
-	};
-    for (int n = 0; n < n_batch; ++n) {
-        for (int k = 0; k < out_channels; ++k) {
-            for (int p = 0; p < o_h; ++p) {
-                for (int q = 0; q < o_w; ++q) {
-                    GETY(n, k, p, q) = b_data[k] + calc_func(n, k, p, q);
-                }
-            }
-        }
     }
  });
 

@@ -188,6 +188,154 @@ void cuda_conv2d(
         cudaFree(dev_b);
     }
 }
+__global__ void kernel_depthwise_conv2d(
+        int32_t *input, int32_t i_n/*TODO i_n > 1*/, int32_t i_c, int32_t i_h, int32_t i_w,
+        int32_t *filter, int32_t f_n, int32_t f_c, int32_t f_h, int32_t f_w,
+        int32_t *bias,
+        int32_t padding,
+        int32_t stride,
+        int32_t dilation, // TODO dilation > 1
+        int32_t groups, // TODO groups > 1
+        int32_t *output, int32_t o_n, int32_t o_c, int32_t o_h, int32_t o_w){
+    //    int g_y = blockDim.y * blockIdx.y + threadIdx.y;
+    int g_x = blockDim.x * blockIdx.x + threadIdx.x;
+    int l_y = threadIdx.y; 
+    int l_x = threadIdx.x;
+    int tmp_o_h = i_h + 2 * padding - f_h + 1; // for stride
+    int tmp_o_w = i_w + 2 * padding - f_w + 1;
+    int perBlockYOneImage = (tmp_o_h+BS-1) / BS;
+    int perBlockXOneImage = (tmp_o_w+BS-1) / BS;
+    int l_o_c = blockIdx.y / perBlockYOneImage;
+    int l_o_hi = blockIdx.y % perBlockYOneImage;
+    int l_o_wi = blockIdx.x % perBlockXOneImage;
+    int l_o_h = l_o_hi * BS + l_y;
+    //    int l_o_w = l_o_wi * BS + l_x;
+    if(l_o_h >= tmp_o_h || g_x >= tmp_o_w) return;
+
+    const int32_t F_H = f_h;
+    const int32_t F_W = f_w;
+    //    __shared__ int32_t shared_i[BS + F_H - 1][BS + F_W - 1];
+    int32_t sih = BS + F_H - 1;
+    int32_t siw = BS + F_W - 1;
+    extern __shared__ int32_t  share[];
+    int32_t *shared_i = (int32_t*)share; 
+    int32_t *shared_f = &share[sih * siw];
+
+    int32_t sum = 0; 
+    int min_s_y = (l_o_hi+1) * BS <= tmp_o_h ? BS : tmp_o_h%BS;
+    int min_s_x = (l_o_wi+1) * BS <= tmp_o_w ? BS : tmp_o_w%BS;
+
+    //load input to shared
+    int l_i_h = l_o_h - padding;
+    int i_y = l_o_c * i_h + l_i_h;
+    int i_x = g_x - padding;
+    // 0~2-> -1~1
+    if(l_i_h < 0 || i_x < 0 || l_i_h >= i_h || i_x >= i_w)
+        shared_i[l_y*siw + l_x] = 0;
+    else
+        shared_i[l_y*siw + l_x] = input[i_y * i_w + i_x];
+
+    if(l_y < F_H-1){
+        for(int i = l_y; i < F_H-1; i+=min_s_y){
+            if(l_i_h+min_s_y+i-l_y < 0 || i_x < 0 || l_i_h+min_s_y+i-l_y >= i_h || i_x >= i_w)
+                shared_i[(i+min_s_y)*siw + l_x] = 0;
+            else
+                shared_i[(i + min_s_y)*siw + l_x] = input[(i_y + min_s_y + i - l_y) * i_w + i_x];     
+        }
+    }
+    if(l_x < F_W-1){
+        for(int i = l_x; i < F_W-1; i+= min_s_x){
+            if(l_i_h < 0 || i_x+min_s_x+i-l_x < 0 || l_i_h >= i_h || i_x+min_s_x+i-l_x >= i_w)
+                shared_i[l_y * siw + i+min_s_x] = 0;
+            else
+                shared_i[l_y * siw + i + min_s_x] = input[i_y * i_w + i_x + min_s_x + i - l_x];
+        }
+    }
+    if(l_y < F_H-1 && l_x < F_W-1){
+        for(int i = l_y; i < F_H-1; i+=min_s_y){
+            for(int j = l_x; j < F_W-1; j+=min_s_x){
+                if(l_i_h+min_s_y+i-l_y < 0 || i_x+min_s_x+j-l_x < 0 || l_i_h+min_s_y+i-l_y >= i_h || i_x+min_s_x+j-l_x >= i_w)
+                    shared_i[(i+min_s_y) * siw + j+min_s_x] = 0;
+                else
+                    shared_i[(i+min_s_y) * siw + j+min_s_x] = input[(i_y+min_s_y + i-l_y)*i_w + i_x + min_s_x + j - l_x];
+            }
+        }
+    }
+
+    //load filter to shared;
+    if(l_y < F_H && l_x < F_W){
+        for(int i = l_y; i < F_H; i+= min_s_y)
+            for(int j = l_x; j < F_W; j+=min_s_x)
+                shared_f[i*F_W + j] = filter[l_o_c * F_H * F_W + i * F_W + j];
+    }
+    __syncthreads();
+
+    for(int fy = 0; fy < F_H; fy++){
+        for(int fx = 0; fx < F_W; fx++){
+            sum += shared_i[(l_y+fy)*siw + l_x+fx] * shared_f[fy*F_W + fx];
+        }
+    } 
+    __syncthreads();
+
+    if(l_o_h % stride == 0 && g_x % stride == 0){
+        //int oi = l_o_c * o_h * o_w + l_o_h * o_w + g_x;
+        int oi = l_o_c * o_h * o_w + l_o_h/stride * o_w + g_x/stride;
+        output[oi] = sum + bias[l_o_c];
+    }
+}
+void cuda_depthwise_conv2d(
+        int32_t *input, int32_t i_n, int32_t i_c, int32_t i_h, int32_t i_w,
+        int32_t *filter, int32_t f_n, int32_t f_c, int32_t f_h, int32_t f_w,
+        int32_t *bias,
+        int32_t padding,
+        int32_t stride,
+        int32_t dilation,
+        int32_t groups,
+        int32_t *output, int32_t o_n, int32_t o_c, int32_t o_h, int32_t o_w, bool debug){
+    int32_t *dev_i = input, *dev_f = filter, *dev_o = output, *dev_b = bias;
+    size_t s_i = i_n * i_c * i_h * i_w * sizeof(int32_t);
+    size_t s_f = f_n * f_c * f_h * f_w * sizeof(int32_t);
+    size_t s_b = o_c * sizeof(int32_t); 
+    size_t s_o = o_n * o_c * o_h * o_w * sizeof(int32_t);
+    if(debug){
+        cudaMalloc((void**)&dev_i, s_i);
+        cudaMalloc((void**)&dev_f, s_f);
+        cudaMalloc((void**)&dev_b, s_b);
+        cudaMalloc((void**)&dev_o, s_o);
+        cudaMemcpy(dev_i, input, s_i, cudaMemcpyHostToDevice);
+        cudaMemcpy(dev_f, filter, s_f, cudaMemcpyHostToDevice);
+        cudaMemcpy(dev_b, bias, s_b, cudaMemcpyHostToDevice);
+    }
+//    clock_t start = clock();
+    int b_h = BS;
+    int b_w = BS;
+    int tmp_o_h = i_h + 2 * padding - f_h + 1; //for stride > 1
+    int tmp_o_w = i_w + 2 * padding - f_w + 1;
+    int32_t g_h = o_n * o_c * ((tmp_o_h + b_h - 1) / b_h);
+    int32_t g_w = (tmp_o_w + b_w - 1) / b_w;
+    dim3 bDim(b_w, b_h, 1);
+    dim3 gDim(g_w, g_h, 1);
+    size_t share_size = (BS + f_h - 1) * (BS + f_w - 1) * sizeof(int32_t) + f_h * f_w * sizeof(int32_t);
+    kernel_depthwise_conv2d<<<gDim, bDim, share_size>>>(
+            dev_i, i_n, i_c, i_h, i_w,
+            dev_f, f_n, f_c, f_h, f_w,
+            dev_b, 
+            padding, 
+            stride,
+            dilation,
+            groups,
+            dev_o, o_n, o_c, o_h, o_w);
+    cudaDeviceSynchronize();
+//    clock_t end = clock();
+//    printf("gpu cal time: %d\n", end-start);
+    if(debug){
+        cudaMemcpy(output, dev_o, s_o, cudaMemcpyDeviceToHost);
+        cudaFree(dev_i);
+        cudaFree(dev_f);
+        cudaFree(dev_o);
+        cudaFree(dev_b);
+    }
+}
 
 __global__ void kernel_max_pool(
         int32_t *input, int32_t i_n/*TODO i_n > 1*/, int32_t i_c, int32_t i_h, int32_t i_w,

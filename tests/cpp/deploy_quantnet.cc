@@ -20,7 +20,7 @@ void RunCVM(DLTensor* x, TVMByteArray& params_arr, std::string json_data,
         tvm::runtime::Module &mod_syslib  ,  std::string runtime_name, DLTensor *y, int devicetype) {
     // get global function module for graph runtime
     auto mf =  (*tvm::runtime::Registry::Get("tvm." + runtime_name + ".create"));
-    tvm::runtime::Module mod = mf(json_data, mod_syslib, devicetype, device_id);
+    tvm::runtime::Module mod = mf(json_data, mod_syslib, static_cast<int>(x->ctx.device_type), device_id);
 
     // load image data saved in binary
     // std::ifstream data_fin("cat.bin", std::ios::binary);
@@ -58,6 +58,19 @@ void RunCVM(DLTensor* x, TVMByteArray& params_arr, std::string json_data,
 //
 //
 //    TVMArrayFree(y);
+}
+
+void call_tvm_runtime_cpu(tvm::runtime::Module mod, DLTensor*x){
+
+}
+void call_tvm_runtime_gpu(){
+}
+
+void call_cvm_runtime_cpu(){
+
+}
+void call_cvm_runtime_gpu(){
+
 }
 
 int main()
