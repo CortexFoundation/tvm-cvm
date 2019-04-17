@@ -95,73 +95,7 @@ NNVM_REGISTER_OP(matmul)
 .add_argument("rhs", "NDArray-or-Symbol", "The second input")
 .set_attr<FInferShape>("FInferShape", DotShape)
 .set_attr<FInferType>("FInferType", ElemwiseType<2, 1>)
-.set_attr<FCorrectLayout>("FCorrectLayout", DotCorrectLayout)
-.set_attr<FGradient>(
-  "FGradient", [](const NodePtr& n,
-                  const std::vector<NodeEntry>& ograds) {
-    // z = x dot y
-    // xshape (n,m,k), yshape (k,r,s)
-    const MatMulParam& param = nnvm::get<MatMulParam>(n->attrs.parsed);
-    bool Ta = param.transpose_a;
-    bool Tb = param.transpose_b;
-    // Ta = false, Tb = false
-    // grad_x = grad_z dot y.T
-    // grad_y = x.T dot grad_z
-    if (!Ta && !Tb) {
-      return std::vector<NodeEntry>{
-        MakeNode("matmul", n->attrs.name + "_grad_0",
-                 {ograds[0], n->inputs[1]},
-                 {{"transpose_a", "false"},
-                  {"transpose_b", "true"}}),
-        MakeNode("matmul", n->attrs.name + "_grad_1",
-                 {n->inputs[0], ograds[0]},
-                 {{"transpose_a", "true"},
-                  {"transpose_b", "false"}})
-      };
-    } else if (Ta && !Tb) {
-      // Ta = true, Tb = false
-      // grad_x = y dot grad_z.T
-      // grad_y = x dot grad_z
-      return std::vector<NodeEntry>{
-        MakeNode("matmul", n->attrs.name + "_grad_0",
-                 {n->inputs[1], ograds[0]},
-                 {{"transpose_a", "false"},
-                  {"transpose_b", "true"}}),
-        MakeNode("matmul", n->attrs.name + "_grad_1",
-                 {n->inputs[0], ograds[0]},
-                 {{"transpose_a", "false"},
-                  {"transpose_b", "false"}})
-      };
-    } else if (!Ta && Tb) {
-      // Ta = false, Tb = true
-      // grad_x = grad_z dot y
-      // grad_y = grad_z.T dot x
-      return std::vector<NodeEntry>{
-        MakeNode("matmul", n->attrs.name + "_grad_0",
-                 {ograds[0], n->inputs[1]},
-                 {{"transpose_a", "false"},
-                  {"transpose_b", "false"}}),
-        MakeNode("matmul", n->attrs.name + "_grad_1",
-                 {ograds[0], n->inputs[0]},
-                 {{"transpose_a", "true"},
-                  {"transpose_b", "false"}})
-      };
-    } else {
-      // Ta = true, Tb = true
-      // grad_x = y.T dot grad_z.T
-      // grad_y = grad_z.T dot x.T
-      return std::vector<NodeEntry>{
-        MakeNode("matmul", n->attrs.name + "_grad_0",
-                 {n->inputs[1], ograds[0]},
-                 {{"transpose_a", "true"},
-                  {"transpose_b", "true"}}),
-        MakeNode("matmul", n->attrs.name + "_grad_1",
-                 {ograds[0], n->inputs[0]},
-                 {{"transpose_a", "true"},
-                  {"transpose_b", "true"}})
-      };
-    }
-});
+.set_attr<FCorrectLayout>("FCorrectLayout", DotCorrectLayout);
 
 }  // namespace top
 }  // namespace nnvm

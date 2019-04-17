@@ -62,6 +62,15 @@ void CvmRuntime::Init(const std::string& graph_json,
   this->SetupStorage();
   this->SetupOpExecs();
 }
+
+int64_t CvmRuntime::GetOps(const std::string& graph_json) {
+	std::istringstream is(graph_json);
+	dmlc::JSONReader reader(&is);
+	this->Load(&reader);
+	return this->GetOps();
+}
+
+
 /*!
  * \brief Get the input index given the name of input.
  * \param name The name of the input.
@@ -444,5 +453,16 @@ TVM_REGISTER_GLOBAL("tvm.cvm_runtime.remote_create")
     *rv = CvmRuntimeCreate(
         args[0], *static_cast<tvm::runtime::Module*>(mhandle), contexts);
   });
+
+TVM_REGISTER_GLOBAL("tvm.cvm_runtime.estimate_ops")
+  .set_body([](TVMArgs args, TVMRetValue* rv) {
+    CHECK_GE(args.num_args, 1) << "The expected number of arguments for "
+                                  "graph_runtime.estimate_ops is "
+                                  "at least 1, but it has "
+                               << args.num_args;
+    *rv = CvmRuntime::EstimateOps(args[0]);
+  });
+
+
 }  // namespace runtime
 }  // namespace tvm

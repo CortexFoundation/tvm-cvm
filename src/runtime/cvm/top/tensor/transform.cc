@@ -16,8 +16,7 @@
 
 namespace nnvm {
 namespace top {
-using namespace tvm;
-
+using tvm::Array;
 // flatten
 inline bool FlattenInferShape(const NodeAttrs& attrs,
                               std::vector<TShape>* in_attrs,
@@ -1011,15 +1010,6 @@ inline bool SliceLikeShape(const nnvm::NodeAttrs& attrs,
   TShape out_shape = TShape(std::move(end_idx));
   NNVM_ASSIGN_OUTPUT_SHAPE(attrs, *out_attrs, 0, out_shape);
   return true;
-}
-
-// Adapter function to make int array.
-Array<Integer> GetIntArray(Array<Expr> arr) {
-  for (size_t i = 0; i < arr.size(); ++i) {
-    CHECK(!arr[i].defined() || arr[i].as<IntImm>())
-        << "Expect an int array";
-  }
-  return Array<Integer>(arr.node_);
 }
 
 NNVM_REGISTER_OP(slice_like)

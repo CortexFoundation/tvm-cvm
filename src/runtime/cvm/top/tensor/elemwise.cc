@@ -16,8 +16,6 @@
 namespace nnvm {
 namespace top {
 
-using namespace tvm;
-
 // undefined op
 NNVM_REGISTER_ELEMWISE_UNARY_OP(__undef__)
 .describe(R"code(undefined op.

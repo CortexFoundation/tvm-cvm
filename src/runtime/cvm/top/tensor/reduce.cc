@@ -15,7 +15,6 @@
 
 namespace nnvm {
 namespace top {
-using namespace tvm;
 using namespace nnvm::compiler;
 
 

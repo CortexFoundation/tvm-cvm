@@ -80,7 +80,15 @@ class CvmRuntime : public ModuleNode {
             tvm::runtime::Module module,
             const std::vector<TVMContext>& ctxs);
 
-  /*!
+  int64_t GetOps();
+	int64_t GetOps(const std::string& sym_json);
+ 
+	static int64_t EstimateOps(const std::string& sym_json) {
+		CvmRuntime rt;
+		auto ret = rt.GetOps(sym_json);
+		return ret;
+	} 
+	/*!
    * \brief Get the input index given the name of input.
    * \param name The name of the input.
    * \return The index of input.
@@ -181,9 +189,11 @@ class CvmRuntime : public ModuleNode {
     int precision;
     // inputs
     std::vector<NodeEntry> inputs;
-    // control deps
+	// op attr
+	std::unordered_map<std::string, std::string> attrs;
+	// control deps
     std::vector<uint32_t> control_deps;
-    // JSON Loader
+	// JSON Loader
     void LoadAttrs(dmlc::JSONReader *reader, CVMOpParam* param) {
       int bitmask = 0;
       std::string key, value;
@@ -233,17 +243,31 @@ class CvmRuntime : public ModuleNode {
       }
       CHECK_EQ(bitmask, 1|2|4) << "invalid format";
     }
+
+	void LoadOpAttr(const std::string& attr_json_) {
+	  std::string attr_json;
+	  for (auto s: attr_json_) {
+		if (s != '\\' && s != ' ' && s != '(' && s != ')')
+		  attr_json += s;
+	  }
+		if (attr_json == "") return;
+	  std::istringstream is(attr_json);
+	  dmlc::JSONReader reader(&is);
+	  std::string key, value;
+      reader.BeginObject();
+      while (reader.NextObjectItem(&key)) {
+        reader.Read(&value);
+		attrs[key] = value;
+      }
+	}
   };
   struct GraphAttr {
     size_t storage_num_not_alloctaed{0};
     std::vector<int> storage_id;
     std::vector<int> device_index;
     std::vector<std::string> dltype;
-<<<<<<< HEAD
     std::vector<int> precision;
-=======
     std::vector<std::string> op_attrs;
->>>>>>> tian-gist
     std::vector<std::vector<int64_t> > shape;
     // The graph attribute fields.
     void Load(dmlc::JSONReader *reader) {
@@ -306,7 +330,7 @@ class CvmRuntime : public ModuleNode {
             CHECK(reader->NextArrayItem());
             size_t temp;
             reader->Read(&temp);
-          }            else {
+          } else {
               LOG(FATAL) << "cannot skip graph attr " << key;
           }
           CHECK(!reader->NextArrayItem());
@@ -343,6 +367,10 @@ class CvmRuntime : public ModuleNode {
         }
       }
       CHECK_EQ(bitmask, 1|2|4|8|16) << "invalid format";
+	  CHECK_EQ(nodes_.size(), attrs_.op_attrs.size());
+	  for (auto i = 0; i < nodes_.size(); ++i) {
+		nodes_[i].LoadOpAttr(attrs_.op_attrs[i]);
+	  }
   }
   /*! \brief Setup the shape, type, and precision */
   void SetupShape();

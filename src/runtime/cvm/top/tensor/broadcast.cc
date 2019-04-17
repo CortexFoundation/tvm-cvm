@@ -3,10 +3,7 @@
  * \file broadcast.cc
  * \brief broadcast operator.
  */
-#include <tvm/expr.h>
-#include <tvm/packed_func_ext.h>
 #include <nnvm/op.h>
-#include <nnvm/node.h>
 #include <nnvm/op_attr_types.h>
 #include <nnvm/compiler/op_attr_types.h>
 #include <nnvm/compiler/util.h>
@@ -17,7 +14,6 @@
 
 namespace nnvm {
 namespace top {
-using namespace tvm;
 using namespace nnvm::compiler;
 
 // broadcast_to
@@ -222,15 +218,7 @@ Example::
    broadcast_add(x, y) = [[ 1.,  1.,  1.],
                           [ 2.,  2.,  2.]]
 
-)code" NNVM_ADD_FILELINE)
-.set_attr<FGradient>(
-  "FGradient", [](const NodePtr& n,
-                  const std::vector<NodeEntry>& ograds) {
-    return std::vector<NodeEntry>{
-      MakeNode("collapse_sum", n->attrs.name + "_dlhs", { ograds[0], n->inputs[0] }),
-      MakeNode("collapse_sum", n->attrs.name + "_drhs", { ograds[0], n->inputs[1] })
-    };
-});
+)code" NNVM_ADD_FILELINE);
 
 
 NNVM_REGISTER_BINARY_BROADCAST_OP(broadcast_sub, subtract)
@@ -248,18 +236,7 @@ Example::
    broadcast_sub(x, y) = [[ 1.,  1.,  1.],
                           [ 0.,  0.,  0.]]
 
-)code" NNVM_ADD_FILELINE)
-.set_attr<FGradient>(
-  "FGradient", [](const NodePtr& n,
-                  const std::vector<NodeEntry>& ograds) {
-    return std::vector<NodeEntry>{
-      MakeNode("collapse_sum", n->attrs.name + "_dlhs", { ograds[0], n->inputs[0] }),
-      MakeNode("collapse_sum", n->attrs.name + "_drhs", {
-          MakeNode("negative", n->attrs.name + "_drhs_neg", {ograds[0]}),
-          n->inputs[1]
-        })
-    };
-});
+)code" NNVM_ADD_FILELINE);
 
 
 NNVM_REGISTER_BINARY_BROADCAST_OP(broadcast_mul, multiply)
@@ -276,22 +253,7 @@ Example::
 
    broadcast_mul(x, y) = [[ 0.,  0.,  0.],
                           [ 1.,  1.,  1.]]
-)code" NNVM_ADD_FILELINE)
-.set_attr<FGradient>(
-  "FGradient", [](const NodePtr& n,
-                  const std::vector<NodeEntry>& ograds) {
-    NodeEntry dlhs = MakeNode("collapse_sum", n->attrs.name + "_dlhs_sum", {
-        MakeNode("broadcast_mul", n->attrs.name + "_dlhs_mul",
-                 { n->inputs[1], ograds[0] }),
-        n->inputs[0]
-      });
-    NodeEntry drhs = MakeNode("collapse_sum", n->attrs.name + "_drhs_sum", {
-        MakeNode("broadcast_mul", n->attrs.name + "_drhs_mul",
-                 { n->inputs[0], ograds[0] }),
-        n->inputs[1]
-      });
-    return std::vector<NodeEntry>{ dlhs, drhs };
-});
+)code" NNVM_ADD_FILELINE);
 
 
 NNVM_REGISTER_BINARY_BROADCAST_OP(broadcast_div, divide)
@@ -309,25 +271,7 @@ Example::
    broadcast_div(x, y) = [[ 3.,  3.,  3.],
                           [ 2.,  2.,  2.]]
 
-)code" NNVM_ADD_FILELINE)
-.set_attr<FGradient>(
-  "FGradient", [](const NodePtr& n,
-                  const std::vector<NodeEntry>& ograds) {
-    NodeEntry dlhs = MakeNode("collapse_sum", n->attrs.name + "_dlhs_sum", {
-        MakeNode("broadcast_div", n->attrs.name + "_dlhs_div",
-                 { ograds[0], n->inputs[1] }),
-        n->inputs[0]
-      });
-    NodeEntry dy = MakeNode("broadcast_div", n->attrs.name + "_drhs_div", {
-        NodeEntry{n, 0, 0},
-        MakeNode("negative", n->attrs.name + "_rhs_neg", {n->inputs[1]})
-      });
-    NodeEntry drhs = MakeNode("collapse_sum", n->attrs.name + "_drhs_sum", {
-        MakeNode("broadcast_mul", n->attrs.name + "_drhs_mul", { dy, ograds[0] }),
-        n->inputs[1]
-      });
-    return std::vector<NodeEntry>{ dlhs, drhs };
-});
+)code" NNVM_ADD_FILELINE);
 
 NNVM_REGISTER_BINARY_BROADCAST_OP(broadcast_mod, mod)
 .add_alias("__mod_symbol__")

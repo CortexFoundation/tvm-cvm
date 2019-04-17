@@ -9,6 +9,7 @@
 #include <nnvm/op_attr_types.h>
 #include <nnvm/graph_attr_types.h>
 #include <iostream>
+#include <stdio.h>
 
 using nnvm::Op;
 using nnvm::TShape;
@@ -17,11 +18,8 @@ namespace tvm {
 namespace runtime {
 
 void CvmRuntime::SetupAttr() {
-  std::cout << "try to setup shape" << std::endl;
   SetupShape();
-  std::cout << "try to setup type" << std::endl;
   SetupType();
-  std::cout << "try to setup prec" << std::endl;
   SetupPrecision();
   for (auto p:  attrs_.precision) {
     std::cout << p << ' ';
@@ -30,15 +28,14 @@ void CvmRuntime::SetupAttr() {
 }
 
 std::string GetOpName(std::string name) {
-  bool has_underline = false;
+	std::string ret = name;
   for (int i = name.size() - 1; i >= 0; --i) {
     if (name[i] >= '0' && name[i] <= '9') continue;
-    if (name[i] == '_') has_underline = true;
-    else if (has_underline) {
-      return name.substr(0, i + 1);
-    }
+    else if (name[i] == '_') ret = name.substr(0, i);
+    else ret = name.substr(0, i + 1);
+		break;
   }
-  return name;
+  return ret;
 }
 
 void CvmRuntime::SetupPrecision() {
@@ -47,7 +44,7 @@ void CvmRuntime::SetupPrecision() {
   precision.resize(nodes_.size(), -1);
   // Temp space for shape inference.
   std::vector<int> iprec, oprec;
-	auto finfer_prec = FInferPrecisionMap::getInstance();
+  auto finfer_prec = FInferPrecisionMap::getInstance();
 
   // inference step function for nid
   auto infer_prec = [&](uint32_t nid) {
@@ -73,7 +70,6 @@ void CvmRuntime::SetupPrecision() {
       // which raise an error if the op has bit been registered.
       // TODO: pre-check or try-catch is needed.
       auto opname = GetOpName(inode.param.func_name);
-      std::cout << opname << std::endl;
       auto op = Op::Get(opname);
       auto finfer = finfer_prec.get(opname);
       if (!forward_known) {
@@ -83,7 +79,7 @@ void CvmRuntime::SetupPrecision() {
             nnvm::NodeAttrs attrs;
             attrs.op = op;
             attrs.name = opname;
-            forward_known = finfer(opname, &iprec, &oprec, nullptr);
+            forward_known = finfer(&iprec, &oprec, nullptr);
           } catch (const std::exception& e) {
             throw dmlc::Error(e.what() + std::string(" with ") + opname);
           }
@@ -127,6 +123,51 @@ std::vector<TShape> GetTShapeArray(const std::vector<std::vector<int64_t> > &sha
     }
   }
   return ret;
+}
+
+int64_t CvmRuntime::GetOps() {
+  auto &idx = nodes_;
+  const auto rshape = GetTShapeArray(attrs_.shape);
+  // inference step function for nid
+	int64_t ret = 0;
+	std::vector<std::string> ops;
+	std::unordered_map<std::string, int64_t> opcount;
+  for (uint32_t nid = 0; nid < idx.size(); ++nid) {
+		auto inode = idx[nid];
+		if (inode.op_type == "null") {
+			ret += rshape[nid].Size();
+		} else {
+			auto op = GetOpName(idx[nid].param.func_name);
+			if (opcount.find(op) == opcount.end()) {
+				opcount[op] = 0;
+				ops.push_back(op);
+			}
+
+			if (op == "dense") {
+				auto shape1 = rshape[inode.inputs[0].node_id];
+				auto shape2 = rshape[inode.inputs[1].node_id];
+				auto t = shape1[0] * shape1[1] * shape2[0];
+				ret += t;
+				opcount[op] += t;
+			} else if (op == "conv2d") {
+				auto shape1 = rshape[inode.inputs[0].node_id];
+				auto shape2 = rshape[inode.inputs[1].node_id];
+				auto oshape = rshape[nid];
+				auto t = ((int64_t)shape2[1] * shape2[2] * shape2[3] + 1)
+								* shape1[2] * shape1[3] * shape2[0] * 2;
+				ret += t;
+				opcount[op] += t;
+			} else {
+				auto t = rshape[nid].Size();
+				ret += t;
+				opcount[op] += t;
+			}
+		}	
+	}
+//  for (auto op: ops) {
+//  	std::cout << op << ' ' << opcount[op] << std::endl;
+//  }
+	return ret;
 }
 
 void CvmRuntime::SetupShape() {

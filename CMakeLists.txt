@@ -174,8 +174,7 @@ if(USE_CVM_RUNTIME)
     list(APPEND RUNTIME_SRCS ${RUNTIME_CVM_SRCS})
     file(GLOB NNVM_TOP_SRCS src/runtime/cvm/top/*.cc
             src/runtime/cvm/top/nn/*.cc
-      #      src/runtime/cvm/top/tensor/*.cc)
-    )
+            src/runtime/cvm/top/tensor/*.cc)
     list(APPEND RUNTIME_SRCS ${NNVM_TOP_SRCS})
     #list(APPEND RUNTIME_SRCS ${NNVM_COMPILER_SRCS})
     #list(APPEND RUNTIME_SRCS ${TOPI_SRCS})

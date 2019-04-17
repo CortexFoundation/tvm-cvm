@@ -14,7 +14,7 @@ int main()
     tvm::runtime::Module mod_syslib = (*tvm::runtime::Registry::Get("module._GetSystemLib"))();
 
     // json graph
-    std::ifstream json_in("/tmp/start_cuda.json", std::ios::in);
+    std::ifstream json_in("/tmp/imagenet_cuda.json", std::ios::in);
     std::string json_data((std::istreambuf_iterator<char>(json_in)), std::istreambuf_iterator<char>());
     json_in.close();
 
@@ -33,8 +33,9 @@ int main()
     int dtype_lanes = 1;
     int device_type = kDLCPU;
     int device_id = 0;
-
-    // get global function module for graph runtime
+		int64_t ops = (*tvm::runtime::Registry::Get("tvm.cvm_runtime.estimate_ops"))(json_data);
+		std::cout << "ops " << ops << std::endl;
+		// get global function module for graph runtime
     tvm::runtime::Module mod = (*tvm::runtime::Registry::Get("tvm.cvm_runtime.create"))(json_data, mod_syslib, device_type, device_id);
 
     DLTensor* x;
