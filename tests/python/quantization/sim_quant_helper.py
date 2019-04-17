@@ -13,13 +13,13 @@ def get_zero_symmetric(threshold):
         return (max_range + min_range) / 2
 
 def save_data_scale(name, scale, params):
-    params[name+'_scale'] = nd.array([scale])
+    params[name+'_scale'] = scale
 
 def load_quant_data(data, name, params):
     data_name = name + '_scale'
     assert data_name in params, "data scale %s not in params dict %s" \
             % (data_name, params.keys())
-    return int_realize(data*params[data_name], 8)
+    return data*params[data_name]
 
 def get_simple_sim_scale(threshold, target_bit):
     min_range, max_range = threshold
@@ -41,7 +41,7 @@ def int_realize(data, target_bit, logger=logging):
     out = data.round()
     clip_range = 2 ** (target_bit - 1) - 1
     if logger and out.abs().max() > clip_range:
-        logger.warn("quant out of range int%d with data=<%s,%s,%s>, sb=%s",
+        logger.warn("quant out of range int%d with data=<%s,%s,%s>",
                 target_bit,
                 out.asnumpy().flatten()[0],
                 out.max().asnumpy(),
@@ -51,11 +51,22 @@ def int_realize(data, target_bit, logger=logging):
 
     return out
 
+def parse_nd_float(array):
+    shape= array.shape
+    array = array.asnumpy().flatten()
+    size = len(array)
+    fracs, sbs = [None] * size, [None] * size
+    for idx in range(size):
+        fracs[idx], sbs[idx] = extract_float(array[idx])
+    return nd.array(fracs).reshape(shape), nd.array(sbs).reshape(shape)
+
 def extract_float(number):
     sign, binary = float_bin(number, 24)
     dot_idx = binary.find('.')
     binary = binary.replace('.', '')
     use_idx = binary.rfind('1') + 1
+    if use_idx == 0:
+        return 0, 0
     sb = dot_idx - use_idx
     frac = sign * int(binary[:use_idx], 2)
     return frac, sb

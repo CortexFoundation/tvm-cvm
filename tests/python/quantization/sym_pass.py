@@ -170,26 +170,26 @@ def nnvm_realize(symbol, params, inputs_ext):
                 const_1, const_name = op_const(1, graph, var=nnvm.sym.Variable)
                 params[const_name] = nd.array([1])
                 node = nnvm.sym.broadcast_left_shift(const_1, childs[0])
-        # elif op_name == "broadcast_div":
-        #     msg = '%s(op=%s, inputs=%s)'%(name, op_name, [c.attr('name') for c in childs])
-        #     input_sym = childs[0]
-        #     div_sym = childs[1]
-        #     assert div_sym.attr('op_name') == 'null' # params or constant
-        #     div_sym_name = div_sym.attr('name')
+        elif op_name == "broadcast_div":
+           msg = '%s(op=%s, inputs=%s)'%(name, op_name, [c.attr('name') for c in childs])
+           input_sym = childs[0]
+           div_sym = childs[1]
+           assert div_sym.attr('op_name') == 'null' # params or constant
+           div_sym_name = div_sym.attr('name')
 
-        #     div = params[div_sym_name]
-        #     shift_bits = mx.ndarray.log2(div).astype('float32')
-        #     assert all(div >= 0)
-        #     assert shift_bits.astype('int8').astype('float32') == shift_bits, msg
+           div = params[div_sym_name]
+           shift_bits = mx.ndarray.log2(div).astype('float32')
+           assert all(div >= 0)
+           assert shift_bits.astype('int8').astype('float32') == shift_bits, msg
 
-        #     sb_sym_name = div_sym_name.replace('_scale', '') + '_shift_bits'
-        #     if sb_sym_name in graph:
-        #         sb_sym = graph[sb_sym_name]
-        #     else:
-        #         sb_sym = nnvm.sym.Variable(sb_sym_name, shape=(1,))
-        #         graph[sb_sym_name] = sb_sym
-        #         params[sb_sym_name] = shift_bits
-        #     node = nnvm.sym.broadcast_right_shift(input_sym, sb_sym)
+           sb_sym_name = div_sym_name.replace('_scale', '') + '_shift_bits'
+           if sb_sym_name in graph:
+               sb_sym = graph[sb_sym_name]
+           else:
+               sb_sym = nnvm.sym.Variable(sb_sym_name, shape=(1,))
+               graph[sb_sym_name] = sb_sym
+               params[sb_sym_name] = shift_bits
+           node = nnvm.sym.broadcast_right_shift(input_sym, sb_sym)
         elif op_name not in nnvm_identity_ext:
             # logger.critical(
                 # "Unsupported op:%s(name=%s, attr=%s) in INT8 Inference network",
@@ -207,12 +207,14 @@ def nnvm_realize(symbol, params, inputs_ext):
     args = ret_sym.list_input_names()
     ret_params = {}
     for key, value in params.items():
-        if key in args:
+        if key not in args:
+            logger.warn("key:%s not exists in graph", key)
+            ret_params[key] = value
+        else:
             msg = "key:%s value:%s"%(key, value)
             flat = value.asnumpy().flatten()
             assert all(flat >= INT32_MIN) and all(flat <= INT32_MAX), msg
             assert all(flat.astype('int32').astype('float32') == flat), msg
-
             ret_params[key] = tvm.nd.array(value.astype('int32').asnumpy())
 
     return ret_sym, ret_params

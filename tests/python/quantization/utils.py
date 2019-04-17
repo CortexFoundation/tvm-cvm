@@ -92,9 +92,7 @@ def log_init():
             datefmt="%Y-%m-%d %H:%M:%S")
 
     log_filter = FilterList(
-                # allows=allows, disables=disables,
-                # keywords=["layer=pool", "calib_pool"],
-                log_level=logging.INFO,
+                log_level=logging.DEBUG,
                 default=False)
     for handler in logging.root.handlers:
         handler.addFilter(log_filter)

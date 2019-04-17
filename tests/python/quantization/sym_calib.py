@@ -1,5 +1,6 @@
 import logging
 import os
+import numpy as np
 
 import mxnet as mx
 from mxnet.gluon import nn, SymbolBlock
@@ -13,6 +14,8 @@ from quant_utils import *
 from utils import *
 import sim_quant_helper as sim
 
+from scipy import stats
+
 default_target_bit = 8 # INT8
 bias_target_bit = default_target_bit * 4 - 1
 disable_requant_ops = [
@@ -20,8 +23,125 @@ disable_requant_ops = [
     'slice', 'clip',
 ]
 
+def _smooth_distribution(p, eps=0.0001):
+    """Given a discrete distribution (may have not been normalized to 1),
+    smooth it by replacing zeros with eps multiplied by a scaling factor and taking the
+    corresponding amount off the non-zero values.
+    Ref: http://web.engr.illinois.edu/~hanj/cs412/bk3/KL-divergence.pdf
+    """
+    is_zeros = (p == 0).astype(np.float32)
+    is_nonzeros = (p != 0).astype(np.float32)
+    n_zeros = is_zeros.sum()
+    n_nonzeros = p.size - n_zeros
+    if not n_nonzeros:
+        raise ValueError('The discrete probability distribution is malformed. All entries are 0.')
+    eps1 = eps * float(n_zeros) / float(n_nonzeros)
+    assert eps1 < 1.0, 'n_zeros=%d, n_nonzeros=%d, eps1=%f' % (n_zeros, n_nonzeros, eps1)
+    hist = p.astype(np.float32)
+    hist += eps * is_zeros + (-eps1) * is_nonzeros
+    assert (hist <= 0).sum() == 0
+    return hist
+def _get_optimal_threshold(arr, num_bins=8001, num_quantized_bins=255):
+    """Given a dataset, find the optimal threshold for quantizing it.
+    Ref: http://on-demand.gputechconf.com/gtc/2017/presentation/s7310-8-bit-inference-with-tensorrt.pdf
+    """
+    if isinstance(arr, nd.NDArray):
+        arr = arr.asnumpy()
+    elif isinstance(arr, list):
+        assert len(arr) != 0
+        for i, nd_arr in enumerate(arr):
+            if isinstance(nd_arr, nd.NDArray):
+                arr[i] = nd_arr.asnumpy()
+            elif not isinstance(nd_arr, np.ndarray):
+                raise TypeError('get_optimal_threshold only supports input type of NDArray,'
+                                ' list of np.ndarrays or NDArrays, and np.ndarray,'
+                                ' while received type=%s' % (str(type(nd_arr))))
+        arr = np.concatenate(arr)
+    elif not isinstance(arr, np.ndarray):
+        raise TypeError('get_optimal_threshold only supports input type of NDArray,'
+                        ' list of NDArrays and np.ndarray,'
+                        ' while received type=%s' % (str(type(arr))))
+    min_val = np.min(arr)
+    max_val = np.max(arr)
+    th = max(abs(min_val), abs(max_val))
+
+    hist, hist_edges = np.histogram(arr, bins=num_bins, range=(-th, th))
+    zero_bin_idx = num_bins // 2
+    num_half_quantized_bins = num_quantized_bins // 2
+    assert np.allclose(hist_edges[zero_bin_idx] + hist_edges[zero_bin_idx + 1],
+                       0, rtol=1e-5, atol=1e-7), "val: %s, %s" \
+                    % (hist_edges[zero_bin_idx], hist_edges[zero_bin_idx + 1])
+
+    thresholds = np.zeros(num_bins // 2 + 1 - num_quantized_bins // 2)
+    divergence = np.zeros_like(thresholds)
+
+    quantized_bins = np.zeros(num_quantized_bins, dtype=np.int32)
+    # i means the number of bins on half axis excluding the zero bin.
+    for i in range(num_quantized_bins // 2,
+                   num_bins // 2 + 1):
+        p_bin_idx_start = zero_bin_idx - i
+        p_bin_idx_stop = zero_bin_idx + i + 1
+        thresholds[i - num_half_quantized_bins] = hist_edges[p_bin_idx_stop]
+        sliced_nd_hist = hist[p_bin_idx_start:p_bin_idx_stop]
+
+        # generate reference distribution p
+        p = sliced_nd_hist.copy()
+        assert p.size % 2 == 1
+        assert p.size >= num_quantized_bins
+        # put left outlier count in p[0]
+        left_outlier_count = np.sum(hist[0:p_bin_idx_start])
+        p[0] += left_outlier_count
+        # put right outlier count in p[-1]
+        right_outlier_count = np.sum(hist[p_bin_idx_stop:])
+        p[-1] += right_outlier_count
+        # is_nonzeros[k] indicates whether hist[k] is nonzero
+        is_nonzeros = (sliced_nd_hist != 0).astype(np.int32)
+
+        # calculate how many bins should be merged to generate quantized distribution q
+        num_merged_bins = p.size // num_quantized_bins
+        # merge hist into num_quantized_bins bins
+        for j in range(num_quantized_bins):
+            start = j * num_merged_bins
+            stop = start + num_merged_bins
+            quantized_bins[j] = sliced_nd_hist[start:stop].sum()
+        quantized_bins[-1] += sliced_nd_hist[num_quantized_bins * num_merged_bins:].sum()
+        # expand quantized_bins into p.size bins
+        q = np.zeros(p.size, dtype=np.float32)
+        for j in range(num_quantized_bins):
+            start = j * num_merged_bins
+            if j == num_quantized_bins - 1:
+                stop = -1
+            else:
+                stop = start + num_merged_bins
+            norm = is_nonzeros[start:stop].sum()
+            if norm != 0:
+                q[start:stop] = float(quantized_bins[j]) / float(norm)
+        q[sliced_nd_hist == 0] = 0
+        p = _smooth_distribution(p)
+        # There is a chance that q is an invalid probability distribution.
+        try:
+            q = _smooth_distribution(q)
+        except ValueError:
+            divergence[i - num_half_quantized_bins] = float("inf")
+        divergence[i - num_half_quantized_bins] = stats.entropy(p, q)
+        quantized_bins[:] = 0
+
+    min_divergence_idx = np.argmin(divergence)
+    min_divergence = divergence[min_divergence_idx]
+    opt_th = thresholds[min_divergence_idx]
+    return min_val, max_val, min_divergence, opt_th
+def _get_thresholds(output, calib_mode='naive'):
+    if calib_mode == 'naive':
+        min_range = output.min().asscalar()
+        max_range = output.max().asscalar()
+    elif calib_mode == 'entropy':
+        min_val, max_val, min_divergence, opt_th = \
+            _get_optimal_threshold(output, num_bins=8001, num_quantized_bins=255)
+        min_range = -opt_th if min_val < 0 else 0
+        max_range = opt_th
+    return (min_range, max_range)
 def _calib_sym_collect_thresholds(sym, params, graph, inputs_ext,
-        th_dict, calib_data, ctx=mx.gpu()):
+        th_dict, calib_data, calib_mode='naive', ctx=mx.gpu()):
     logger = logging.getLogger('log.calib.sym.collect.thresholds')
 
     name = sym.attr('name')
@@ -30,7 +150,6 @@ def _calib_sym_collect_thresholds(sym, params, graph, inputs_ext,
 
     if op_name == 'null':
         if name in inputs_ext:
-            #  output = inputs_ext[name]['thresholds']
             output = calib_data
         else:
             output = params[name]
@@ -44,17 +163,9 @@ def _calib_sym_collect_thresholds(sym, params, graph, inputs_ext,
         load_parameters(graph, params, ctx=ctx)
         output = graph.forward(calib_data.as_in_context(ctx))
 
-    min_range = output.min().asscalar()
-    max_range = output.max().asscalar()
-    if name in th_dict:
-        th_dict[name] = (
-                min(min_range, th_dict[name][0]),
-                max(max_range, th_dict[name][1]))
-    else:
-        th_dict[name] = (min_range, max_range)
-
+    th_dict[name] = _get_thresholds(output, calib_mode)
     logger.debug("collect symbol %-40s output min_range=%-20s, max_range=%-20s",
-            name, min_range, max_range)
+            name, th_dict[name][0], th_dict[name][1])
 
     return sym, params
 
@@ -224,49 +335,24 @@ def _calib_sym_zero_rewrite(sym, params, graph, inputs_ext,
     infer_shapes[node.attr('name')] = infer_shapes[name]
     idxs['index'] = index + 1
     return node, params
-def sym_calib_quantize(symbol, params, inputs_ext, calib_data, ctx):
-    logger = logging.getLogger("log.calib.quantize")
-
-    ops = sym_collect_attr(symbol)
-    print (ops)
-
-    th_dict, in_zeros, out_zeros= {}, {}, {}
-    topo_visit(symbol, params, get_op=get_mxnet_op,
-            logger=logger, inputs_ext=inputs_ext,
-            callback=_calib_sym_collect_thresholds,
-            th_dict=th_dict, calib_data=calib_data, ctx=ctx)
-
-    topo_visit(symbol, params, get_op=get_mxnet_op,
-            logger=logger, inputs_ext=inputs_ext,
-            callback=_calib_sym_zero_symmetric,
-            th_dict=th_dict, in_zeros=in_zeros, out_zeros=out_zeros)
-
-    infer_shapes = sym_infer_shape(symbol, params, inputs_ext)
-    indexes = {'index': 0}
-    sym, params = topo_visit(symbol, params, get_op=get_mxnet_op,
-            logger=logger, inputs_ext=inputs_ext,
-            callback=_calib_sym_zero_rewrite,
-            in_zeros=in_zeros, out_zeros=out_zeros,
-            infer_shapes=infer_shapes, idxs=indexes)
-
-    return sym, params
 
 def _sim_requantize_op(sym, scale, params, graph):
     name = sym.attr('name')
     scale_name = name + '_requant_scale'
     assert scale_name not in graph
-    scale_sym = graph[scale_name] = mx.sym.var(scale_name, shape=(1,))
-    params[scale_name] = nd.array([scale])
+    scale_sym = graph[scale_name] = mx.sym.var(scale_name, shape=scale.shape)
+    params[scale_name] = scale
 
     requant_op_name = name + '_requant_op'
     assert requant_op_name not in graph
     node = mx.sym.broadcast_mul(sym, scale_sym, name=requant_op_name)
+    node = mx.sym.round(node)
     graph[requant_op_name] = node
     return node
 def _is_sim_requantize_op(sym):
     name = sym.attr('name')
     return True if name.endswith('_requant_op') else False
-def _realize_sim_requant_op(sym, sb, params, graph):
+def _realize_sim_requant_op(sym, sb, params, graph, target_bit=8):
     """Requantize Op:
         out = round(sym >> sb)  if sb >  0
         out = round(sym)        if sb == 0
@@ -280,14 +366,15 @@ def _realize_sim_requant_op(sym, sb, params, graph):
     sb_name = name + '_shift_bit'
     assert sb_name not in graph
     sb_sym = mx.sym.var(sb_name, shape=(1,))
+    clip_range = 2 ** (target_bit - 1) - 1
 
     if sb == 0:
-        out = mx.sym.clip(sym, a_min=-127, a_max=127)
+        out = mx.sym.clip(sym, a_min=-clip_range, a_max=clip_range)
         return out
     elif sb < 0:
         params[sb_name] = nd.array([2 ** (-sb)])
         out = mx.sym.broadcast_mul(sym, sb_sym)
-        out = mx.sym.clip(sym, a_min=-127, a_max=127)
+        out = mx.sym.clip(sym, a_min=-clip_range, a_max=clip_range)
         return out
 
     params[sb_name] = nd.array([2 ** (sb - 1)])
@@ -304,7 +391,7 @@ def _realize_sim_requant_op(sym, sb, params, graph):
     out = mx.sym.broadcast_add(out, var1)
     out = mx.sym.broadcast_div(out, var2)
     out = mx.sym.floor(out)
-    out = mx.sym.clip(out, a_min=-127, a_max=127)
+    out = mx.sym.clip(out, a_min=-clip_range, a_max=clip_range)
     return out
 
 # simlutate and realize graph pass
@@ -335,12 +422,28 @@ def _sim_scale(sym, params, graph, inputs_ext,
 
     # calculate simulate scale
     target_bits[name] = default_target_bit
-    scale_helper[name] = sim.get_sim_scale(th_dict[name], default_target_bit)
+    scale = sim.get_sim_scale(th_dict[name], default_target_bit)
+    scale_helper[name] = nd.array([scale])
     if op_name in ['Convolution', 'FullyConnected']:
+        X_name, W_name = childs[0].attr('name'), childs[1].attr('name')
+        # if 'num_group' in attr and attr['num_group'] == attr['num_filter']:
+        #     channel = int(attr['num_filter'])
+        #     weight = params[W_name]
+        #     weight_shape = weight.shape
+        #     assert weight_shape[0] == channel
+        #     weight_scales = [None] * channel
+        #     for idx in range(channel):
+        #         threshold = _get_thresholds(weight[idx,:])
+        #         weight_scales[idx] = sim.get_sim_scale(threshold, default_target_bit)
+        #     scale_helper[W_name] = nd.array(weight_scales).reshape(channel, 1, 1, 1)
+
         if attr['no_bias'] == 'False':
             X_name, W_name = childs[0].attr('name'), childs[1].attr('name')
             B_name = childs[2].attr('name')
-            scale_helper[B_name] = scale_helper[X_name] * scale_helper[W_name]
+
+            w_size = np.product(scale_helper[W_name].shape)
+            flat_w_scale = scale_helper[W_name].reshape((w_size))
+            scale_helper[B_name] = scale_helper[X_name] * flat_w_scale
             target_bits[B_name] = bias_target_bit
     return sym, params
 def _sim_rewrite(sym, params, graph, inputs_ext, scale_helper, params_sim):
@@ -363,7 +466,17 @@ def _sim_rewrite(sym, params, graph, inputs_ext, scale_helper, params_sim):
         return sym, params
 
     node = sym
-    if op_name in ['Convolution', 'FullyConnected', 'broadcast_mul']:
+    if op_name in ['Convolution']:
+        X, W = childs[0], childs[1]
+        X_name, W_name = X.attr('name'), W.attr('name')
+        if False and attr['num_group'] == attr['num_filter']:
+            channel = int(attr['num_filter'])
+            flat_w_scale = scale_helper[W_name].reshape(1, channel, 1, 1)
+            in_scale = scale_helper[X_name] * flat_w_scale
+        else:
+            in_scale = scale_helper[X_name] * scale_helper[W_name]
+        requant_scale = scale_helper[name] / in_scale
+    elif op_name in ['FullyConnected', 'broadcast_mul']:
         X, W = childs[0], childs[1]
         X_name, W_name = X.attr('name'), W.attr('name')
         in_scale = scale_helper[X_name] * scale_helper[W_name]
@@ -377,9 +490,15 @@ def _sim_rewrite(sym, params, graph, inputs_ext, scale_helper, params_sim):
         if A_scale > B_scale:
             in_scale, offset = B_scale, B_scale / A_scale
             A = _sim_requantize_op(A, offset, params, graph)
+            logger.debug("symbol %s requant scale=%s out=%s",
+                    A_name, offset.min().asscalar(),
+                    scale_helper[A_name].min().asscalar())
         elif A_scale < B_scale:
             in_scale, offset = A_scale, A_scale / B_scale
             B = _sim_requantize_op(B, offset, params, graph)
+            logger.debug("symbol %s requant scale=%s out=%s",
+                    B_name, offset.min().asscalar(),
+                    scale_helper[A_name].min().asscalar())
         else:
             in_scale = A_scale
 
@@ -407,42 +526,177 @@ def _sim_rewrite(sym, params, graph, inputs_ext, scale_helper, params_sim):
         node = get_mxnet_op(op_name)(*new_childs, **attr, name=name)
         requant_scale = scale_helper[name]
 
-    if requant_scale != 1:
+    if (requant_scale.asnumpy() != 1).any():
         node = _sim_requantize_op(node, requant_scale, params, graph)
         logger.debug("symbol %s requant scale=%s out=%s in=%s",
-                name, requant_scale, scale_helper[name],
-                [scale_helper[c.attr('name')] for c in childs])
+                name, requant_scale.min().asscalar(),
+                scale_helper[name].min().asscalar(),
+                [scale_helper[c.attr('name')].min().asscalar() for c in childs])
 
     scale_helper[node.attr('name')] = scale_helper[name]
     return node, params
+def _sim_post_scale(sym, params, graph, inputs_ext):
+    logger = logging.getLogger('log.calib.sim.post.scale')
+    if not _is_sim_requantize_op(sym):
+        return sym, params
+
+    name = sym.attr('name')
+    childs = sym_iter(sym.get_children())
+
+    A, B = childs[0], childs[1]
+    A_attr = A.list_attr()
+    A_name, B_name = A.attr('name'), B.attr('name')
+    B_size = np.product(params[B_name].shape)
+    if B_size == 1:
+        return sym, params
+
+    assert A.attr('op_name') == 'Convolution' and \
+            A_attr['num_group'] == A_attr['num_filter']
+    channel = int(A_attr['num_filter'])
+    scales = params[B_name].asnumpy().flatten()
+    logger.info("layer %s split into %s slices matching with shape(%s)",
+            sym.attr('name'), B_size, params[B_name].shape)
+    nodes = []
+    begin, end = [None]*4, [None]*4
+    for i in range(channel):
+        begin[1], end[1] = i, i+1
+        tmp = mx.sym.slice(A, begin=begin, end=end)
+        tmp = _sim_requantize_op(tmp, nd.array([scales[i]]), params, graph)
+        nodes.append(tmp)
+    node = mx.sym.concat(*nodes, dim=1)
+    return node, params
+def _sim_realize(sym, params, graph, inputs_ext):
+    logger = logging.getLogger('log.calib.realize')
+    if not _is_sim_requantize_op(sym):
+        return sym, params
+
+    childs = sym_iter(sym.get_children())
+    X, B = childs[0], childs[1]
+    X_name, B_name = X.attr('name'), B.attr('name')
+
+    scale = params[B_name].asscalar()
+    if scale == 1:
+        logger.debug("layer %s skip realize requant with one", sym.attr('name'))
+        return X, params
+    frac, sb = sim.extract_float(scale)
+    Y_range = 2 ** (default_target_bit - 1) - 1
+    A_range = Y_range / scale
+
+    if frac == 0:
+        var0, _ = op_const(0, graph, var=mx.sym.var)
+        params[var0.attr('name')] = nd.array([0])
+        node = mx.sym.broadcast_mul(X, var0)
+        logger.debug("layer %s skip realize requant with zero", sym.attr('name'))
+        return node, params
+
+    # Y = Z * frac * (2 ** sb) <=>
+    # Y = (Z -> Int16) * (frac -> Int16) * (2 ** sb_)
+    A_target_bit, B_target_bit = 16, 16
+    A_bit = math.ceil(math.log2(A_range)) + 1
+    B_bit = math.ceil(math.log2(frac)) + 1
+    A_target_bit = min(A_bit, A_target_bit)
+    B_target_bit = min(B_bit, B_target_bit)
+    A_target_bit = 32 - B_target_bit if B_target_bit < 16 else A_target_bit
+    B_target_bit = 32 - A_target_bit if A_target_bit < 16 else B_target_bit
+    A_target_bit = min(A_bit, A_target_bit)
+    B_target_bit = min(B_bit, B_target_bit)
+    A_sb, B_sb = A_bit - A_target_bit, B_bit - B_target_bit
+    Y_sb = (-sb) - A_sb - B_sb
+
+    X = _realize_sim_requant_op(X, A_sb, params, graph, A_target_bit)
+    params[B_name] = nd.array([round(frac / (2 ** B_sb))])
+    B_range = 2 ** (B_target_bit - 1) - 1
+    params[B_name] = nd.clip(params[B_name],
+            a_min=-B_range, a_max=B_range)
+    node = mx.sym.broadcast_mul(X, B)
+    node = _realize_sim_requant_op(node, Y_sb, params, graph, target_bit=8)
+    logger.debug("layer %s Y(%s >> %s) X(%s|%s >> %s) B(%s|%s vs. %s %s >> %s)",
+            sym.attr('name'), Y_range, Y_sb, A_range, A_bit, A_sb, B_range,
+            B_bit, frac, sb, B_sb)
+    return node, params
 def _sim_realize_requantize_op(sym, params, graph, inputs_ext):
     logger = logging.getLogger('log.calib.realize')
+    if not _is_sim_requantize_op(sym):
+        return sym, params
+
     childs = sym_iter(sym.get_children())
     node = sym
-    if _is_sim_requantize_op(sym):
-        A, B = childs[0], childs[1]
-        A_name, B_name = A.attr('name'), B.attr('name')
+    A, B = childs[0], childs[1]
+    A_name, B_name = A.attr('name'), B.attr('name')
+    scale_shape = params[B_name].shape
+    slices = [A]
+    for idx, s in enumerate(scale_shape):
+        if s == 1:
+            continue
+        begin, end = [None] * len(scale_shape), [None] * len(scale_shape)
+        tmp_slices = []
+        for start in range(s):
+            begin[idx], end[idx] = start, start+1
+            for sli in slices:
+                tmp = mx.sym.slice(sli, begin=begin, end=end)
+                tmp_slices.append(tmp)
+        slices = tmp_slices
 
-        scale = params[B_name].asscalar()
+    size = np.product(scale_shape)
+    assert len(slices) == size
+    logger.info("layer %s split into %s slices matching with shape(%s)",
+            sym.attr('name'), size, scale_shape)
+    scales = params[B_name].asnumpy().flatten()
+    nodes = []
+    for idx in range(size):
+        data, scale = slices[idx], scales[idx]
+        requant_name = B.attr('name') + '_' + str(idx)
         frac, sb = sim.extract_float(scale)
         Y_range = 2 ** (default_target_bit - 1) - 1
         A_range = Y_range / scale
 
-        A_sb = math.ceil(math.log2(A_range))
-        A_sb = A_sb - (default_target_bit - 1)
-        B_sb = math.ceil(math.log2(frac))
-        B_sb = B_sb - (default_target_bit - 1)
-        Y_sb = - (A_sb + B_sb + sb)
+        if frac == 0:
+            var0, _ = op_const(0, graph, var=mx.sym.var)
+            params[var0.attr('name')] = nd.array([0])
+            tmp = mx.sym.broadcast_mul(data, var0)
+            nodes.append(tmp)
+            logger.debug("layer %s skip realize requant with zero", sym.attr('name'))
+            continue
 
-        A = _realize_sim_requant_op(A, A_sb, params, graph)
-        params[B_name] = nd.array([round(frac / (2 ** B_sb))])
-        node = mx.sym.broadcast_mul(A, B)
-        node = _realize_sim_requant_op(node, Y_sb, params, graph)
-        logger.debug("layer %-60s Y_range=%-10s>>%-2s X_range=%-20s>>%-2s " +
-                "scale=%-20s fraction=%-10s>>%-2s[%-20s] shift bit=%-20s",
-                sym.attr('name'), Y_range, Y_sb, A_range, A_sb, scale, frac,
-                B_sb, params[B_name].asscalar(), sb)
+        # Y = Z * frac * (2 ** sb) <=>
+        # Y = (Z -> Int16) * (frac -> Int16) * (2 ** sb_)
+        A_target_bit, B_target_bit = 16, 16
+        A_bit = math.ceil(math.log2(A_range)) + 1
+        B_bit = math.ceil(math.log2(frac)) + 1
+        A_target_bit = min(A_bit, A_target_bit)
+        B_target_bit = min(B_bit, B_target_bit)
+        A_target_bit = 32 - B_target_bit if B_target_bit < 16 else A_target_bit
+        B_target_bit = 32 - A_target_bit if A_target_bit < 16 else B_target_bit
+        A_target_bit = min(A_bit, A_target_bit)
+        B_target_bit = min(B_bit, B_target_bit)
+        A_sb, B_sb = A_bit - A_target_bit, B_bit - B_target_bit
+        Y_sb = (-sb) - A_sb - B_sb
 
+        data = _realize_sim_requant_op(data, A_sb, params, graph, A_target_bit)
+        params[requant_name] = nd.array([round(frac / (2 ** B_sb))])
+        B_range = 2 ** (B_target_bit - 1) - 1
+        params[requant_name] = nd.clip(params[requant_name],
+                a_min=-B_range, a_max=B_range)
+        assert requant_name not in graph
+        requant_sym = mx.sym.var(requant_name, shape=(1,))
+        tmp = mx.sym.broadcast_mul(data, requant_sym)
+        tmp = _realize_sim_requant_op(tmp, Y_sb, params, graph, target_bit=8)
+        nodes.append(tmp)
+
+    for idx, s in enumerate(reversed(scale_shape)):
+        if s == 1:
+            continue
+        assert len(nodes) % s == 0, "nodes: %s, shape: %s" \
+                % (len(nodes), scale_shape)
+        tmp_nodes = []
+        for begin in range(0, len(nodes), s):
+            dim = len(scale_shape)-1-idx
+            tmp = mx.sym.concat(*nodes[begin:begin+s], dim=dim)
+            tmp_nodes.append(tmp)
+        nodes = tmp_nodes
+
+    assert len(nodes) == 1
+    node = nodes[0]
     return node, params
 
 def _simple_sim_scale(sym, params, graph, inputs_ext,
@@ -495,7 +749,8 @@ def sym_calib_sim_quant(symbol, params, inputs_ext, calib_data, ctx):
     topo_visit(symbol, params, get_op=get_mxnet_op,
             logger=logger, inputs_ext=inputs_ext,
             callback=_calib_sym_collect_thresholds,
-            th_dict=th_dict, calib_data=calib_data, ctx=ctx)
+            th_dict=th_dict, calib_data=calib_data,
+            calib_mode='naive', ctx=ctx)
     topo_visit(symbol, params, get_op=get_mxnet_op,
             logger=logger, inputs_ext=inputs_ext,
             callback=_sim_scale, th_dict=th_dict,
@@ -504,15 +759,28 @@ def sym_calib_sim_quant(symbol, params, inputs_ext, calib_data, ctx):
             logger=logger, inputs_ext=inputs_ext,
             callback=_sim_rewrite,
             scale_helper=scale_helper, params_sim=params_sim)
+    sym, params = topo_visit(sym, params, get_op=get_mxnet_op,
+            logger=logger, inputs_ext=inputs_ext,
+            callback=_sim_post_scale)
 
     # realize
     _, params = topo_visit(sym, params, get_op=get_mxnet_op,
-            logger=logger, inputs_ext=inputs_ext,
-            callback=_realize_parameters,
-            target_bits=target_bits, params_sim=params_sim)
+           logger=logger, inputs_ext=inputs_ext,
+           callback=_realize_parameters,
+           target_bits=target_bits, params_sim=params_sim)
     sym, params = topo_visit(sym, params, get_op=get_mxnet_op,
-            logger=logger, inputs_ext=inputs_ext,
-            callback=_sim_realize_requantize_op)
+           logger=logger, inputs_ext=inputs_ext,
+           callback=_sim_realize)
+
+    def _check_int_params(params, arg):
+        param = params[arg]
+        msg = "key:%s value:%s"%(arg, param)
+        flat = param.asnumpy().flatten()
+        assert all(flat >= INT32_MIN) and all(flat <= INT32_MAX), msg
+        assert all(flat.astype('int32').astype(flat.dtype) == flat), msg
+
+    params = examine_parameters(sym, params, inputs_ext,
+           allows=['data_scale'], callback=_check_int_params)
 
     return sym, params, th_dict
 
@@ -554,5 +822,32 @@ def sym_calib_simple_sim_quant(symbol, params, inputs_ext,
 
     params = examine_parameters(sym, params, inputs_ext,
             allows=['data_scale'], callback=_check_int_params)
+
+    return sym, params
+
+def sym_calib_quantize(symbol, params, inputs_ext, calib_data, ctx):
+    logger = logging.getLogger("log.calib.quantize")
+
+    ops = sym_collect_attr(symbol)
+    print (ops)
+
+    th_dict, in_zeros, out_zeros= {}, {}, {}
+    topo_visit(symbol, params, get_op=get_mxnet_op,
+            logger=logger, inputs_ext=inputs_ext,
+            callback=_calib_sym_collect_thresholds,
+            th_dict=th_dict, calib_data=calib_data, ctx=ctx)
+
+    topo_visit(symbol, params, get_op=get_mxnet_op,
+            logger=logger, inputs_ext=inputs_ext,
+            callback=_calib_sym_zero_symmetric,
+            th_dict=th_dict, in_zeros=in_zeros, out_zeros=out_zeros)
+
+    infer_shapes = sym_infer_shape(symbol, params, inputs_ext)
+    indexes = {'index': 0}
+    sym, params = topo_visit(symbol, params, get_op=get_mxnet_op,
+            logger=logger, inputs_ext=inputs_ext,
+            callback=_calib_sym_zero_rewrite,
+            in_zeros=in_zeros, out_zeros=out_zeros,
+            infer_shapes=infer_shapes, idxs=indexes)
 
     return sym, params

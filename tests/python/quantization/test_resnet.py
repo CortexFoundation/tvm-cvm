@@ -264,9 +264,16 @@ def test_sym_nnvm(batch_size=10, iter_num=10):
     logger.info("=== Log Test NNVM ===")
 
     target = "cuda"
-    ctx = tvm.context(target, 1)
+    tvm_ctx = tvm.context(target, 1)
+    mx_ctx = mx.gpu(2)
+    inputs_ext = {
+        'data': {
+            'shape': (batch_size, 3, 224, 224),
+        }
+    }
+    inputs = [mx.sym.var(name) for name in inputs_ext]
+    inputs_shape = {k:v['shape'] for k,v in inputs_ext.items()}
 
-    in_shape = (batch_size, 3, 224, 224)
     data_iter = load_dataset(batch_size)
     def data_iter_func():
         data = data_iter.next()
@@ -275,58 +282,48 @@ def test_sym_nnvm(batch_size=10, iter_num=10):
 
     dump_symbol, dump_params = get_dump_fname("sym.nnvm.compile")
     _, dump_lib = get_dump_fname("nnvm.so")
-    if True or not os.path.exists(dump_symbol):
-        load_symbol_fname, load_params_fname = get_dump_fname("sym.quant")
 
-        params = nd.load(load_params_fname)
-        sym = mx.sym.load(load_symbol_fname)
-        nnvm_sym, _ = nnvm.frontend.from_mxnet(sym)
-        ops = sym_collect_attr(sym)
-        print (ops)
-        exit()
-        # nnvm_sym, params = nnvm_realize(nnvm_sym, params, quant_flag)
-
-        nnvm_graph = nnvm.graph.create(nnvm_sym)
-        save_symbol_file, _ = get_dump_fname("nnvm.realize")
-        with open(save_symbol_file, "w") as fout:
-           fout.write(nnvm_graph.json())
-
-        use_dtype = "float32"
-        for key, value in list(params.items()):
-            params[key] = tvm.nd.array(value.asnumpy().astype(use_dtype), ctx)
-
-        with nnvm.compiler.build_config(opt_level=0): #, add_pass=["PrecomputePrune"]):
-            deploy_graph, lib, params = nnvm.compiler.build(
-                nnvm_sym, target=target, shape={"data": in_shape},
-                params=params, dtype=use_dtype)
-
-        with open(dump_symbol, "w") as fout:
-            fout.write(deploy_graph.json())
-        with open(dump_params, "wb") as fout:
-            param_bytes = nnvm.compiler.save_param_dict(params)
-            fout.write(param_bytes)
-        lib.export_library(dump_lib)
-
-    print ("Load graph from json")
-    with open(dump_symbol) as fout:
-        json_str = fout.read()
-        deploy_graph = nnvm.graph.load_json(json_str)
-    with open(dump_params, "rb") as fread:
-        param_bytes = fread.read()
-        params = nnvm.compiler.load_param_dict(param_bytes)
-    lib = tvm.module.load(dump_lib)
-    inputs_sb = nd.load('./in_sbits')
-
-    module = graph_runtime.create(deploy_graph, lib, ctx)
-    module.load_params(param_bytes)
+    load_symbol_fname, load_params_fname = get_dump_fname("sym.sim.quant")
+    sym, params = mx.sym.load(load_symbol_fname), nd.load(load_params_fname)
+    graph = nn.SymbolBlock(sym, inputs)
+    load_parameters(graph, params, ctx=mx_ctx)
     def graph_func(data):
-        data, _ = sim.nd_quant(data, shift_bits=inputs_sb['data'],
-                target_bit=8)
-        data = tvm.nd.array(data.asnumpy(), ctx)
+        data = sim.load_quant_data(data, 'data', params)
+        return graph.forward(data.as_in_context(mx_ctx))
+
+    nnvm_sym, _ = nnvm.frontend.from_mxnet(sym)
+    nnvm_sym, real_params = nnvm_realize(nnvm_sym, params, inputs_ext)
+
+    nnvm_graph = nnvm.graph.create(nnvm_sym)
+    save_symbol_file, _ = get_dump_fname("nnvm.realize")
+    with open(save_symbol_file, "w") as fout:
+       fout.write(nnvm_graph.json())
+
+    use_dtype = "int32"
+    for key, value in list(real_params.items()):
+        real_params[key] = tvm.nd.array(value.asnumpy().astype(use_dtype), tvm_ctx)
+
+    with nnvm.compiler.build_config(opt_level=0): #, add_pass=["PrecomputePrune"]):
+        deploy_graph, lib, real_params = nnvm.compiler.build(
+            nnvm_sym, target=target, shape=inputs_shape,
+            params=real_params, dtype=use_dtype)
+    with open(dump_symbol, "w") as fout:
+        fout.write(deploy_graph.json())
+    with open(dump_params, "wb") as fout:
+        param_bytes = nnvm.compiler.save_param_dict(real_params)
+        fout.write(param_bytes)
+    lib.export_library(dump_lib)
+
+    module = graph_runtime.create(deploy_graph, lib, tvm_ctx)
+    module.load_params(param_bytes)
+    def nnvm_real(data):
+        data = sim.load_quant_data(data, 'data', params)
+        data = tvm.nd.array(data.asnumpy(), tvm_ctx)
         module.run(data=data.asnumpy())
         return nd.array(module.get_output(0).asnumpy())
 
-    eval_accuracy(graph_func, data_iter_func, iter_num, logger=logger)
+    multi_eval_accuracy(graph_func, data_iter_func, nnvm_real,
+            iter_num=iter_num, logger=logger)
 
 def test_sym_pass(quant_flag, batch_size=10, iter_num=10):
     logger = logging.getLogger("log.test.sym.pass")
@@ -357,7 +354,7 @@ def test_sym_pass(quant_flag, batch_size=10, iter_num=10):
     th_dict = {}
     sim_sym, sim_params, th_dict = calib.sym_calib_sim_quant(sym,
             params, inputs_ext, calib_data, ctx)
-    dump_sym, dump_params = get_dump_fname('sym.prepare')
+    dump_sym, dump_params = get_dump_fname('sym.sim.quant')
     nd.save(dump_params, sim_params)
     with open(dump_sym, 'w') as fout:
         fout.write(sim_sym.tojson())
@@ -370,7 +367,7 @@ def test_sym_pass(quant_flag, batch_size=10, iter_num=10):
 
     qsym, qparams = calib.sym_calib_simple_sim_quant(sym, params, inputs_ext,
            calib_data=calib_data, th_dict=th_dict, ctx=ctx)
-    dump_sym, dump_params = get_dump_fname('sym.quant')
+    dump_sym, dump_params = get_dump_fname('sym.simple.sim.quant')
     nd.save(dump_params, qparams)
     with open(dump_sym, 'w') as fout:
        fout.write(qsym.tojson())
@@ -423,7 +420,7 @@ if __name__ == "__main__":
     # save_data()
 
     # test_nnvm_load(batch_size=16, iter_num=10)
-    test_sym_pass(quant_flag, batch_size=16, iter_num=10)
-    #  test_sym_nnvm(batch_size=100, iter_num=10)
+    # test_sym_pass(quant_flag, batch_size=16, iter_num=10000)
+    test_sym_nnvm(batch_size=100, iter_num=10)
 
 
