@@ -200,12 +200,9 @@ class CvmRuntime : public ModuleNode {
         } else if (key == "flatten_data") {
           param->flatten_data = strtoul(value.c_str(), nullptr, 10);
           bitmask |= 8;
-        } else if (key == "op_attrs"){
-          param->attrs = value;
-          bitmask |= 16;
         }
       }
-      CHECK_EQ(bitmask, 1|2|4|8|16) << "invalid format";
+      CHECK_EQ(bitmask, 1|2|4|8) << "invalid format";
     }
     // JSON Loader
     void Load(dmlc::JSONReader *reader) {

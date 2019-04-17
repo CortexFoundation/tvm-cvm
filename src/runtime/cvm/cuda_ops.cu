@@ -24,7 +24,7 @@ void cuda_elemwise_add(int32_t *a, int32_t *b, int32_t *c, int32_t n, bool debug
     int blockSize = 256;
     int gridSize = (n + blockSize - 1) / blockSize;
     kernel_elemwise_add<<<gridSize, blockSize>>>(dev_a, dev_b, dev_c, n);
-    cudaDeviceSynchronize();
+//    cudaDeviceSynchronize();
     if(debug){
         cudaMemcpy(c, dev_c, size, cudaMemcpyDeviceToHost);
         cudaFree(dev_a);
@@ -177,7 +177,7 @@ void cuda_conv2d(
             dilation,
             groups,
             dev_o, o_n, o_c, o_h, o_w);
-    cudaDeviceSynchronize();
+//    cudaDeviceSynchronize();
 //    clock_t end = clock();
 //    printf("gpu cal time: %d\n", end-start);
     if(debug){
@@ -325,7 +325,7 @@ void cuda_depthwise_conv2d(
             dilation,
             groups,
             dev_o, o_n, o_c, o_h, o_w);
-    cudaDeviceSynchronize();
+    //cudaDeviceSynchronize();
 //    clock_t end = clock();
 //    printf("gpu cal time: %d\n", end-start);
     if(debug){
@@ -454,7 +454,7 @@ void cuda_max_pool(
             padding, 
             stride,
             dev_o, o_n, o_c, o_h, o_w);
-    cudaDeviceSynchronize();
+    //cudaDeviceSynchronize();
 //    clock_t end = clock();
 //    printf("gpu cal time: %ld\n", end-start);
     if(debug){
@@ -532,7 +532,7 @@ void cuda_dense(
     int gw = (n + TILE_WIDTH - 1) / TILE_WIDTH;
     dim3 gDim(gw, gh, 1);
     kernel_dense<<<gDim, bDim>>>(dev_a, dev_b, dev_c, m, k, n, dev_bias, useBias);
-    cudaDeviceSynchronize();
+    //cudaDeviceSynchronize();
     if(debug){
         cudaMemcpy(c, dev_c, s_c, cudaMemcpyDeviceToHost);
         cudaFree(dev_a);
@@ -563,7 +563,7 @@ void cuda_clip(const int32_t *x, int32_t *y, const int32_t n, const int32_t max,
     int threadSize = 256;
     int blockSize = (n + threadSize - 1) / threadSize;
     kernel_clip<<<blockSize, threadSize>>>(dev_x, dev_y, n, max, min);
-    cudaDeviceSynchronize();
+   // cudaDeviceSynchronize();
 
     if(debug){
         cudaMemcpy(y, dev_y, sizeof(int32_t)*n, cudaMemcpyDeviceToHost);
@@ -592,7 +592,7 @@ void cuda_relu(const int32_t *x, int32_t *y, const int32_t n, bool debug){
     int threadSize = 256;
     int blockSize = (n + threadSize - 1) / threadSize;
     kernel_relu<<<blockSize, threadSize>>>(dev_x, dev_y, n);
-    cudaDeviceSynchronize();
+    //cudaDeviceSynchronize();
 
     if(debug){
         cudaMemcpy(y, dev_y, sizeof(int32_t)*n, cudaMemcpyDeviceToHost);
@@ -621,7 +621,7 @@ void cuda_flatten(const int32_t *x, int32_t *y, const int32_t n, bool debug){
     int threadSize = 256;
     int blockSize = (n + threadSize - 1) / threadSize;
     kernel_flatten<<<blockSize, threadSize>>>(dev_x, dev_y, n);
-    cudaDeviceSynchronize();
+    //cudaDeviceSynchronize();
 
     if(debug){
         cudaMemcpy(y, dev_y, sizeof(int32_t)*n, cudaMemcpyDeviceToHost);
@@ -653,7 +653,7 @@ void cuda_broadcast_add(const int32_t *a, const int32_t *b, int32_t* c, const in
     int threadSize = 256;
     int blockSize = (n + threadSize - 1) / threadSize;
     kernel_broadcast_add<<<blockSize, threadSize>>>(dev_a, dev_b, dev_c, n);
-    cudaDeviceSynchronize();
+    //cudaDeviceSynchronize();
 
     if(debug){
         cudaMemcpy(c, dev_c, sizeof(int32_t)*n, cudaMemcpyDeviceToHost);
@@ -685,7 +685,7 @@ void cuda_broadcast_sub(const int32_t *a, const int32_t *b, int32_t* c, const in
     int threadSize = 256;
     int blockSize = (n + threadSize - 1) / threadSize;
     kernel_broadcast_sub<<<blockSize, threadSize>>>(dev_a, dev_b, dev_c, n);
-    cudaDeviceSynchronize();
+    //cudaDeviceSynchronize();
 
     if(debug){
         cudaMemcpy(c, dev_c, sizeof(int32_t)*n, cudaMemcpyDeviceToHost);
@@ -717,7 +717,7 @@ void cuda_broadcast_mul(const int32_t *a, const int32_t *b, int32_t* c, const in
     int threadSize = 256;
     int blockSize = (n + threadSize - 1) / threadSize;
     kernel_broadcast_mul<<<blockSize, threadSize>>>(dev_a, dev_b, dev_c, n);
-    cudaDeviceSynchronize();
+    //cudaDeviceSynchronize();
 
     if(debug){
         cudaMemcpy(c, dev_c, sizeof(int32_t)*n, cudaMemcpyDeviceToHost);
@@ -749,7 +749,7 @@ void cuda_broadcast_div(const int32_t *a, const int32_t *b, int32_t* c, const in
     int threadSize = 256;
     int blockSize = (n + threadSize - 1) / threadSize;
     kernel_broadcast_div<<<blockSize, threadSize>>>(dev_a, dev_b, dev_c, n);
-    cudaDeviceSynchronize();
+    //cudaDeviceSynchronize();
 
     if(debug){
         cudaMemcpy(c, dev_c, sizeof(int32_t)*n, cudaMemcpyDeviceToHost);
@@ -782,7 +782,7 @@ void cuda_broadcast_right_shift(const int32_t *a, const int32_t* b, int32_t* c, 
     int threadSize = 256;
     int blockSize = (n + threadSize - 1) / threadSize;
     kernel_broadcast_right_shift<<<blockSize, threadSize>>>(dev_a, dev_b, dev_c, n);
-    cudaDeviceSynchronize();
+    //cudaDeviceSynchronize();
 
     if(debug){
         cudaMemcpy(c, dev_c, sizeof(int32_t)*n, cudaMemcpyDeviceToHost);
@@ -814,7 +814,7 @@ void cuda_broadcast_left_shift(const int32_t *a, const int32_t *b, int32_t* c, c
     int threadSize = 256;
     int blockSize = (n + threadSize - 1) / threadSize;
     kernel_broadcast_left_shift<<<blockSize, threadSize>>>(dev_a, dev_b, dev_c, n);
-    cudaDeviceSynchronize();
+    //cudaDeviceSynchronize();
 
     if(debug){
         cudaMemcpy(c, dev_c, sizeof(int32_t)*n, cudaMemcpyDeviceToHost);
@@ -864,7 +864,7 @@ void cuda_sum(
     int threadSize = 256;
     int blockSize = (n + threadSize - 1) / threadSize;
     kernel_sum<<<blockSize, threadSize>>>(dev_x, n_batch, channels, h, w, dev_y);
-    cudaDeviceSynchronize();
+    //cudaDeviceSynchronize();
     if(debug){
         cudaMemcpy(y, dev_y, n * sizeof(int32_t), cudaMemcpyDeviceToHost);
         cudaFree(tmp_x);
