@@ -57,46 +57,39 @@ void CvmRuntime::SetupPrecision() {
     } else {
       const uint32_t num_inputs = inode.param.num_inputs;
       const uint32_t num_outputs = inode.param.num_outputs;
-      bool forward_known = true;
       // Forward operator inference.
       iprec.resize(num_inputs, -1);
       for (uint32_t i = 0; i < iprec.size(); ++i) {
         iprec[i] = precision[inode.inputs[i].node_id];
-        if (iprec[i] == -1) forward_known = false;
       }
       oprec.resize(num_outputs, -1);
       oprec[0] = precision[nid];
-      if (oprec[0] == -1) forward_known = false;
       // which raise an error if the op has bit been registered.
       // TODO: pre-check or try-catch is needed.
       auto opname = GetOpName(inode.param.func_name);
       auto op = Op::Get(opname);
       auto finfer = finfer_prec.get(opname);
-      if (!forward_known) {
-        if (finfer != nullptr) {
-          // Call inference function of the operator.
-          try {
-            nnvm::NodeAttrs attrs;
-            attrs.op = op;
-            attrs.name = opname;
-            forward_known = finfer(&iprec, &oprec, nullptr);
-          } catch (const std::exception& e) {
-            throw dmlc::Error(e.what() + std::string(" with ") + opname);
-          }
-        } else {
-          // TODO: Error
-        }
-      }
+			if (finfer != nullptr) {
+				// Call inference function of the operator.
+				try {
+					nnvm::NodeAttrs attrs;
+					attrs.op = op;
+					attrs.name = opname;
+					if (!finfer(&iprec, &oprec, &inode.attrs)) {
+					}
+				} catch (const std::exception& e) {
+					throw dmlc::Error(e.what() + std::string(" with ") + opname);
+				}
+			} else {
+				// TODO: Error
+			}
       // Save to the result map.
-      for (uint32_t i = 0; i < num_inputs; ++i) {
-        if (precision[inode.inputs[i].node_id] == -1) {
-          precision[inode.inputs[i].node_id] = iprec[i];
-        } else {
-          CHECK_EQ(precision[inode.inputs[i].node_id], iprec[i])
+      for (uint32_t i = 0; i < num_inputs; ++i) { 
+          CHECK_GE(iprec[i], precision[inode.inputs[i].node_id])
              << "Check precision failed, "
             << "expected to be " << iprec[i]
             << " but " << precision[inode.inputs[i].node_id];
-        }
+					precision[inode.inputs[i].node_id] = iprec[i];
 			}
       precision[nid] = oprec[0];
     }
@@ -164,9 +157,9 @@ int64_t CvmRuntime::GetOps() {
 			}
 		}	
 	}
-//  for (auto op: ops) {
-//  	std::cout << op << ' ' << opcount[op] << std::endl;
-//  }
+  for (auto op: ops) {
+  	std::cout << op << ' ' << opcount[op] << std::endl;
+  }
 	return ret;
 }
 
