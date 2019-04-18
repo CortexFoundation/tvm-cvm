@@ -45,17 +45,6 @@ void CvmRuntime::SetupAttr() try {
 	std::cout << e.what();
 }
 
-std::string GetOpName(std::string name) {
-	std::string ret = name;
-  for (int i = name.size() - 1; i >= 0; --i) {
-    if (name[i] >= '0' && name[i] <= '9') continue;
-    else if (name[i] == '_') ret = name.substr(0, i);
-    else ret = name.substr(0, i + 1);
-		break;
-  }
-  return ret;
-}
-
 void CvmRuntime::SetupPrecision() {
   std::vector<Node> &idx = nodes_;
   std::vector<int> &precision = attrs_.precision;
@@ -137,7 +126,7 @@ int64_t CvmRuntime::GetOps() {
 		if (inode.op_type == "null") {
 			ret += rshape[nid].Size();
 		} else {
-			auto op = GetOpName(idx[nid].param.func_name);
+			auto op = idx[nid].attrs.op->name;
 			if (opcount.find(op) == opcount.end()) {
 				opcount[op] = 0;
 				ops.push_back(op);
