@@ -9,7 +9,7 @@
 #include <cvm/op_attr_types.h>
 #include <cvm/graph_attr_types.h>
 
-#define CHECK_ATTR_DEBUG
+//#define CHECK_ATTR_DEBUG
 
 #ifdef CHECK_ATTR_DEBUG
 #include <iostream>
@@ -42,7 +42,7 @@ void CvmRuntime::SetupAttr() try {
   std::cout << std::endl;
 #endif
 } catch (dmlc::Error &e) {
-//	std::cout << e.what();
+	std::cout << e.what();
 }
 
 std::string GetOpName(std::string name) {
@@ -82,15 +82,11 @@ void CvmRuntime::SetupPrecision() {
       }
 			CHECK_GE(num_outputs, 1) << "an operator has at least 1 outputs";
 			oprec.resize(num_outputs, -1);
-      auto opname = GetOpName(inode.param.func_name);
-      auto op = Op::Get(opname);
-      auto finfer = finfer_prec.get(opname);
+      auto finfer = finfer_prec.get(inode.attrs.op->name);
 			// Call inference function of the operator.
 			cvm::NodeAttrs attrs;
-			attrs.op = op;
-			attrs.name = opname;
-			if (!finfer(&iprec, &oprec, &inode.attrs)) {
-				throw dmlc::Error(std::string("error with ") + opname);
+			if (!finfer(inode.attrs, &iprec, &oprec)) {
+				throw dmlc::Error(std::string("error with ") + inode.attrs.op->name);
 			}
       // Save to the result map.
       for (uint32_t i = 0; i < num_inputs; ++i) { 
@@ -200,33 +196,32 @@ void CvmRuntime::SetupShape() {
         ishape[i] = rshape[entry_id(inode.inputs[i])];
       }
       oshape.resize(num_outputs, TShape());
+			for (uint32_t i = 0; i < oshape.size(); ++i) {
+				oshape[i] = TShape();
+			}
       // which raise an error if the op has not been registered.
-      auto opname = GetOpName(inode.param.func_name);
-      auto op = cvm::Op::Get(opname);
-      auto finfer = finfer_shape.get(op, nullptr);
+      auto finfer = finfer_shape.get(inode.attrs.op, nullptr);
+			//TODO: flatten op attr unprovided
 			if (finfer != nullptr) {
 				// Call inference function of the operator.
 				try {
-					cvm::NodeAttrs attrs;
-					attrs.op = op;
-					attrs.name = opname;
-					finfer(attrs, &ishape, &oshape);
+					finfer(inode.attrs, &ishape, &oshape);
 				} catch (const std::exception& e) {
-					throw dmlc::Error(e.what() + std::string(" with ") + opname);
+					throw dmlc::Error(e.what() + std::string(" with ") + inode.attrs.op->name);
 				}
 			} else {
-				throw dmlc::Error(std::string("check shape method is undefined with") + opname);			
+				throw dmlc::Error(std::string("check shape method is undefined with") + inode.attrs.op->name);			
 			}
       // Save to the result map.
       for (uint32_t i = 0; i < num_inputs; ++i) {
         CHECK_EQ(ishape[i], rshape[entry_id(inode.inputs[i])])
-					<< "Check shape failed, "
+					<< "Check input shape failed, "
 					<< "expected to be " << ishape[i]
 					<< " but " << rshape[entry_id(inode.inputs[i])];
       }
 			for (uint32_t i = 0; i < num_outputs; ++i) {
 				CHECK_EQ(oshape[i], rshape[entry_id(nid, i)])
-          << "Check shape failed, "
+          << "Check output shape failed, "
           << "expected to be " << oshape[i]
           << " but " << rshape[entry_id(nid, i)];
 			}
@@ -286,25 +281,24 @@ void CvmRuntime::SetupType() {
       const uint32_t num_outputs = inode.param.num_outputs;
       // Forward operator inference.
       itype.resize(num_inputs, -1);
-      for (uint32_t i = 0; i < itype.size(); ++i) {
+      for (uint32_t i = 0; i < num_inputs; ++i) {
         itype[i] = rtype[entry_id(inode.inputs[i])];
       }
       otype.resize(num_outputs, -1);
+			for (uint32_t i = 0; i < num_outputs; ++i) {
+				otype[i] = -1;
+			}
       // which raise an error if the op has bit been registered.
-      auto opname = GetOpName(inode.param.func_name);
-      auto op = cvm::Op::Get(opname);
-      auto finfer = finfer_type.get(op, SameType);
+      auto finfer = finfer_type.get(inode.attrs.op, SameType);
 			if (finfer != nullptr) {
 				try {
 					cvm::NodeAttrs attrs;
-					attrs.op = op;
-					attrs.name = opname;
-					finfer(attrs, &itype, &otype);
+					finfer(inode.attrs, &itype, &otype);
 				} catch (const std::exception& e) {
-					throw dmlc::Error(e.what() + std::string(" with ") + opname);
+					throw dmlc::Error(e.what() + std::string(" with ") + inode.attrs.op->name);
 				}
 			} else {
-				throw dmlc::Error(std::string("check type method is undefined with") + opname);
+				throw dmlc::Error(std::string("check type method is undefined with") + inode.attrs.op->name);
 			}
       // Save to the result map.
       for (uint32_t i = 0; i < num_inputs; ++i) {

@@ -79,7 +79,7 @@ inline bool Pool2DInferShape(const cvm::NodeAttrs& attrs,
     oshape[widx] = ((dshape[widx] + pad_w - param.pool_size[1] +
                     param.strides[1] - 1) / param.strides[1]) + 1;
   }
-  NNVM_ASSIGN_OUTPUT_SHAPE(attrs, *out_shape, 0, oshape);
+	NNVM_ASSIGN_OUTPUT_SHAPE(attrs, *out_shape, 0, oshape);
   return true;
 }
 

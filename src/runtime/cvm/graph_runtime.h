@@ -13,6 +13,9 @@
 #include <dmlc/json.h>
 #include <tvm/runtime/ndarray.h>
 #include <tvm/runtime/packed_func.h>
+#include <cvm/node.h>
+#include <cvm/bind.h>
+#include <cvm/top/nn.h>
 
 #include <memory>
 #include <utility>
@@ -21,6 +24,8 @@
 
 namespace tvm {
 namespace runtime {
+
+using cvm::NodeAttrs;
 
 /*! \brief macro to do C API call */
 #define TVM_CCALL(func)                                            \
@@ -190,7 +195,7 @@ class CvmRuntime : public ModuleNode {
     // inputs
     std::vector<NodeEntry> inputs;
 		// op attr
-		std::unordered_map<std::string, std::string> attrs;
+		NodeAttrs attrs;
 		// control deps
     std::vector<uint32_t> control_deps;
 		// JSON Loader
@@ -243,23 +248,30 @@ class CvmRuntime : public ModuleNode {
       }
       CHECK_EQ(bitmask, 1|2|4) << "invalid format";
     }
+		
+		std::string GetOpName(std::string name) {
+			std::string ret = name;
+			for (int i = name.size() - 1; i >= 0; --i) {
+				if (name[i] >= '0' && name[i] <= '9') continue;
+				else if (name[i] == '_') ret = name.substr(0, i);
+				else ret = name.substr(0, i + 1);
+				break;
+			}
+			return ret;
+		}
+	
+		void LoadOp() {
+			if (op_type == "null") return;
+			attrs.name = GetOpName(param.func_name);
+			attrs.op = cvm::Op::Get(attrs.name);
+		}
 
-	void LoadOpAttr(const std::string& attr_json_) {
-	  std::string attr_json;
-	  for (auto s: attr_json_) {
-		if (s != '\\' && s != ' ' && s != '(' && s != ')')
-		  attr_json += s;
-	  }
-		if (attr_json == "") return;
-	  std::istringstream is(attr_json);
-	  dmlc::JSONReader reader(&is);
-	  std::string key, value;
-      reader.BeginObject();
-      while (reader.NextObjectItem(&key)) {
-        reader.Read(&value);
-		attrs[key] = value;
-      }
-	}
+		void LoadOpAttr(std::string json_) {
+			if (json_ == "") json_ = "{}";
+			auto& binding = cvm::OpParamBinding::instance();
+			if (!binding.has(attrs.name)) return;
+			attrs.parsed = std::move(binding.get(attrs.name, json_));
+		}
   };
   struct GraphAttr {
     size_t storage_num_not_alloctaed{0};
@@ -341,37 +353,50 @@ class CvmRuntime : public ModuleNode {
   };
   // The graph attribute fields.
   void Load(dmlc::JSONReader *reader) {
-      reader->BeginObject();
-      int bitmask = 0;
-      std::string key;
-      while (reader->NextObjectItem(&key)) {
-        if (key == "nodes") {
-          reader->Read(&nodes_);
-          bitmask |= 1;
-        } else if (key == "arg_nodes") {
-          reader->Read(&input_nodes_);
-          bitmask |= 2;
-        } else if (key == "node_row_ptr") {
-          reader->Read(&node_row_ptr_);
-          bitmask |= 4;
-        } else if (key == "heads") {
-          reader->Read(&outputs_);
-          bitmask |= 8;
-        } else if (key == "attrs") {
-          reader->Read(&attrs_);
-          bitmask |= 16;
-        } else if (key == "metadata") {
-          break;
-        } else {
-          LOG(FATAL) << "key " << key << " is not supported";
-        }
-      }
-      CHECK_EQ(bitmask, 1|2|4|8|16) << "invalid format";
-	  CHECK_EQ(nodes_.size(), attrs_.op_attrs.size());
-	  for (auto i = 0; i < nodes_.size(); ++i) {
-		nodes_[i].LoadOpAttr(attrs_.op_attrs[i]);
-	  }
-  }
+		reader->BeginObject();
+		int bitmask = 0;
+		std::string key;
+		while (reader->NextObjectItem(&key)) {
+			if (key == "nodes") {
+				reader->Read(&nodes_);
+				bitmask |= 1;
+			} else if (key == "arg_nodes") {
+				reader->Read(&input_nodes_);
+				bitmask |= 2;
+			} else if (key == "node_row_ptr") {
+				reader->Read(&node_row_ptr_);
+				bitmask |= 4;
+			} else if (key == "heads") {
+				reader->Read(&outputs_);
+				bitmask |= 8;
+			} else if (key == "attrs") {
+				reader->Read(&attrs_);
+				bitmask |= 16;
+			} else if (key == "metadata") {
+				break;
+			} else {
+				LOG(FATAL) << "key " << key << " is not supported";
+			}
+		}
+		CHECK_EQ(bitmask, 1|2|4|8|16) << "invalid format";
+		CHECK_EQ(nodes_.size(), attrs_.op_attrs.size());
+		for (auto i = 0; i < nodes_.size(); ++i) {
+			if (nodes_[i].op_type != "null") {
+				nodes_[i].LoadOp();
+				if (nodes_[i].attrs.op->name == "flatten") {
+					uint64_t size = 1;
+					for (auto x: attrs_.shape[i]) {
+						size *= x;
+					}
+					std::ostringstream size_s;
+					size_s << "{\"shape\":\"(" << size << ")\"}";
+					nodes_[i].LoadOpAttr(size_s.str());
+				} else {
+					nodes_[i].LoadOpAttr(attrs_.op_attrs[i]);
+				}
+			}
+		}
+	}
   /*! \brief Setup the shape, type, and precision */
   void SetupShape();
   void SetupType();
