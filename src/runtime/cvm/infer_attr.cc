@@ -8,8 +8,12 @@
 #include <nnvm/op.h>
 #include <nnvm/op_attr_types.h>
 #include <nnvm/graph_attr_types.h>
+
+#define CHECK_ATTR_DEBUG
+
+#ifdef CHECK_ATTR_DEBUG
 #include <iostream>
-#include <stdio.h>
+#endif
 
 using nnvm::Op;
 using nnvm::TShape;
@@ -17,14 +21,18 @@ using nnvm::TShape;
 namespace tvm {
 namespace runtime {
 
-void CvmRuntime::SetupAttr() {
+void CvmRuntime::SetupAttr() try {
   SetupShape();
   SetupType();
   SetupPrecision();
-  for (auto p:  attrs_.precision) {
+#ifdef CHECK_ATTR_DEBUG
+	for (auto p:  attrs_.precision) {
     std::cout << p << ' ';
   }
   std::cout << std::endl;
+#endif
+} catch (dmlc::Error &e) {
+	std::cout << e.what();
 }
 
 std::string GetOpName(std::string name) {
@@ -60,38 +68,32 @@ void CvmRuntime::SetupPrecision() {
       // Forward operator inference.
       iprec.resize(num_inputs, -1);
       for (uint32_t i = 0; i < iprec.size(); ++i) {
-        iprec[i] = precision[inode.inputs[i].node_id];
+        iprec[i] = precision[entry_id(inode.inputs[i])];
       }
-      oprec.resize(num_outputs, -1);
+			CHECK_GE(num_outputs, 1) << "an operator has at least 1 outputs";
+			oprec.resize(num_outputs, -1);
       oprec[0] = precision[nid];
-      // which raise an error if the op has bit been registered.
-      // TODO: pre-check or try-catch is needed.
       auto opname = GetOpName(inode.param.func_name);
       auto op = Op::Get(opname);
       auto finfer = finfer_prec.get(opname);
-			if (finfer != nullptr) {
-				// Call inference function of the operator.
-				try {
-					nnvm::NodeAttrs attrs;
-					attrs.op = op;
-					attrs.name = opname;
-					if (!finfer(&iprec, &oprec, &inode.attrs)) {
-					}
-				} catch (const std::exception& e) {
-					throw dmlc::Error(e.what() + std::string(" with ") + opname);
-				}
-			} else {
-				// TODO: Error
+			// Call inference function of the operator.
+			nnvm::NodeAttrs attrs;
+			attrs.op = op;
+			attrs.name = opname;
+			if (!finfer(&iprec, &oprec, &inode.attrs)) {
+				throw dmlc::Error(std::string("error with ") + opname);
 			}
       // Save to the result map.
       for (uint32_t i = 0; i < num_inputs; ++i) { 
-          CHECK_GE(iprec[i], precision[inode.inputs[i].node_id])
+          CHECK(iprec[i] <= 32 && iprec[i] >= precision[entry_id(inode.inputs[i])])
              << "Check precision failed, "
-            << "expected to be " << iprec[i]
-            << " but " << precision[inode.inputs[i].node_id];
-					precision[inode.inputs[i].node_id] = iprec[i];
+             << "expected to be at most " << iprec[i]
+             << " but " << precision[entry_id(inode.inputs[i])];
+					precision[entry_id(inode.inputs[i])] = iprec[i];
 			}
-      precision[nid] = oprec[0];
+			for (uint32_t i = 0; i < num_outputs; ++i) {
+				precision[entry_id(nid, i)] = oprec[i];
+			}
     }
   };
 
@@ -157,9 +159,11 @@ int64_t CvmRuntime::GetOps() {
 			}
 		}	
 	}
-  for (auto op: ops) {
+#ifdef CHECK_ATTR_DEBUG
+	for (auto op: ops) {
   	std::cout << op << ' ' << opcount[op] << std::endl;
   }
+#endif
 	return ret;
 }
 
@@ -181,47 +185,42 @@ void CvmRuntime::SetupShape() {
     } else {
       const uint32_t num_inputs = inode.param.num_inputs;
       const uint32_t num_outputs = inode.param.num_outputs;
-      bool forward_known = true;
       // Forward operator inference.
       ishape.resize(num_inputs, TShape());
       for (uint32_t i = 0; i < ishape.size(); ++i) {
-        ishape[i] = rshape[inode.inputs[i].node_id];
-        if (ishape[i].ndim() == 0) forward_known = false;
+        ishape[i] = rshape[entry_id(inode.inputs[i])];
       }
       oshape.resize(num_outputs, TShape());
-      oshape[0] = rshape[nid];
-      if (oshape[0].ndim() == 0) forward_known = false;
       // which raise an error if the op has not been registered.
-      // TODO: pre-check or try-catch is needed.
       auto opname = GetOpName(inode.param.func_name);
       auto op = nnvm::Op::Get(opname);
       auto finfer = finfer_shape.get(op, nullptr);
-      if (!forward_known) {
-        if (finfer != nullptr) {
-          // Call inference function of the operator.
-          try {
-            nnvm::NodeAttrs attrs;
-            attrs.op = op;
-            attrs.name = opname;
-            forward_known = finfer(attrs, &ishape, &oshape);
-          } catch (const std::exception& e) {
-            throw dmlc::Error(e.what() + std::string(" with ") + opname);
-          }
-        } else {
-          // TODO: error
-        }
-      }
+			if (finfer != nullptr) {
+				// Call inference function of the operator.
+				try {
+					nnvm::NodeAttrs attrs;
+					attrs.op = op;
+					attrs.name = opname;
+					finfer(attrs, &ishape, &oshape);
+				} catch (const std::exception& e) {
+					throw dmlc::Error(e.what() + std::string(" with ") + opname);
+				}
+			} else {
+				throw dmlc::Error(std::string("check shape method is undefined with") + opname);			
+			}
       // Save to the result map.
       for (uint32_t i = 0; i < num_inputs; ++i) {
-        CHECK_EQ(ishape[i], rshape[inode.inputs[i].node_id])
-            << "Check shape failed, "
-            << "expected to be " << ishape[i]
-            << " but " << rshape[inode.inputs[i].node_id];
+        CHECK_EQ(ishape[i], rshape[entry_id(inode.inputs[i])])
+					<< "Check shape failed, "
+					<< "expected to be " << ishape[i]
+					<< " but " << rshape[entry_id(inode.inputs[i])];
       }
-      CHECK_EQ(oshape[0], rshape[nid])
+			for (uint32_t i = 0; i < num_outputs; ++i) {
+				CHECK_EQ(oshape[i], rshape[entry_id(nid, i)])
           << "Check shape failed, "
-          << "expected to be " << oshape[0]
-          << " but " << rshape[nid];
+          << "expected to be " << oshape[i]
+          << " but " << rshape[entry_id(nid, i)];
+			}
     }
   };
 
@@ -231,7 +230,7 @@ void CvmRuntime::SetupShape() {
 }
 
 // inference fucntion for same type
-inline bool SameType(const std::vector<int>& attrs,
+inline bool SameType(const nnvm::NodeAttrs attrs,
                      std::vector<int> *iattr,
                      std::vector<int> *oattr) {
   int def_v = -1;
@@ -264,7 +263,8 @@ void CvmRuntime::SetupType() {
   static auto& finfer_type =
       Op::GetAttr<nnvm::FInferNodeEntryAttr<int> >("FInferType");
   // reshape shape vector
-  // Temp space for shape inference.
+
+	// Temp space for shape inference.
   std::vector<int> itype, otype;
 
   // inference step function for nid
@@ -275,47 +275,41 @@ void CvmRuntime::SetupType() {
     } else {
       const uint32_t num_inputs = inode.param.num_inputs;
       const uint32_t num_outputs = inode.param.num_outputs;
-      bool forward_known = true;
       // Forward operator inference.
       itype.resize(num_inputs, -1);
       for (uint32_t i = 0; i < itype.size(); ++i) {
-        itype[i] = rtype[inode.inputs[i].node_id];
-        if (itype[i] == -1) forward_known = false;
+        itype[i] = rtype[entry_id(inode.inputs[i])];
       }
       otype.resize(num_outputs, -1);
-      otype[0] = rtype[nid];
-      if (otype[0] == -1) forward_known = false;
       // which raise an error if the op has bit been registered.
-      // TODO: pre-check or try-catch is needed.
       auto opname = GetOpName(inode.param.func_name);
       auto op = nnvm::Op::Get(opname);
-      auto finfer = finfer_type.get(op, nullptr);
-      if (!forward_known) {
-        if (finfer != nullptr) {
-          // Call inference function of the operator.
-          try {
-            nnvm::NodeAttrs attrs;
-            attrs.op = op;
-            attrs.name = opname;
-            forward_known = finfer(attrs, &itype, &otype);
-          } catch (const std::exception& e) {
-            throw dmlc::Error(e.what() + std::string(" with ") + opname);
-          }
-        } else {
-          // TODO: Error
-        }
-      }
+      auto finfer = finfer_type.get(op, SameType);
+			if (finfer != nullptr) {
+				try {
+					nnvm::NodeAttrs attrs;
+					attrs.op = op;
+					attrs.name = opname;
+					finfer(attrs, &itype, &otype);
+				} catch (const std::exception& e) {
+					throw dmlc::Error(e.what() + std::string(" with ") + opname);
+				}
+			} else {
+				throw dmlc::Error(std::string("check type method is undefined with") + opname);
+			}
       // Save to the result map.
       for (uint32_t i = 0; i < num_inputs; ++i) {
-        CHECK_EQ(itype[i], rtype[inode.inputs[i].node_id])
+        CHECK_EQ(itype[i], rtype[entry_id(inode.inputs[i])])
           << "Check type failed, "
           << "expected to be " << itype[i]
-          << " but " << rtype[inode.inputs[i].node_id];
+          << " but " << rtype[entry_id(inode.inputs[i])];
 			}
-      CHECK_EQ(otype[0], rtype[nid])
-        << "Check type failed, "
-        << "expected to be " << otype[0]
-        << " but " << rtype[nid];
+			for (uint32_t i = 0; i < num_outputs; ++i) {
+				CHECK_EQ(otype[i], rtype[entry_id(nid, i)])
+					<< "Check type failed, "
+					<< "expected to be " << otype[i]
+					<< " but " << rtype[entry_id(nid, i)];
+			}
     }
   };
 

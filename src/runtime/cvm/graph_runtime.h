@@ -189,11 +189,11 @@ class CvmRuntime : public ModuleNode {
     int precision;
     // inputs
     std::vector<NodeEntry> inputs;
-	// op attr
-	std::unordered_map<std::string, std::string> attrs;
-	// control deps
+		// op attr
+		std::unordered_map<std::string, std::string> attrs;
+		// control deps
     std::vector<uint32_t> control_deps;
-	// JSON Loader
+		// JSON Loader
     void LoadAttrs(dmlc::JSONReader *reader, CVMOpParam* param) {
       int bitmask = 0;
       std::string key, value;
