@@ -127,7 +127,6 @@ void conv_cpu_v2(int* x_data, int n_batch, int x_h, int x_w, int in_channels,
         }
     }
 }
-
 void print(int* data, int n, int c, int h, int w){
     for(int in = 0; in < n; in++){
     for(int i = 0; i < c; i++){
@@ -142,12 +141,12 @@ void print(int* data, int n, int c, int h, int w){
 }
 int main(){
     int i_n = 1;
-    int i_c = 64;
-    int i_h = 56;
-    int i_w = 56;
+    int i_c = 1;
+    int i_h = 64;
+    int i_w = 64;
     int f_h = 3;
     int f_w = 3;
-    int o_c = 64;
+    int o_c = 8;
     int padding = 1;
     int stride = 1;
     int o_h = (i_h + 2 * padding - f_h) / stride + 1;
@@ -167,7 +166,7 @@ int main(){
         b_data[i] = 1;
 //    print(input, i_c, i_h, i_w);
     clock_t start = clock();
-    for(int i = 0; i < 10; i++){
+    for(int i = 0; i < 1; i++){
         conv_cpu(input, i_n, i_h, i_w, i_c,
                 filter, f_h, f_w,
                 b_data,
@@ -179,37 +178,37 @@ int main(){
 //    print(output, i_n, o_c, o_h, o_w);
     std::cout << "cpu time: " << end-start << std::endl;
 
-    int *output3 = new int[s_o];
-    clock_t start2 = clock();
-    for(int i = 0; i < 10; i++){
-        conv_cpu_v2(input, i_n, i_h, i_w, i_c,
-                filter, f_h, f_w,
-                b_data,
-                output3, o_h, o_w, o_c,
-                stride, stride,
-                padding);
-    }
-    clock_t end2 = clock();
+//    int *output3 = new int[s_o];
+//    clock_t start2 = clock();
+//    for(int i = 0; i < 10; i++){
+//        conv_cpu_v2(input, i_n, i_h, i_w, i_c,
+//                filter, f_h, f_w,
+//                b_data,
+//                output3, o_h, o_w, o_c,
+//                stride, stride,
+//                padding);
+//    }
+//    clock_t end2 = clock();
 //print(output3, i_n, o_c, o_h, o_w);
-    std::cout << "cpu time: " << end2-start2 << std::endl;
-    int ret = memcmp(output, output3, s_o*sizeof(int32_t));
-    std::cout << (ret == 0 ? "pass" : "failed") << std::endl;
-
-//    int* output2 = new int[s_o];
-//    cuda_conv2d(
-//        input, i_n, i_c, i_h, i_w,
-//        filter, o_c, i_c, f_h, f_w,
-//        b_data,
-//        padding,
-//        stride,
-//        1,
-//        1,
-//        output2, i_n, o_c, o_h, o_w, true);
-//
-//    clock_t gpu_end = clock();
-//    std::cout << "gpu all time: " << gpu_end - end << std::endl;
-////    print(output2, i_n, o_c, o_h, o_w);
-//    int ret = memcmp(output, output2, sizeof(int) * s_o);
+//    std::cout << "cpu time: " << end2-start2 << std::endl;
+//    int ret = memcmp(output, output3, s_o*sizeof(int32_t));
 //    std::cout << (ret == 0 ? "pass" : "failed") << std::endl;
+
+    int* output2 = new int[s_o];
+    cuda_conv2d(
+        input, i_n, i_c, i_h, i_w,
+        filter, o_c, i_c, f_h, f_w,
+        b_data,
+        padding,
+        stride,
+        1,
+        1,
+        output2, i_n, o_c, o_h, o_w, true);
+
+    clock_t gpu_end = clock();
+    std::cout << "gpu all time: " << gpu_end - end << std::endl;
+//    print(output2, i_n, o_c, o_h, o_w);
+    int ret = memcmp(output, output2, sizeof(int) * s_o);
+    std::cout << (ret == 0 ? "pass" : "failed") << std::endl;
     return 0;
 }

@@ -75,7 +75,7 @@ void call_cvm_runtime_gpu(){
 
 int main()
 {
-    tvm::runtime::Module mod_org = tvm::runtime::Module::LoadFromFile("/tmp/mobilenet1_0.params.nnvm.so");///tmp/imagenet_llvm.org.so
+    tvm::runtime::Module mod_org = tvm::runtime::Module::LoadFromFile("/tmp/imagenet_llvm.org.so");///tmp/imagenet_llvm.org.so
     tvm::runtime::Module mod_syslib = (*tvm::runtime::Registry::Get("module._GetSystemLib"))();
 
     for(int in = 0; in < 1; in++){
@@ -91,7 +91,7 @@ int main()
 //    std::cout << "\n";
 
     // parameters in binary
-    std::ifstream params_in("/tmp/mobilenet_nnvm.params", std::ios::binary);
+    std::ifstream params_in("/tmp/imagenet_cuda_cvm.params", std::ios::binary);
     std::string params_data((std::istreambuf_iterator<char>(params_in)), std::istreambuf_iterator<char>());
     params_in.close();
 
@@ -100,7 +100,7 @@ int main()
     params_arr.data = params_data.c_str();
     params_arr.size = params_data.length();
 
-    std::ifstream json_in2("/tmp/mobilenet1_0.json", std::ios::in);
+    std::ifstream json_in2("/tmp/imagenet_llvm.org.json", std::ios::in);
     std::string json_data_org((std::istreambuf_iterator<char>(json_in2)), std::istreambuf_iterator<char>());
     json_in2.close();
     // json graph
@@ -110,17 +110,19 @@ int main()
     int64_t out_shape[2] = {1, 1000, };
     TVMArrayAlloc(out_shape, out_ndim, dtype_code, dtype_bits, dtype_lanes, device_type, device_id, &y1);
 
-    DLTensor* t_gpu_x, *t_gpu_y;
-    TVMArrayAlloc(in_shape, in_ndim, dtype_code, dtype_bits, dtype_lanes, kDLGPU, device_id, &t_gpu_x);
-    TVMArrayAlloc(out_shape, out_ndim, dtype_code, dtype_bits, dtype_lanes, kDLGPU, device_id, &t_gpu_y);
-    TVMStreamHandle stream;
-    TVMStreamCreate(kDLGPU, device_id, &stream);
-    TVMArrayCopyFromTo(x, t_gpu_x, stream);
+//    DLTensor* t_gpu_x, *t_gpu_y;
+//    TVMArrayAlloc(in_shape, in_ndim, dtype_code, dtype_bits, dtype_lanes, kDLGPU, device_id, &t_gpu_x);
+//    TVMArrayAlloc(out_shape, out_ndim, dtype_code, dtype_bits, dtype_lanes, kDLGPU, device_id, &t_gpu_y);
+//    TVMStreamHandle stream;
+//    TVMStreamCreate(kDLGPU, device_id, &stream);
+//    TVMArrayCopyFromTo(x, t_gpu_x, stream);
 
     clock_t start = clock();
-    RunCVM(t_gpu_x, params_arr, json_data_org, mod_org, "graph_runtime", t_gpu_y,(int)kDLGPU);
+    for(int i = 0; i < 1; i++){
+        RunCVM(x, params_arr, json_data_org, mod_org, "graph_runtime", y1,(int)kDLCPU);
+    }
     clock_t end = clock();
-    TVMArrayCopyFromTo(t_gpu_y, y1, stream);
+//    TVMArrayCopyFromTo(t_gpu_y, y1, stream);
     std::cout << "graph runtime : " << end-start << std::endl;
     for(int i = 0; i < 10; i++){
         std::cout << static_cast<int32_t*>(y1->data)[i] << " ";
@@ -128,7 +130,7 @@ int main()
     std::cout << std::endl;
 
 
-    std::ifstream json_in("/tmp/mobilenet_nnvm.json", std::ios::in);
+    std::ifstream json_in("/tmp/imagenet_cuda_cvm.json", std::ios::in);
     std::string json_data((std::istreambuf_iterator<char>(json_in)), std::istreambuf_iterator<char>());
     json_in.close();
 
@@ -147,7 +149,7 @@ int main()
     }
     clock_t cvm_end = clock();
     std::cout << "cvm runtime: " << cvm_end - cvm_start << std::endl;
-    TVMArrayCopyFromTo(gpu_y, y2, stream);
+    TVMArrayCopyFromTo(gpu_y, y2, stream1);
     //TVMArrayFree(y_cpu);
 
     for(int i = 0; i < 10; i++){

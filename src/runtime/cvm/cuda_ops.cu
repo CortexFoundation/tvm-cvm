@@ -33,7 +33,8 @@ void cuda_elemwise_add(int32_t *a, int32_t *b, int32_t *c, int32_t n, bool debug
     }
 }
 
-#define BS 32
+#define BS 16
+#define FS 8
 //template<int F_H, int F_W, int STRIDE>
 __global__ void kernel_conv2d(
         int32_t *input, int32_t i_n, int32_t i_c, int32_t i_h, int32_t i_w,
@@ -53,9 +54,9 @@ __global__ void kernel_conv2d(
     int perBlockYOneImage = (tmp_o_h+BS-1) / BS;
     int perBlockXOneImage = (tmp_o_w+BS-1) / BS;
     int l_o_c = blockIdx.y / perBlockYOneImage;
-    int n = l_o_c / o_c;
+    int n = l_o_c / ((o_c+FS-1)/FS);
     int nsize = n * i_c * i_h * i_w; 
-    int l_f_c = l_o_c % o_c;
+    int l_f_n = l_o_c % ((o_c+FS-1)/FS);
     int l_o_hi = blockIdx.y % perBlockYOneImage;
     int l_o_wi = blockIdx.x % perBlockXOneImage;
     int l_o_h = l_o_hi * BS + l_y;
@@ -71,7 +72,7 @@ __global__ void kernel_conv2d(
     int32_t *shared_i = (int32_t*)share; 
     int32_t *shared_f = &share[sih * siw];
 
-    int32_t sum = 0; 
+    int32_t sum[FS] = {0}; 
     int min_s_y = (l_o_hi+1) * BS <= tmp_o_h ? BS : tmp_o_h%BS;
     int min_s_x = (l_o_wi+1) * BS <= tmp_o_w ? BS : tmp_o_w%BS;
 
@@ -117,13 +118,19 @@ __global__ void kernel_conv2d(
         if(l_y < F_H && l_x < F_W){
             for(int i = l_y; i < F_H; i+= min_s_y)
                 for(int j = l_x; j < F_W; j+=min_s_x)
-                    shared_f[i*F_W + j] = filter[l_f_c * F_H * F_W * f_c + c * F_H * F_W + i * F_W + j];
+                    for(int fc = 0; fc < FS; fc++){
+                        if(l_f_n * FS + fc < o_c)
+                            shared_f[fc * F_H*F_W + i*F_W + j] = filter[(l_f_n*FS+fc) * F_H * F_W * f_c + c * F_H * F_W + i * F_W + j];
+                        else shared_f[fc * F_H * F_W + i * F_W + j] = 0;
+                    }
         }
         __syncthreads();
 
         for(int fy = 0; fy < F_H; fy++){
             for(int fx = 0; fx < F_W; fx++){
-                sum += shared_i[(l_y+fy)*siw + l_x+fx] * shared_f[fy*F_W + fx];
+                for(int fc = 0; fc < FS; fc++){
+                    sum[fc] += shared_i[(l_y+fy)*siw + l_x+fx] * shared_f[fc*F_H*F_W + fy*F_W + fx];
+                }
             }
         } 
         __syncthreads();
@@ -131,8 +138,12 @@ __global__ void kernel_conv2d(
 
     if(l_o_h % stride == 0 && g_x % stride == 0){ //TODO to be optimized
         //int oi = l_o_c * o_h * o_w + l_o_h * o_w + g_x;
-        int oi = l_o_c * o_h * o_w + l_o_h/stride * o_w + g_x/stride;
-        output[oi] = sum + bias[l_o_c];
+        for(int fc = 0; fc < FS; fc++){
+            if(l_f_n*FS + fc < o_c){
+                int oi = n*o_c*o_h*o_w + (l_f_n*FS+fc) * o_h * o_w + l_o_h/stride * o_w + g_x/stride;
+                output[oi] = sum[fc] + bias[l_f_n*FS+fc];
+            }
+        }
     }
 }
 void cuda_conv2d(
@@ -163,11 +174,11 @@ void cuda_conv2d(
     int b_w = BS;
     int tmp_o_h = i_h + 2 * padding - f_h + 1; //for stride > 1 , TODO to be optimized
     int tmp_o_w = i_w + 2 * padding - f_w + 1;
-    int32_t g_h = o_n * o_c * ((tmp_o_h + b_h - 1) / b_h);
+    int32_t g_h = o_n * ((o_c+FS-1)/FS) * ((tmp_o_h + b_h - 1) / b_h);
     int32_t g_w = (tmp_o_w + b_w - 1) / b_w;
     dim3 bDim(b_w, b_h, 1);
     dim3 gDim(g_w, g_h, 1);
-    size_t share_size = (BS + f_h - 1) * (BS + f_w - 1) * sizeof(int32_t) + f_h * f_w * sizeof(int32_t);
+    size_t share_size = (BS + f_h - 1) * (BS + f_w - 1) * sizeof(int32_t) + f_h * f_w * sizeof(int32_t)*FS;
     kernel_conv2d<<<gDim, bDim, share_size>>>(
             dev_i, i_n, i_c, i_h, i_w,
             dev_f, f_n, f_c, f_h, f_w,
