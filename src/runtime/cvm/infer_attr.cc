@@ -22,17 +22,27 @@ namespace tvm {
 namespace runtime {
 
 void CvmRuntime::SetupAttr() try {
-  SetupShape();
-  SetupType();
+
+	SetupShape();
+#ifdef CHECK_ATTR_DEBUG
+	std::cout << "check shape pass" << std::endl;
+#endif
+
+	SetupType();
+#ifdef CHECK_ATTR_DEBUG
+	std::cout << "check type pass" << std::endl;
+#endif
+
   SetupPrecision();
 #ifdef CHECK_ATTR_DEBUG
+	std::cout << "infer precision pass" << std::endl;
 	for (auto p:  attrs_.precision) {
     std::cout << p << ' ';
   }
   std::cout << std::endl;
 #endif
 } catch (dmlc::Error &e) {
-	std::cout << e.what();
+//	std::cout << e.what();
 }
 
 std::string GetOpName(std::string name) {
@@ -72,7 +82,6 @@ void CvmRuntime::SetupPrecision() {
       }
 			CHECK_GE(num_outputs, 1) << "an operator has at least 1 outputs";
 			oprec.resize(num_outputs, -1);
-      oprec[0] = precision[nid];
       auto opname = GetOpName(inode.param.func_name);
       auto op = Op::Get(opname);
       auto finfer = finfer_prec.get(opname);
