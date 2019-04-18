@@ -6,32 +6,31 @@
 #include <tvm/tvm.h>
 #include <tvm/expr.h>
 #include <tvm/packed_func_ext.h>
-#include <nnvm/op.h>
-#include <nnvm/node.h>
-#include <nnvm/layout.h>
-#include <nnvm/op_attr_types.h>
-#include <nnvm/compiler/op_attr_types.h>
-#include <nnvm/top/nn.h>
+#include <cvm/op.h>
+#include <cvm/node.h>
+#include <cvm/layout.h>
+#include <cvm/op_attr_types.h>
+#include <cvm/compiler/op_attr_types.h>
+#include <cvm/top/nn.h>
 #include "nn_common.h"
 #include "../op_common.h"
 #include "../elemwise_op_common.h"
 
-namespace nnvm {
+namespace cvm {
 namespace top {
 
 using tvm::Var;
 using tvm::Expr;
 using tvm::Tensor;
 using tvm::Array;
-using nnvm::compiler::FTVMCompute;
 
 // dense
 DMLC_REGISTER_PARAMETER(DenseParam);
 
-inline bool DenseInferShape(const nnvm::NodeAttrs& attrs,
+inline bool DenseInferShape(const cvm::NodeAttrs& attrs,
                             std::vector<TShape>* in_shape,
                             std::vector<TShape>* out_shape) {
-  const DenseParam& param = nnvm::get<DenseParam>(attrs.parsed);
+  const DenseParam& param = cvm::get<DenseParam>(attrs.parsed);
   if (param.use_bias) {
     CHECK_EQ(in_shape->size(), 3U) << "Input:[data, weight, bias]";
   } else {
@@ -111,6 +110,7 @@ NNVM_REGISTER_ELEMWISE_UNARY_OP(relu)
 })
 .set_support_level(1);
 
+/*
 // dropout
 DMLC_REGISTER_PARAMETER(DropoutParam);
 
@@ -138,14 +138,16 @@ NNVM_REGISTER_OP(dropout)
     return std::vector<std::string>{"output", "mask"};
   })
 .set_support_level(1);
+*/
 
+/*
 // batchnorm
 DMLC_REGISTER_PARAMETER(BatchNormParam);
 
-inline bool BatchNormInferShape(const nnvm::NodeAttrs& attrs,
+inline bool BatchNormInferShape(const cvm::NodeAttrs& attrs,
                                 std::vector<TShape>* in_shape,
                                 std::vector<TShape>* out_shape) {
-  const BatchNormParam& param = nnvm::get<BatchNormParam>(attrs.parsed);
+  const BatchNormParam& param = cvm::get<BatchNormParam>(attrs.parsed);
   CHECK_EQ(in_shape->size(), 5U)
       << "Input:[data, gamma, beta, moving_mean, moving_var]";
   CHECK_EQ(out_shape->size(), 3U);
@@ -168,7 +170,7 @@ inline bool BatchNormCorrectLayout(const NodeAttrs& attrs,
                                    std::vector<Layout> *in_layouts,
                                    const std::vector<Layout> *last_in_layouts,
                                    std::vector<Layout> *out_layouts) {
-  const BatchNormParam& param = nnvm::get<BatchNormParam>(attrs.parsed);
+  const BatchNormParam& param = cvm::get<BatchNormParam>(attrs.parsed);
   CHECK_EQ(in_layouts->size(), 5U);
   CHECK_EQ(last_in_layouts->size(), 5U);
   CHECK_EQ(out_layouts->size(), 3U);
@@ -225,71 +227,9 @@ inline bool BatchNormCorrectLayout(const NodeAttrs& attrs,
   NNVM_ASSIGN_LAYOUT(*out_layouts, 2, param_layout);
   return true;
 }
-
-NNVM_REGISTER_OP(batch_norm)
-.describe(R"(Batch normalization layer (Ioffe and Szegedy, 2014).
-Normalizes the input at each batch, i.e. applies a transformation
-that maintains the mean activation close to 0 and the activation
-standard deviation close to 1.
-
-.. math::
-
-  data\_mean[i] = mean(data[:,i,:,...]) \\
-  data\_var[i] = var(data[:,i,:,...])
-
-Then compute the normalized output, which has the same shape as input, as following:
-
-.. math::
-
-  out[:,i,:,...] = \frac{data[:,i,:,...] - data\_mean[i]}{\sqrt{data\_var[i]+\epsilon}} * gamma[i] + beta[i]
-
-Both *mean* and *var* returns a scalar by treating the input as a vector.
-
-Assume the input has size *k* on axis 1, then both ``gamma`` and ``beta`` have shape *(k,)*.
-
-Besides the inputs and the outputs, this operator accepts two auxiliary
-states, ``moving_mean`` and ``moving_var``, which are *k*-length
-vectors. They are global statistics for the whole dataset, which are updated
-by::
-
-  moving_mean = moving_mean * momentum + data_mean * (1 - momentum)
-  moving_var = moving_var * momentum + data_var * (1 - momentum)
-
-The parameter ``axis`` specifies which axis of the input shape denotes
-the 'channel' (separately normalized groups).  The default is 1.  Specifying -1 sets the channel
-axis to be the last item in the input shape.
-
-.. note::
-    This operator can be optimized away for inference.
-)" NNVM_ADD_FILELINE)
-.add_argument("data", "Tensor", "Input to which dropout will be applied")
-.add_argument("gamma", "Tensor", "The gamma scale factor")
-.add_argument("beta", "Tensor", "The beta offset factor")
-.add_argument("moving_mean", "Tensor", "running mean of input")
-.add_argument("moving_var", "Tensor", "running variance of input")
-.add_arguments(BatchNormParam::__FIELDS__())
-.set_attr_parser(ParamParser<BatchNormParam>)
-.set_attr<FGetAttrDict>("FGetAttrDict", ParamGetAttrDict<BatchNormParam>)
-.set_attr<FCorrectLayout>("FCorrectLayout", BatchNormCorrectLayout)
-.set_num_inputs(5)
-.set_num_outputs(3)
-.set_attr<FInferShape>("FInferShape", BatchNormInferShape)
-.set_attr<FInferType>("FInferType", ElemwiseType<5, 3>)
-.set_attr<FListInputNames>("FListInputNames", [](const NodeAttrs& attrs) {
-    return std::vector<std::string>{"data", "gamma", "beta", "moving_mean", "moving_var"};
-  })
-.set_attr<FListOutputNames>("FListOutputNames", [](const NodeAttrs& attrs) {
-    return std::vector<std::string>{"output", "mean", "var"};
-  })
-.set_attr<FNumVisibleOutputs>("FNumVisibleOutputs", [](const NodeAttrs& attrs) {
-    return 1;
-  })
-.set_attr<FMutateInputs>("FMutateInputs", [](const NodeAttrs& attrs) {
-    return std::vector<uint32_t>{3, 4};
-  })
-.set_support_level(1);
-
+*/
 // softmax
+/*
 DMLC_REGISTER_PARAMETER(SoftmaxParam);
 
 NNVM_REGISTER_OP(softmax)
@@ -332,7 +272,7 @@ NNVM_REGISTER_OP(softmax)
     // grad_x = grad_x broadcast_mul output
     // grad_x = neg grad_x
     // grad_x = grad_x + ograd elemwise_mul output
-    const SoftmaxParam& param = nnvm::get<SoftmaxParam>(n->attrs.parsed);
+    const SoftmaxParam& param = cvm::get<SoftmaxParam>(n->attrs.parsed);
     NodeEntry output =  NodeEntry{n, 0, 0};
     NodeEntry sub0 = MakeNode("elemwise_mul", n->attrs.name + "_grad_sub0", {ograds[0], output});
     NodeEntry sub1 = MakeNode("sum", n->attrs.name + "_grad_sub1", {sub0},
@@ -342,7 +282,8 @@ NNVM_REGISTER_OP(softmax)
       MakeNode("elemwise_sub", n->attrs.name + "_grad", {sub0, sub2})
     };
 });
-
+*/
+/*
 // log_softmax
 NNVM_REGISTER_OP(log_softmax)
 .describe(R"code(Computes log softmax.
@@ -383,7 +324,7 @@ NNVM_REGISTER_OP(log_softmax)
     // grad_x = grad_x elemwise_mul sigma
     // grad_x = neg grad_x
     // grad_x = grad_x + ograd
-    const SoftmaxParam& param = nnvm::get<SoftmaxParam>(n->attrs.parsed);
+    const SoftmaxParam& param = cvm::get<SoftmaxParam>(n->attrs.parsed);
     NodeEntry output =  NodeEntry{n, 0, 0};
     NodeEntry sub0 = MakeNode("sum", n->attrs.name + "_grad_sub0", {ograds[0]},
                               {{"axis", std::to_string(param.axis)}, {"keepdims", "true"}});
@@ -418,7 +359,7 @@ NNVM_REGISTER_OP(leaky_relu)
                   const std::vector<NodeEntry>& ograds) {
     // y = leak_relu(x)
     // grad = indicator(x > 0) + alpha * indicator(x < 0)
-    const LeakyReLUParam& param = nnvm::get<LeakyReLUParam>(n->attrs.parsed);
+    const LeakyReLUParam& param = cvm::get<LeakyReLUParam>(n->attrs.parsed);
     NodeEntry zero = MakeNode("zeros_like", n->attrs.name + "_grad_zero",
                               {n->inputs[0]});
     NodeEntry sub0 = MakeNode("greater", n->attrs.name + "_pos_grad",
@@ -438,10 +379,10 @@ NNVM_REGISTER_OP(leaky_relu)
 // prelu
 DMLC_REGISTER_PARAMETER(PReLUParam);
 
-inline bool PReluInferShape(const nnvm::NodeAttrs &attrs,
+inline bool PReluInferShape(const cvm::NodeAttrs &attrs,
                             std::vector<TShape> *in_shape,
                             std::vector<TShape> *out_shape) {
-  const PReLUParam &param = nnvm::get<PReLUParam>(attrs.parsed);
+  const PReLUParam &param = cvm::get<PReLUParam>(attrs.parsed);
   TShape dshape = in_shape->at(0);
   NNVM_ASSIGN_INPUT_SHAPE(attrs, *in_shape, 0, dshape);
 
@@ -461,7 +402,7 @@ inline bool PReluCorrectLayout(const NodeAttrs& attrs,
                                std::vector<Layout> *in_layouts,
                                const std::vector<Layout> *last_in_layouts,
                                std::vector<Layout> *out_layouts) {
-  const PReLUParam& param = nnvm::get<PReLUParam>(attrs.parsed);
+  const PReLUParam& param = cvm::get<PReLUParam>(attrs.parsed);
   CHECK_EQ(in_layouts->size(), 2U);
   CHECK_EQ(last_in_layouts->size(), 2U);
   CHECK_EQ(out_layouts->size(), 1U);
@@ -502,10 +443,10 @@ where :math:`*` is an channelwise multiplication for each sample in the
 
 DMLC_REGISTER_PARAMETER(PadParam);
 
-inline bool PadInferShape(const nnvm::NodeAttrs& attrs,
+inline bool PadInferShape(const cvm::NodeAttrs& attrs,
                           std::vector<TShape>* in_shape,
                           std::vector<TShape>* out_shape) {
-  const PadParam& param = nnvm::get<PadParam>(attrs.parsed);
+  const PadParam& param = cvm::get<PadParam>(attrs.parsed);
   CHECK_EQ(in_shape->size(), 1U);
   CHECK_EQ(out_shape->size(), 1U);
   TShape dshape = (*in_shape)[0];
@@ -545,7 +486,7 @@ inline bool LayoutTransformInferShape(const NodeAttrs& attrs,
                                       std::vector<TShape>* out_attrs) {
   CHECK_EQ(in_attrs->size(), 1U) << "Input: [data]";
   CHECK_EQ(out_attrs->size(), 1U);
-  const LayoutTransformParam& param = nnvm::get<LayoutTransformParam>(attrs.parsed);
+  const LayoutTransformParam& param = cvm::get<LayoutTransformParam>(attrs.parsed);
   const TShape &dshape = (*in_attrs)[0];
   if (dshape.ndim() == 0) return false;
   const TShape &oshape = ConvertLayout(dshape,
@@ -574,7 +515,7 @@ the input array by output[n, c, h, w, C] = data[n, C*16+c, h, w]
                      std::vector<Layout> *ilayouts,
                      const std::vector<Layout> *last_ilayouts,
                      std::vector<Layout> *olayouts) {
-    const LayoutTransformParam& param = nnvm::get<LayoutTransformParam>(attrs.parsed);
+    const LayoutTransformParam& param = cvm::get<LayoutTransformParam>(attrs.parsed);
     CHECK_EQ(ilayouts->size(), 1U);
     CHECK_EQ(olayouts->size(), 1U);
     NNVM_ASSIGN_LAYOUT(*ilayouts, 0, Layout(param.src_layout));
@@ -585,7 +526,7 @@ the input array by output[n, c, h, w, C] = data[n, C*16+c, h, w]
 
 DMLC_REGISTER_PARAMETER(LRNParam);
 
-inline bool LRNInferShape(const nnvm::NodeAttrs& attrs,
+inline bool LRNInferShape(const cvm::NodeAttrs& attrs,
                           std::vector<TShape>* in_shape,
                           std::vector<TShape>* out_shape) {
   TShape dshape = (*in_shape)[0];
@@ -608,7 +549,7 @@ NNVM_REGISTER_OP(lrn)
 
 DMLC_REGISTER_PARAMETER(L2NormalizeParam);
 
-inline bool L2NormalizeInferShape(const nnvm::NodeAttrs& attrs,
+inline bool L2NormalizeInferShape(const cvm::NodeAttrs& attrs,
                                   std::vector<TShape>* in_shape,
                                   std::vector<TShape>* out_shape) {
   TShape dshape = (*in_shape)[0];
@@ -629,6 +570,6 @@ NNVM_REGISTER_OP(l2_normalize)
 .set_attr<FInferType>("FInferType", ElemwiseType<1, 1>)
 .set_attr<FCorrectLayout>("FCorrectLayout", ElemwiseArbitraryLayout<1, 1>)
 .set_support_level(1);
-
+*/
 }  // namespace top
-}  // namespace nnvm
+}  // namespace cvm

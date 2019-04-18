@@ -3,25 +3,25 @@
  * \file matrix_op.cc
  * \brief Matrix operators
  */
-#include <nnvm/op.h>
-#include <nnvm/node.h>
-#include <nnvm/op_attr_types.h>
-#include <nnvm/compiler/op_attr_types.h>
-#include <nnvm/top/tensor.h>
+#include <cvm/op.h>
+#include <cvm/node.h>
+#include <cvm/op_attr_types.h>
+#include <cvm/compiler/op_attr_types.h>
+#include <cvm/top/tensor.h>
 #include "../op_common.h"
 #include "../elemwise_op_common.h"
 
-namespace nnvm {
+namespace cvm {
 namespace top {
 
-using namespace nnvm::compiler;
+using namespace cvm::compiler;
 
 DMLC_REGISTER_PARAMETER(MatMulParam);
 
-inline bool DotShape(const nnvm::NodeAttrs& attrs,
+inline bool DotShape(const cvm::NodeAttrs& attrs,
                      std::vector<TShape> *in_attrs,
                      std::vector<TShape> *out_attrs) {
-  const MatMulParam& param = nnvm::get<MatMulParam>(attrs.parsed);
+  const MatMulParam& param = cvm::get<MatMulParam>(attrs.parsed);
   CHECK_EQ(in_attrs->size(), 2U);
   CHECK_EQ(out_attrs->size(), 1U);
   TShape lshape = (*in_attrs)[0];
@@ -48,7 +48,7 @@ inline bool DotCorrectLayout(const NodeAttrs& attrs,
                              std::vector<Layout> *ilayouts,
                              const std::vector<Layout> *last_ilayouts,
                              std::vector<Layout> *olayouts) {
-  const MatMulParam& param = nnvm::get<MatMulParam>(attrs.parsed);
+  const MatMulParam& param = cvm::get<MatMulParam>(attrs.parsed);
   CHECK_EQ(ilayouts->size(), 2U);
   CHECK_EQ(olayouts->size(), 1U);
   const Layout& lhs = last_ilayouts->at(0).defined() ? last_ilayouts->at(0)
@@ -98,4 +98,4 @@ NNVM_REGISTER_OP(matmul)
 .set_attr<FCorrectLayout>("FCorrectLayout", DotCorrectLayout);
 
 }  // namespace top
-}  // namespace nnvm
+}  // namespace cvm

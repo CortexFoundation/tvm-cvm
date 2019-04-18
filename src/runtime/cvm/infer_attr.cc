@@ -5,9 +5,9 @@
  */
 #include "graph_runtime.h"
 #include "infer_precision.h"
-#include <nnvm/op.h>
-#include <nnvm/op_attr_types.h>
-#include <nnvm/graph_attr_types.h>
+#include <cvm/op.h>
+#include <cvm/op_attr_types.h>
+#include <cvm/graph_attr_types.h>
 
 #define CHECK_ATTR_DEBUG
 
@@ -15,8 +15,8 @@
 #include <iostream>
 #endif
 
-using nnvm::Op;
-using nnvm::TShape;
+using cvm::Op;
+using cvm::TShape;
 
 namespace tvm {
 namespace runtime {
@@ -86,7 +86,7 @@ void CvmRuntime::SetupPrecision() {
       auto op = Op::Get(opname);
       auto finfer = finfer_prec.get(opname);
 			// Call inference function of the operator.
-			nnvm::NodeAttrs attrs;
+			cvm::NodeAttrs attrs;
 			attrs.op = op;
 			attrs.name = opname;
 			if (!finfer(&iprec, &oprec, &inode.attrs)) {
@@ -180,7 +180,7 @@ void CvmRuntime::SetupShape() {
   auto &idx = nodes_;
   const auto rshape = GetTShapeArray(attrs_.shape);
   static auto& finfer_shape =
-      Op::GetAttr<nnvm::FInferNodeEntryAttr<TShape> >("FInferShape");
+      Op::GetAttr<cvm::FInferNodeEntryAttr<TShape> >("FInferShape");
   // reshape shape vector
   // Temp space for shape inference.
   std::vector<TShape> ishape, oshape;
@@ -202,12 +202,12 @@ void CvmRuntime::SetupShape() {
       oshape.resize(num_outputs, TShape());
       // which raise an error if the op has not been registered.
       auto opname = GetOpName(inode.param.func_name);
-      auto op = nnvm::Op::Get(opname);
+      auto op = cvm::Op::Get(opname);
       auto finfer = finfer_shape.get(op, nullptr);
 			if (finfer != nullptr) {
 				// Call inference function of the operator.
 				try {
-					nnvm::NodeAttrs attrs;
+					cvm::NodeAttrs attrs;
 					attrs.op = op;
 					attrs.name = opname;
 					finfer(attrs, &ishape, &oshape);
@@ -239,7 +239,7 @@ void CvmRuntime::SetupShape() {
 }
 
 // inference fucntion for same type
-inline bool SameType(const nnvm::NodeAttrs attrs,
+inline bool SameType(const cvm::NodeAttrs attrs,
                      std::vector<int> *iattr,
                      std::vector<int> *oattr) {
   int def_v = -1;
@@ -270,7 +270,7 @@ void CvmRuntime::SetupType() {
   std::vector<int> rtype;
   rtype.resize(nodes_.size(), 4);
   static auto& finfer_type =
-      Op::GetAttr<nnvm::FInferNodeEntryAttr<int> >("FInferType");
+      Op::GetAttr<cvm::FInferNodeEntryAttr<int> >("FInferType");
   // reshape shape vector
 
 	// Temp space for shape inference.
@@ -292,11 +292,11 @@ void CvmRuntime::SetupType() {
       otype.resize(num_outputs, -1);
       // which raise an error if the op has bit been registered.
       auto opname = GetOpName(inode.param.func_name);
-      auto op = nnvm::Op::Get(opname);
+      auto op = cvm::Op::Get(opname);
       auto finfer = finfer_type.get(op, SameType);
 			if (finfer != nullptr) {
 				try {
-					nnvm::NodeAttrs attrs;
+					cvm::NodeAttrs attrs;
 					attrs.op = op;
 					attrs.name = opname;
 					finfer(attrs, &itype, &otype);

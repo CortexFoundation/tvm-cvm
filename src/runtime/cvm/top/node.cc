@@ -3,9 +3,9 @@
  * \file node.cc
  * \brief Graph node data structure.
  */
-#include <nnvm/node.h>
+#include <cvm/node.h>
 
-namespace nnvm {
+namespace cvm {
 
 Node::~Node() {
   if (inputs.size() != 0) {
@@ -37,4 +37,4 @@ Node::~Node() {
   }
 }
 
-}  // namespace nnvm
+}  // namespace cvm

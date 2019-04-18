@@ -4,28 +4,28 @@
  * \file pooling.cc
  * \brief Property def of pooling operators.
  */
-#include <nnvm/op.h>
-#include <nnvm/node.h>
-#include <nnvm/op_attr_types.h>
-#include <nnvm/compiler/op_attr_types.h>
-#include <nnvm/compiler/util.h>
-#include <nnvm/top/nn.h>
+#include <cvm/op.h>
+#include <cvm/node.h>
+#include <cvm/op_attr_types.h>
+#include <cvm/compiler/op_attr_types.h>
+#include <cvm/compiler/util.h>
+#include <cvm/top/nn.h>
 #include "nn_common.h"
 #include "../op_common.h"
 #include "../elemwise_op_common.h"
 
-namespace nnvm {
+namespace cvm {
 namespace top {
 using namespace tvm;
-using namespace nnvm::compiler;
+using namespace cvm::compiler;
 
 DMLC_REGISTER_PARAMETER(MaxPool2DParam);
 
 template <typename T>
-inline bool Pool2DInferShape(const nnvm::NodeAttrs& attrs,
+inline bool Pool2DInferShape(const cvm::NodeAttrs& attrs,
                              std::vector<TShape>* in_shape,
                              std::vector<TShape>* out_shape) {
-  const T& param = nnvm::get<T>(attrs.parsed);
+  const T& param = cvm::get<T>(attrs.parsed);
   CHECK_EQ(in_shape->size(), 1U);
   CHECK_EQ(out_shape->size(), 1U);
 
@@ -88,7 +88,7 @@ inline bool Pool2DCorrectLayout(const NodeAttrs& attrs,
                                 std::vector<Layout> *ilayouts,
                                 const std::vector<Layout> *last_ilayouts,
                                 std::vector<Layout> *olayouts) {
-  const T &param = nnvm::get<T>(attrs.parsed);
+  const T &param = cvm::get<T>(attrs.parsed);
   CHECK_EQ(ilayouts->size(), 1);
   CHECK_EQ(last_ilayouts->size(), 1);
   CHECK_EQ(olayouts->size(), 1);
@@ -169,48 +169,14 @@ NNVM_REGISTER_OP(_max_pool2d_grad)
 .set_attr<FInferType>("FInferType", ElemwiseType<3, 1>)
 .set_attr<TIsBackward>("TIsBackward", true);
 
-DMLC_REGISTER_PARAMETER(AvgPool2DParam);
-
-NNVM_REGISTER_OP(avg_pool2d)
-.describe(R"code(Average pooling operation for one dimensional data.
-
-- **data**: This depends on the `layout` parameter. Input is 4D array of shape
-            (batch_size, channels, height, width) if `layout` is `NCHW`.
-- **out**: This depends on the `layout` parameter. Output is 4D array of shape
-           (batch_size, channels, out_height, out_width)  if `layout` is `NCHW`.
-           out_height and out_width are calculated as::
-
-               out_height = floor((height+padding[0]+padding[2]-pool_size[0])/strides[0])+1
-               out_width = floor((width+padding[1]+padding[3]-pool_size[1])/strides[1])+1
-
-           where padding will be an expanded array based on number of values passed as::
-               one int : all sides same padding used.
-               two int : bottom, right use same as top and left.
-               four int: padding width in the order of (top, left, bottom, right).
-
-           When `ceil_mode` is `True`, ceil will be used instead of floor in this
-           equation.
-
-)code" NNVM_ADD_FILELINE)
-.add_argument("data", "4D Tensor", "Input data.")
-.add_arguments(AvgPool2DParam::__FIELDS__())
-.set_attr_parser(ParamParser<AvgPool2DParam>)
-.set_attr<FGetAttrDict>("FGetAttrDict", ParamGetAttrDict<AvgPool2DParam>)
-.set_attr<FInferShape>("FInferShape", Pool2DInferShape<AvgPool2DParam>)
-.set_attr<FInferType>("FInferType", ElemwiseType<1, 1>)
-.set_attr<FCorrectLayout>("FCorrectLayout", Pool2DCorrectLayout<AvgPool2DParam>)
-.set_num_outputs(1)
-.set_num_inputs(1)
-.set_support_level(2);
-
-
+/*
 DMLC_REGISTER_PARAMETER(GlobalPool2DParam);
 
-inline bool GlobalPool2DInferShape(const nnvm::NodeAttrs& attrs,
+inline bool GlobalPool2DInferShape(const cvm::NodeAttrs& attrs,
                                    std::vector<TShape>* in_shape,
                                    std::vector<TShape>* out_shape) {
   static const Layout kNCHW("NCHW");
-  const GlobalPool2DParam& param = nnvm::get<GlobalPool2DParam>(attrs.parsed);
+  const GlobalPool2DParam& param = cvm::get<GlobalPool2DParam>(attrs.parsed);
   CHECK_EQ(in_shape->size(), 1U);
   CHECK_EQ(out_shape->size(), 1U);
 
@@ -239,7 +205,7 @@ inline bool GlobalPool2DCorrectLayout(const NodeAttrs& attrs,
                                       std::vector<Layout> *ilayouts,
                                       const std::vector<Layout> *last_ilayouts,
                                       std::vector<Layout> *olayouts) {
-  const GlobalPool2DParam &param = nnvm::get<GlobalPool2DParam>(attrs.parsed);
+  const GlobalPool2DParam &param = cvm::get<GlobalPool2DParam>(attrs.parsed);
   CHECK_EQ(ilayouts->size(), 1);
   CHECK_EQ(last_ilayouts->size(), 1);
   CHECK_EQ(olayouts->size(), 1);
@@ -265,7 +231,8 @@ inline bool GlobalPool2DCorrectLayout(const NodeAttrs& attrs,
 
   return true;
 }
-
+*/
+/*
 NNVM_REGISTER_OP(global_max_pool2d)
 .describe(R"code(Global max pooling operation for 2D data.
 
@@ -285,27 +252,6 @@ NNVM_REGISTER_OP(global_max_pool2d)
 .set_num_outputs(1)
 .set_num_inputs(1)
 .set_support_level(2);
-
-
-NNVM_REGISTER_OP(global_avg_pool2d)
-.describe(R"code(Global average pooling operation for 2D data.
-
-- **data**: This depends on the `layout` parameter. Input is 4D array of shape
-            (batch_size, channels, height, width) if `layout` is `NCHW`.
-- **out**: This depends on the `layout` parameter. Output is 4D array of shape
-           (batch_size, channels, 1, 1)  if `layout` is `NCHW`.
-
-)code" NNVM_ADD_FILELINE)
-.add_argument("data", "4D Tensor", "Input data.")
-.add_arguments(GlobalPool2DParam::__FIELDS__())
-.set_attr_parser(ParamParser<GlobalPool2DParam>)
-.set_attr<FGetAttrDict>("FGetAttrDict", ParamGetAttrDict<GlobalPool2DParam>)
-.set_attr<FInferShape>("FInferShape", GlobalPool2DInferShape)
-.set_attr<FInferType>("FInferType", ElemwiseType<1, 1>)
-.set_attr<FCorrectLayout>("FCorrectLayout", GlobalPool2DCorrectLayout)
-.set_num_outputs(1)
-.set_num_inputs(1)
-.set_support_level(2);
-
+*/
 }  // namespace top
-}  // namespace nnvm
+}  // namespace cvm

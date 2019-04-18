@@ -8,15 +8,15 @@
 
 #include <dmlc/logging.h>
 #include <dmlc/parameter.h>
-#include <nnvm/top/tensor.h>
-#include <nnvm/node.h>
+#include <cvm/top/tensor.h>
+#include <cvm/node.h>
 #include <string>
 #include <vector>
 #include <utility>
 #include <unordered_map>
 #include <unordered_set>
 
-namespace nnvm {
+namespace cvm {
 namespace top {
 /*!
  * \brief Parse keyword arguments as PType arguments and save to parsed
@@ -24,7 +24,7 @@ namespace top {
  * \param attrs The attributes.
  */
 template<typename PType>
-inline void ParamParser(nnvm::NodeAttrs* attrs) {
+inline void ParamParser(cvm::NodeAttrs* attrs) {
   PType param;
   try {
     param.Init(attrs->dict);
@@ -49,9 +49,9 @@ inline void ParamParser(nnvm::NodeAttrs* attrs) {
  */
 template<typename PType>
 inline std::unordered_map<std::string, std::string>
-ParamGetAttrDict(const nnvm::NodeAttrs& attrs) {
+ParamGetAttrDict(const cvm::NodeAttrs& attrs) {
   std::unordered_map<std::string, std::string> dict = attrs.dict;
-  nnvm::get<PType>(attrs.parsed).UpdateDict(&dict);
+  cvm::get<PType>(attrs.parsed).UpdateDict(&dict);
   return dict;
 }
 
@@ -313,7 +313,7 @@ inline std::vector<NodeEntry> MakeGradNode(
   std::vector<NodeEntry> inputs,
   std::unordered_map<std::string, std::string> attr = {{}}) {
   NodePtr p = Node::Create();
-  p->attrs.op = nnvm::Op::Get(op_name);
+  p->attrs.op = cvm::Op::Get(op_name);
   p->attrs.name = n->attrs.name + "_grad";
   p->inputs = std::move(inputs);
   p->attrs.dict = std::move(attr);
@@ -329,6 +329,6 @@ inline std::vector<NodeEntry> MakeGradNode(
 
 
 }  // namespace top
-}  // namespace nnvm
+}  // namespace cvm
 
 #endif  // NNVM_TOP_OP_COMMON_H_

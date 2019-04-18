@@ -6,22 +6,22 @@
 #ifndef NNVM_TOP_ELEMWISE_OP_COMMON_H_
 #define NNVM_TOP_ELEMWISE_OP_COMMON_H_
 
-#include <nnvm/layout.h>
-#include <nnvm/top/nn.h>
+#include <cvm/layout.h>
+#include <cvm/top/nn.h>
 #include <string>
 #include <vector>
 #include <utility>
 #include <functional>
 #include "op_common.h"
 
-namespace nnvm {
+namespace cvm {
 namespace top {
 
 template<typename AttrType, bool (*is_none)(const AttrType&),
          bool (*assign)(AttrType*, const AttrType&), bool reverse_infer,
          std::string (*attr_string)(const AttrType&),
          int n_in = -1, int n_out = -1>
-inline bool ElemwiseAttr(const nnvm::NodeAttrs& attrs,
+inline bool ElemwiseAttr(const cvm::NodeAttrs& attrs,
                          std::vector<AttrType> *in_attrs,
                          std::vector<AttrType> *out_attrs,
                          const AttrType& none) {
@@ -317,11 +317,11 @@ inline bool ElemwiseBinaryKeepLeftLayout(const NodeAttrs& attrs,
   .set_attr_parser(ParamParser<ElementWiseReduceParam>)             \
   .set_attr<FGetAttrDict>("FGetAttrDict",                           \
     ParamGetAttrDict<ElementWiseReduceParam>)                       \
-  .set_attr<nnvm::FInferShape>("FInferShape",                       \
+  .set_attr<cvm::FInferShape>("FInferShape",                       \
     ElementWiseReduceShape)                                         \
   .set_attr<FCorrectLayout>("FCorrectLayout",                       \
     ElemwiseFixedLayoutCopyToOut<-1, 1>)                             \
-  .set_attr<nnvm::FInferType>("FInferType", ElementWiseReduceType)  \
+  .set_attr<cvm::FInferType>("FInferType", ElementWiseReduceType)  \
   .add_argument("args", "Symbol[]", "Positional input arguments")
 
 
@@ -347,5 +347,5 @@ inline bool ElemwiseBinaryKeepLeftLayout(const NodeAttrs& attrs,
 
 
 }  // namespace top
-}  // namespace nnvm
+}  // namespace cvm
 #endif  // NNVM_TOP_ELEMWISE_OP_COMMON_H_

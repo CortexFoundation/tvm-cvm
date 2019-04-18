@@ -3,18 +3,18 @@
  * \file broadcast.cc
  * \brief broadcast operator.
  */
-#include <nnvm/op.h>
-#include <nnvm/op_attr_types.h>
-#include <nnvm/compiler/op_attr_types.h>
-#include <nnvm/compiler/util.h>
-#include <nnvm/top/tensor.h>
-#include <nnvm/top/nn.h>
+#include <cvm/op.h>
+#include <cvm/op_attr_types.h>
+#include <cvm/compiler/op_attr_types.h>
+#include <cvm/compiler/util.h>
+#include <cvm/top/tensor.h>
+#include <cvm/top/nn.h>
 #include "../op_common.h"
 #include "../elemwise_op_common.h"
 
-namespace nnvm {
+namespace cvm {
 namespace top {
-using namespace nnvm::compiler;
+using namespace cvm::compiler;
 
 // broadcast_to
 DMLC_REGISTER_PARAMETER(BroadcastToParam);
@@ -27,7 +27,7 @@ inline bool BroadcastToInferShape(const NodeAttrs& attrs,
   const TShape& ishape = (*in_attrs)[0];
   if (ishape.ndim() == 0) return false;
 
-  const BroadcastToParam& param = nnvm::get<BroadcastToParam>(attrs.parsed);
+  const BroadcastToParam& param = cvm::get<BroadcastToParam>(attrs.parsed);
   CHECK_EQ(ishape.ndim(), param.shape.ndim())
       << "Operand of shape " << ishape
       << " cannot be broadcasted to " << param.shape;
@@ -76,7 +76,7 @@ So with `shape=(2,0)`, we will obtain the same result as in the above example.
 .set_support_level(4);
 
 // binary broadcast op
-inline bool BinaryBroadcastShape(const nnvm::NodeAttrs& attrs,
+inline bool BinaryBroadcastShape(const cvm::NodeAttrs& attrs,
                                  std::vector<TShape>* in_attrs,
                                  std::vector<TShape>* out_attrs) {
   CHECK_EQ(in_attrs->size(), 2U);
@@ -478,4 +478,4 @@ Example::
 )code" NNVM_ADD_FILELINE);
 
 }  // namespace top
-}  // namespace nnvm
+}  // namespace cvm

@@ -3,19 +3,19 @@
  * \file reduce.cc
  * \brief reduce operator.
  */
-#include <nnvm/op.h>
-#include <nnvm/node.h>
-#include <nnvm/op_attr_types.h>
-#include <nnvm/compiler/op_attr_types.h>
-#include <nnvm/compiler/util.h>
-#include <nnvm/top/tensor.h>
+#include <cvm/op.h>
+#include <cvm/node.h>
+#include <cvm/op_attr_types.h>
+#include <cvm/compiler/op_attr_types.h>
+#include <cvm/compiler/util.h>
+#include <cvm/top/tensor.h>
 #include <numeric>
 #include "../op_common.h"
 #include "../elemwise_op_common.h"
 
-namespace nnvm {
+namespace cvm {
 namespace top {
-using namespace nnvm::compiler;
+using namespace cvm::compiler;
 
 
 // reduce
@@ -85,13 +85,13 @@ inline TShape ReduceShapeImpl(const TShape& ishape,
   return oshape;
 }
 
-inline bool ReduceShape(const nnvm::NodeAttrs& attrs,
+inline bool ReduceShape(const cvm::NodeAttrs& attrs,
                         std::vector<TShape>* in_attrs,
                         std::vector<TShape>* out_attrs) {
   CHECK_EQ(in_attrs->size(), 1U);
   CHECK_EQ(out_attrs->size(), 1U);
   if ((*in_attrs)[0].ndim() == 0) return false;
-  const ReduceParam& param = nnvm::get<ReduceParam>(attrs.parsed);
+  const ReduceParam& param = cvm::get<ReduceParam>(attrs.parsed);
   NNVM_ASSIGN_OUTPUT_SHAPE(
       attrs, *out_attrs, 0,
       ReduceShapeImpl((*in_attrs)[0], param.axis,
@@ -99,7 +99,7 @@ inline bool ReduceShape(const nnvm::NodeAttrs& attrs,
   return true;
 }
 
-inline bool CollapseShape(const nnvm::NodeAttrs& attrs,
+inline bool CollapseShape(const cvm::NodeAttrs& attrs,
                           std::vector<TShape>* in_attrs,
                           std::vector<TShape>* out_attrs) {
   CHECK_EQ(in_attrs->size(), 2U);
@@ -110,7 +110,7 @@ inline bool CollapseShape(const nnvm::NodeAttrs& attrs,
 }
 
 template<typename PType>
-inline void AxesParamParser(nnvm::NodeAttrs* attrs) {
+inline void AxesParamParser(cvm::NodeAttrs* attrs) {
   PType param;
   param.Init(attrs->dict);
   std::sort(&param.axis[0], &param.axis[param.axis.ndim()]);
@@ -176,7 +176,7 @@ inline bool InferFixedType(const NodeAttrs& attrs,
                           std::vector<int>* out_attrs) {
   CHECK_EQ(in_attrs->size(), 1U);
   CHECK_EQ(out_attrs->size(), 1U);
-  const ReduceParam& param = nnvm::get<ReduceParam>(attrs.parsed);
+  const ReduceParam& param = cvm::get<ReduceParam>(attrs.parsed);
   NNVM_ASSIGN_OUTPUT_TYPE(attrs, *out_attrs, 0, param.dtype);
   return true;
 }
@@ -239,4 +239,4 @@ Example::
 
 
 }  // namespace top
-}  // namespace nnvm
+}  // namespace cvm

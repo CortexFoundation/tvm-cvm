@@ -8,14 +8,14 @@
 
 #include <dmlc/logging.h>
 #include <dmlc/parameter.h>
-#include <nnvm/layout.h>
-#include <nnvm/top/nn.h>
+#include <cvm/layout.h>
+#include <cvm/top/nn.h>
 #include <string>
 #include <vector>
 #include <utility>
 #include <algorithm>
 
-namespace nnvm {
+namespace cvm {
 namespace top {
 
 template<typename ParamType>
@@ -26,7 +26,7 @@ inline uint32_t UseBiasNumInputs(const NodeAttrs& attrs) {
 
 template<typename ParamType>
 inline std::vector<std::string> UseBiasListInputNames(const NodeAttrs& attrs) {
-  const ParamType& param = nnvm::get<ParamType>(attrs.parsed);
+  const ParamType& param = cvm::get<ParamType>(attrs.parsed);
   if (param.use_bias) {
     return {"data", "weight", "bias"};
   } else {
@@ -87,6 +87,6 @@ inline TShape ConvertLayout(TShape src, const Layout& src_layout, const Layout& 
 }
 
 }  // namespace top
-}  // namespace nnvm
+}  // namespace cvm
 
 #endif  // NNVM_TOP_NN_NN_COMMON_H_

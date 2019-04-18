@@ -3,18 +3,18 @@
  * \file transform.cc
  * \brief Injective transformation of shape or type.
  */
-#include <nnvm/op.h>
-#include <nnvm/node.h>
-#include <nnvm/op_attr_types.h>
-#include <nnvm/compiler/op_attr_types.h>
-#include <nnvm/compiler/util.h>
-#include <nnvm/top/tensor.h>
+#include <cvm/op.h>
+#include <cvm/node.h>
+#include <cvm/op_attr_types.h>
+#include <cvm/compiler/op_attr_types.h>
+#include <cvm/compiler/util.h>
+#include <cvm/top/tensor.h>
 #include <cctype>
 #include <sstream>
 #include "../op_common.h"
 #include "../elemwise_op_common.h"
 
-namespace nnvm {
+namespace cvm {
 namespace top {
 using tvm::Array;
 // flatten
@@ -70,7 +70,7 @@ DMLC_REGISTER_PARAMETER(ConcatenateParam);
 inline bool ConcatenateInferShape(const NodeAttrs& attrs,
                                   std::vector<TShape>* in_shape,
                                   std::vector<TShape>* out_shape) {
-  const ConcatenateParam& param = nnvm::get<ConcatenateParam>(attrs.parsed);
+  const ConcatenateParam& param = cvm::get<ConcatenateParam>(attrs.parsed);
   TShape dshape;
   dim_t size = 0;
   bool has_zero = false;
@@ -110,7 +110,7 @@ inline bool ConcatenateCorrectLayout(const NodeAttrs& attrs,
                                      std::vector<Layout> *ilayouts,
                                      const std::vector<Layout> *last_ilayouts,
                                      std::vector<Layout> *olayouts) {
-  const ConcatenateParam& param = nnvm::get<ConcatenateParam>(attrs.parsed);
+  const ConcatenateParam& param = cvm::get<ConcatenateParam>(attrs.parsed);
   CHECK_EQ(ilayouts->size(), last_ilayouts->size());
   CHECK_EQ(olayouts->size(), 1U);
 
@@ -186,7 +186,7 @@ DMLC_REGISTER_PARAMETER(ExpandDimsParam);
 inline bool ExpandDimsInferShape(const NodeAttrs& attrs,
                                  std::vector<TShape>* in_shape,
                                  std::vector<TShape>* out_shape) {
-  const ExpandDimsParam& param = nnvm::get<ExpandDimsParam>(attrs.parsed);
+  const ExpandDimsParam& param = cvm::get<ExpandDimsParam>(attrs.parsed);
   CHECK_EQ(in_shape->size(), 1U);
   const TShape& dshape = in_shape->at(0);
   int ndim = static_cast<int>(dshape.ndim());
@@ -247,8 +247,8 @@ Examples::
 .add_arguments(IndicatorParam::__FIELDS__())
 .set_attr_parser(ParamParser<IndicatorParam>)
 .set_attr<FGetAttrDict>("FGetAttrDict", ParamGetAttrDict<IndicatorParam>)
-.set_attr<nnvm::FInferShape>("FInferShape", AssignOutputAttr<TShape, 1, 0>)
-.set_attr<nnvm::FInferType>("FInferType", ElemwiseType<2, 1>)
+.set_attr<cvm::FInferShape>("FInferShape", AssignOutputAttr<TShape, 1, 0>)
+.set_attr<cvm::FInferType>("FInferType", ElemwiseType<2, 1>)
 // never transform layout of the second input array.
 .set_attr<FCorrectLayout>("FCorrectLayout", ElemwiseFixedLayoutUnknownOut<1, 1>)
 .set_num_inputs(2)
@@ -258,7 +258,7 @@ Examples::
 // split
 DMLC_REGISTER_PARAMETER(SplitParam);
 
-inline void SplitParamParser(nnvm::NodeAttrs* attrs) {
+inline void SplitParamParser(cvm::NodeAttrs* attrs) {
   SplitParam param;
   param.Init(attrs->dict);
   if (!std::isdigit(attrs->dict.at("indices_or_sections")[0])) {
@@ -273,7 +273,7 @@ inline void SplitParamParser(nnvm::NodeAttrs* attrs) {
 inline bool SplitInferShape(const NodeAttrs& attrs,
                             std::vector<TShape>* in_shape,
                             std::vector<TShape>* out_shape) {
-  const SplitParam& param = nnvm::get<SplitParam>(attrs.parsed);
+  const SplitParam& param = cvm::get<SplitParam>(attrs.parsed);
   const TShape& dshape = (*in_shape)[0];
   if (dshape.ndim() == 0) return false;
 
@@ -320,7 +320,7 @@ inline bool SplitInferShape(const NodeAttrs& attrs,
 }
 
 inline uint32_t SplitNumOutputs(const NodeAttrs& attrs) {
-  const SplitParam& param = nnvm::get<SplitParam>(attrs.parsed);
+  const SplitParam& param = cvm::get<SplitParam>(attrs.parsed);
   if (param.equal_split) {
     return static_cast<uint32_t>(param.indices_or_sections[0]);
   } else {
@@ -352,7 +352,7 @@ DMLC_REGISTER_PARAMETER(CastParam);
 inline bool CastInferType(const NodeAttrs& attrs,
                           std::vector<int>* in_attrs,
                           std::vector<int>* out_attrs) {
-  const CastParam& param = nnvm::get<CastParam>(attrs.parsed);
+  const CastParam& param = cvm::get<CastParam>(attrs.parsed);
   CHECK_EQ(out_attrs->size(), 1U);
   NNVM_ASSIGN_OUTPUT_TYPE(attrs, *out_attrs, 0, param.dtype);
   return true;
@@ -380,7 +380,7 @@ DMLC_REGISTER_PARAMETER(ReshapeParam);
 inline bool ReshapeInferShape(const NodeAttrs& attrs,
                               std::vector<TShape>* in_attrs,
                               std::vector<TShape>* out_attrs) {
-  const ReshapeParam& param = nnvm::get<ReshapeParam>(attrs.parsed);
+  const ReshapeParam& param = cvm::get<ReshapeParam>(attrs.parsed);
   CHECK_GT(param.shape.ndim(), 0);
   CHECK_EQ(in_attrs->size(), 1U) << "Input: [data]";
   CHECK_EQ(out_attrs->size(), 1U);
@@ -554,10 +554,10 @@ the input array into an output array with the same shape as the second input arr
 // squeeze
 DMLC_REGISTER_PARAMETER(SqueezeParam);
 
-inline bool SqueezeShape(const nnvm::NodeAttrs& attrs,
+inline bool SqueezeShape(const cvm::NodeAttrs& attrs,
                            std::vector<TShape>* in_attrs,
                            std::vector<TShape>* out_attrs) {
-  const SqueezeParam& param = nnvm::get<SqueezeParam>(attrs.parsed);
+  const SqueezeParam& param = cvm::get<SqueezeParam>(attrs.parsed);
   CHECK_EQ(in_attrs->size(), 1U);
   CHECK_EQ(out_attrs->size(), 1U);
   const TShape& shp = (*in_attrs)[0];
@@ -624,8 +624,8 @@ Examples::
 .add_arguments(SqueezeParam::__FIELDS__())
 .set_attr_parser(ParamParser<SqueezeParam>)
 .set_attr<FGetAttrDict>("FGetAttrDict", ParamGetAttrDict<SqueezeParam>)
-.set_attr<nnvm::FInferShape>("FInferShape", SqueezeShape)
-.set_attr<nnvm::FInferType>("FInferType", ElemwiseType<1, 1>)
+.set_attr<cvm::FInferShape>("FInferShape", SqueezeShape)
+.set_attr<cvm::FInferType>("FInferType", ElemwiseType<1, 1>)
 .set_attr<FCorrectLayout>("FCorrectLayout", ElemwiseFixedLayoutUnknownOut<1, 1>)
 .set_num_inputs(1)
 .set_num_outputs(1)
@@ -634,10 +634,10 @@ Examples::
 // transpose
 DMLC_REGISTER_PARAMETER(TransposeParam);
 
-inline bool TransposeShape(const nnvm::NodeAttrs& attrs,
+inline bool TransposeShape(const cvm::NodeAttrs& attrs,
                            std::vector<TShape>* in_attrs,
                            std::vector<TShape>* out_attrs) {
-  const TransposeParam& param = nnvm::get<TransposeParam>(attrs.parsed);
+  const TransposeParam& param = cvm::get<TransposeParam>(attrs.parsed);
   CHECK_EQ(in_attrs->size(), 1U);
   CHECK_EQ(out_attrs->size(), 1U);
   const TShape& shp = (*in_attrs)[0];
@@ -663,7 +663,7 @@ inline bool TransposeCorrectLayout(const NodeAttrs& attrs,
                                    std::vector<Layout> *ilayouts,
                                    const std::vector<Layout> *last_ilayouts,
                                    std::vector<Layout> *olayouts) {
-  const TransposeParam& param = nnvm::get<TransposeParam>(attrs.parsed);
+  const TransposeParam& param = cvm::get<TransposeParam>(attrs.parsed);
   CHECK_EQ(ilayouts->size(), 1U);
   CHECK_EQ(olayouts->size(), 1U);
 
@@ -725,8 +725,8 @@ Examples::
 .add_arguments(TransposeParam::__FIELDS__())
 .set_attr_parser(ParamParser<TransposeParam>)
 .set_attr<FGetAttrDict>("FGetAttrDict", ParamGetAttrDict<TransposeParam>)
-.set_attr<nnvm::FInferShape>("FInferShape", TransposeShape)
-.set_attr<nnvm::FInferType>("FInferType", ElemwiseType<1, 1>)
+.set_attr<cvm::FInferShape>("FInferShape", TransposeShape)
+.set_attr<cvm::FInferType>("FInferType", ElemwiseType<1, 1>)
 .set_attr<FCorrectLayout>("FCorrectLayout", TransposeCorrectLayout)
 .set_num_inputs(1)
 .set_num_outputs(1)
@@ -735,7 +735,7 @@ Examples::
 // strided_slice
 DMLC_REGISTER_PARAMETER(StridedSliceParam);
 
-inline void StridedSliceParamParser(nnvm::NodeAttrs* attrs) {
+inline void StridedSliceParamParser(cvm::NodeAttrs* attrs) {
   StridedSliceParam param;
   param.Init(attrs->dict);
   attrs->parsed = std::move(param);
@@ -744,7 +744,7 @@ inline void StridedSliceParamParser(nnvm::NodeAttrs* attrs) {
 inline bool StridedSliceInferShape(const NodeAttrs& attrs,
                             std::vector<TShape>* in_shape,
                             std::vector<TShape>* out_shape) {
-  const StridedSliceParam& param = nnvm::get<StridedSliceParam>(attrs.parsed);
+  const StridedSliceParam& param = cvm::get<StridedSliceParam>(attrs.parsed);
   const TShape& dshape = (*in_shape)[0];
   if (dshape.ndim() == 0) return false;
   TShape oshape = dshape;
@@ -858,8 +858,8 @@ Examples::
 .add_arguments(FlipParam::__FIELDS__())
 .set_attr_parser(ParamParser<FlipParam>)
 .set_attr<FGetAttrDict>("FGetAttrDict", ParamGetAttrDict<FlipParam>)
-.set_attr<nnvm::FInferShape>("FInferShape", ElemwiseShape<1, 1>)
-.set_attr<nnvm::FInferType>("FInferType", ElemwiseType<1, 1>)
+.set_attr<cvm::FInferShape>("FInferShape", ElemwiseShape<1, 1>)
+.set_attr<cvm::FInferType>("FInferType", ElemwiseType<1, 1>)
 .set_num_inputs(1)
 .set_num_outputs(1)
 .set_support_level(4);
@@ -878,7 +878,7 @@ inline bool TakeInferShape(const NodeAttrs& attrs,
   if (dshape.ndim() == 0) return false;
   if (indicesshape.ndim() == 0) return false;
 
-  const TakeParam& param = nnvm::get<TakeParam>(attrs.parsed);
+  const TakeParam& param = cvm::get<TakeParam>(attrs.parsed);
   TShape oshape((!param.axis ? 0: dshape.ndim() - 1) + indicesshape.ndim());
   if (!param.axis) {
     for (size_t j = 0; j < indicesshape.ndim(); ++j) {
@@ -974,12 +974,12 @@ Examples::
 // SliceLike
 DMLC_REGISTER_PARAMETER(SliceLikeParam);
 
-inline bool SliceLikeShape(const nnvm::NodeAttrs& attrs,
+inline bool SliceLikeShape(const cvm::NodeAttrs& attrs,
                            std::vector<TShape>* in_attrs,
                            std::vector<TShape>* out_attrs) {
   CHECK_EQ(in_attrs->size(), 2U);
   CHECK_EQ(out_attrs->size(), 1U);
-  const SliceLikeParam& param = nnvm::get<SliceLikeParam>(attrs.parsed);
+  const SliceLikeParam& param = cvm::get<SliceLikeParam>(attrs.parsed);
   const TShape& src_shape = in_attrs->at(0);
   const TShape& target_shape = in_attrs->at(1);
   Tuple<dim_t> end_idx;
@@ -1031,7 +1031,7 @@ NNVM_REGISTER_OP(slice_like)
 .set_support_level(4);
 
 // where
-inline bool WhereShape(const nnvm::NodeAttrs& attrs,
+inline bool WhereShape(const cvm::NodeAttrs& attrs,
                        std::vector<TShape>* in_attrs,
                        std::vector<TShape>* out_attrs) {
   CHECK_EQ(in_attrs->size(), 3U);
@@ -1116,7 +1116,7 @@ Examples::
 .set_support_level(4);
 
 // gather_nd
-inline bool GatherNDInferShape(const nnvm::NodeAttrs& attrs,
+inline bool GatherNDInferShape(const cvm::NodeAttrs& attrs,
                                std::vector<TShape>* in_attrs,
                                std::vector<TShape>* out_attrs) {
   CHECK_EQ(in_attrs->size(), 2U);
@@ -1211,4 +1211,4 @@ Examples::
 .set_support_level(3);
 
 }  // namespace top
-}  // namespace nnvm
+}  // namespace cvm

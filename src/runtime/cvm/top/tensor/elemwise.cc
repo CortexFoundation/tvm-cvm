@@ -3,17 +3,17 @@
  * \file elemwise.cc
  * \brief Elemenwise operators
  */
-#include <nnvm/op.h>
-#include <nnvm/node.h>
-#include <nnvm/op_attr_types.h>
-#include <nnvm/compiler/op_attr_types.h>
-#include <nnvm/compiler/util.h>
-#include <nnvm/top/tensor.h>
+#include <cvm/op.h>
+#include <cvm/node.h>
+#include <cvm/op_attr_types.h>
+#include <cvm/compiler/op_attr_types.h>
+#include <cvm/compiler/util.h>
+#include <cvm/top/tensor.h>
 #include <cmath>
 #include "../op_common.h"
 #include "../elemwise_op_common.h"
 
-namespace nnvm {
+namespace cvm {
 namespace top {
 
 // undefined op
@@ -338,11 +338,11 @@ NNVM_REGISTER_ELEMWISE_UNARY_OP(block_grad)
 .describe(R"code(Blocks gradient computation for input.
 
 )code" NNVM_ADD_FILELINE)
-.set_attr<nnvm::FInplaceIdentity>(
+.set_attr<cvm::FInplaceIdentity>(
   "FInplaceIdentity", [](const NodeAttrs& attrs){
     return std::vector<bool>{true};
 })
-.set_attr<nnvm::FGradient>("FGradient", MakeZeroGradNodes)
+.set_attr<cvm::FGradient>("FGradient", MakeZeroGradNodes)
 .set_support_level(4);
 
 DMLC_REGISTER_PARAMETER(IndicatorParam);
@@ -356,7 +356,7 @@ with 1.0 if (left > right), otherwise 0.0 element-wise.
 .add_argument("lhs", "Tensor", "First input")
 .add_argument("rhs", "Tensor", "Second input")
 .set_num_inputs(2)
-.set_attr<nnvm::FInferShape>("FInferShape", ElemwiseShape<2, 1>)
+.set_attr<cvm::FInferShape>("FInferShape", ElemwiseShape<2, 1>)
 .set_support_level(4);
 
 
@@ -368,7 +368,7 @@ with 1.0 if (left < right), otherwise 0.0 element-wise.
 .add_argument("lhs", "Tensor", "First input")
 .add_argument("rhs", "Tensor", "Second input")
 .set_num_inputs(2)
-.set_attr<nnvm::FInferShape>("FInferShape", ElemwiseShape<2, 1>)
+.set_attr<cvm::FInferShape>("FInferShape", ElemwiseShape<2, 1>)
 .set_support_level(4);
 
 NNVM_REGISTER_INDICATOR_OP(_max_mask)
@@ -381,7 +381,7 @@ with 1.0 if the value is maximum over given axes, otherwise 0.0 element-wise.
 .add_arguments(IndicatorParam::__FIELDS__())
 .set_attr_parser(ParamParser<IndicatorParam>)
 .set_attr<FGetAttrDict>("FGetAttrDict", ParamGetAttrDict<IndicatorParam>)
-.set_attr<nnvm::FInferShape>("FInferShape", ElemwiseShape<1, 1>)
+.set_attr<cvm::FInferShape>("FInferShape", ElemwiseShape<1, 1>)
 .set_support_level(1);
 
 NNVM_REGISTER_INDICATOR_OP(_min_mask)
@@ -394,7 +394,7 @@ with 1.0 if the value is minimum over given axes, otherwise 0.0 element-wise.
 .add_arguments(IndicatorParam::__FIELDS__())
 .set_attr_parser(ParamParser<IndicatorParam>)
 .set_attr<FGetAttrDict>("FGetAttrDict", ParamGetAttrDict<IndicatorParam>)
-.set_attr<nnvm::FInferShape>("FInferShape", ElemwiseShape<1, 1>)
+.set_attr<cvm::FInferShape>("FInferShape", ElemwiseShape<1, 1>)
 .set_support_level(1);
 
 
@@ -413,12 +413,12 @@ Example::
 .set_num_outputs(1)
 .set_attr_parser(ParamParser<ClipParam>)
 .set_attr<FGetAttrDict>("FGetAttrDict", ParamGetAttrDict<ClipParam>)
-.set_attr<nnvm::FInferShape>("FInferShape", ElemwiseShape<1, 1>)
-.set_attr<nnvm::FInferType>("FInferType", ElemwiseType<1, 1>)
-.set_attr<nnvm::FCorrectLayout>("FCorrectLayout", ElemwiseFixedLayoutUnknownOut<1, 1>)
+.set_attr<cvm::FInferShape>("FInferShape", ElemwiseShape<1, 1>)
+.set_attr<cvm::FInferType>("FInferType", ElemwiseType<1, 1>)
+.set_attr<cvm::FCorrectLayout>("FCorrectLayout", ElemwiseFixedLayoutUnknownOut<1, 1>)
 .add_argument("data", "NDArray-or-Symbol", "Input array.")
 .add_arguments(ClipParam::__FIELDS__())
 .set_support_level(4);
 
 }  // namespace top
-}  // namespace nnvm
+}  // namespace cvm

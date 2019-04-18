@@ -3,8 +3,8 @@
  * \file op.cc
  * \brief Support for operator registry.
  */
-#include <nnvm/base.h>
-#include <nnvm/op.h>
+#include <cvm/base.h>
+#include <cvm/op.h>
 
 #include <memory>
 #include <atomic>
@@ -13,10 +13,10 @@
 
 namespace dmlc {
 // enable registry
-DMLC_REGISTRY_ENABLE(nnvm::Op);
+DMLC_REGISTRY_ENABLE(cvm::Op);
 }  // namespace dmlc
 
-namespace nnvm {
+namespace cvm {
 
 // single manager of operator information.
 struct OpManager {
@@ -111,4 +111,4 @@ Op& Op::include(const std::string& group_name) {
   return *this;
 }
 
-}  // namespace nnvm
+}  // namespace cvm
