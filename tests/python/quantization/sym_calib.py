@@ -346,7 +346,6 @@ def _sim_requantize_op(sym, scale, params, graph):
     requant_op_name = name + '_requant_op'
     assert requant_op_name not in graph
     node = mx.sym.broadcast_mul(sym, scale_sym, name=requant_op_name)
-    node = mx.sym.round(node)
     graph[requant_op_name] = node
     return node
 def _is_sim_requantize_op(sym):
