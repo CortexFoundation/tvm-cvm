@@ -143,7 +143,7 @@ inline void conv2d(
 }
 inline void depthwise_conv2d(
         int32_t *x_data, int32_t n_batch, int32_t in_channels, int32_t x_h, int32_t x_w,
-        int32_t *w_data, int32_t filter_h, int32_t filter_w,
+        int32_t *w_data, int32_t filter_c, int32_t filter_h, int32_t filter_w,
         int32_t *y_data, int32_t out_channels, int32_t o_h, int32_t o_w,
         int32_t *b_data,
         int32_t padding[2], int32_t stride_h, int32_t stride_w,
@@ -166,7 +166,7 @@ inline void depthwise_conv2d(
                                 * w_data[c * filter_h * filter_w + fh * filter_w + fw];
                         }
                     }
-                    y_data[n * in_channels * o_h * o_w + c * o_h * o_w + h * o_w + w] = sum;
+                    y_data[n * in_channels * o_h * o_w + c * o_h * o_w + h * o_w + w] = sum + b_data[c];
                 }
             }
         }
@@ -223,6 +223,7 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.conv2d").set_body([]
 	int32_t* b_data = (int32_t*)b->data;
 
     int out_channels = static_cast<int>(w->shape[0]);
+    int filter_c = static_cast<int>(w->shape[1]);
     int filter_h = static_cast<int>(w->shape[2]);
     int filter_w = static_cast<int>(w->shape[3]);
 	filter_h = (filter_h - 1) * dilation[0] + 1;
@@ -241,17 +242,17 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.conv2d").set_body([]
 //              << (x_w + 2 * padding[1] - filter_w) / strides[1] + 1 << "\n";
 //    std::cout << "dim = " << b->ndim << " shape = " << b->shape[0] << "\n";
 //    std::cout << "padding = " << padding[0] << " " << padding[1] << "\n";
+
+
     if(groups > 1){
         depthwise_conv2d(
                 x_data, n_batch, in_channels, x_h, x_w,
-                w_data, filter_h, filter_w,
+                w_data, filter_c, filter_h, filter_w,
                 y_data, out_channels, o_h, o_w,
                 b_data,
                 padding, stride_h, stride_w,
                 groups);
     }else{
-
-
         const int y_n_offset = out_channels * o_h * o_w;
         const int y_c_offset = o_h * o_w;
         const int y_h_offset = o_w;
@@ -674,15 +675,28 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.conv2d")
 //	int o_h = static_cast<int>(y->shape[2]);
 //	int o_w = static_cast<int>(y->shape[3]);
 
-    cuda_conv2d(
-            x_data, n_batch, in_channels, x_h, x_w,
-            w_data, out_channels, in_channels, filter_h, filter_w,
-            b_data,
-            padding[0],
-            strides[0],
-            dilation[0],
-            groups,
-            y_data, n_batch, out_channels, o_h, o_w, DEBUG_OP);
+    if(groups == 1){
+        cuda_conv2d(
+                x_data, n_batch, in_channels, x_h, x_w,
+                w_data, out_channels, in_channels, filter_h, filter_w,
+                b_data,
+                padding[0],
+                strides[0],
+                dilation[0],
+                groups,
+                y_data, n_batch, out_channels, o_h, o_w, DEBUG_OP);
+    }else{
+        cuda_depthwise_conv2d(
+                x_data, n_batch, in_channels, x_h, x_w,
+                w_data, out_channels, in_channels, filter_h, filter_w,
+                b_data,
+                padding[0],
+                strides[0],
+                dilation[0],
+                groups,
+                y_data, n_batch, out_channels, o_h, o_w, DEBUG_OP);
+
+    }
  });
 
 TVM_REGISTER_GLOBAL("tvm.runtime.cvm.cuda_max_pool2d")

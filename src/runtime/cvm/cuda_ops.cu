@@ -36,7 +36,7 @@ void cuda_elemwise_add(int32_t *a, int32_t *b, int32_t *c, int32_t n, bool debug
 #define BS 32
 //template<int F_H, int F_W, int STRIDE>
 __global__ void kernel_conv2d(
-        int32_t *input, int32_t i_n/*TODO i_n > 1*/, int32_t i_c, int32_t i_h, int32_t i_w,
+        int32_t *input, int32_t i_n, int32_t i_c, int32_t i_h, int32_t i_w,
         int32_t *filter, int32_t f_n, int32_t f_c, int32_t f_h, int32_t f_w,
         int32_t *bias,
         int32_t padding,
@@ -129,14 +129,14 @@ __global__ void kernel_conv2d(
         __syncthreads();
     }
 
-    if(l_o_h % stride == 0 && g_x % stride == 0){
-    //int oi = l_o_c * o_h * o_w + l_o_h * o_w + g_x;
-    int oi = l_o_c * o_h * o_w + l_o_h/stride * o_w + g_x/stride;
-    output[oi] = sum + bias[l_o_c];
+    if(l_o_h % stride == 0 && g_x % stride == 0){ //TODO to be optimized
+        //int oi = l_o_c * o_h * o_w + l_o_h * o_w + g_x;
+        int oi = l_o_c * o_h * o_w + l_o_h/stride * o_w + g_x/stride;
+        output[oi] = sum + bias[l_o_c];
     }
 }
 void cuda_conv2d(
-        int32_t *input, int32_t i_n/*TODO i_n > 1*/, int32_t i_c, int32_t i_h, int32_t i_w,
+        int32_t *input, int32_t i_n, int32_t i_c, int32_t i_h, int32_t i_w,
         int32_t *filter, int32_t f_n, int32_t f_c, const int32_t f_h, const int32_t f_w,
         int32_t *bias,
         int32_t padding,
@@ -161,7 +161,7 @@ void cuda_conv2d(
 //    clock_t start = clock();
     int b_h = BS;
     int b_w = BS;
-    int tmp_o_h = i_h + 2 * padding - f_h + 1; //for stride > 1
+    int tmp_o_h = i_h + 2 * padding - f_h + 1; //for stride > 1 , TODO to be optimized
     int tmp_o_w = i_w + 2 * padding - f_w + 1;
     int32_t g_h = o_n * o_c * ((tmp_o_h + b_h - 1) / b_h);
     int32_t g_w = (tmp_o_w + b_w - 1) / b_w;
@@ -189,7 +189,7 @@ void cuda_conv2d(
     }
 }
 __global__ void kernel_depthwise_conv2d(
-        int32_t *input, int32_t i_n/*TODO i_n > 1*/, int32_t i_c, int32_t i_h, int32_t i_w,
+        int32_t *input, int32_t i_n, int32_t i_c, int32_t i_h, int32_t i_w,
         int32_t *filter, int32_t f_n, int32_t f_c, int32_t f_h, int32_t f_w,
         int32_t *bias,
         int32_t padding,

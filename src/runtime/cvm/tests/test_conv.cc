@@ -48,39 +48,66 @@ void conv_cpu_v2(int* x_data, int n_batch, int x_h, int x_w, int in_channels,
         int stride_h, int stride_w,
         int padding
         ){
+    int tmp_o_h = x_h + 2 * padding - filter_h + 1;
+    int tmp_o_w = x_w + 2 * padding - filter_w + 1;
 #define GETX(n, c, h, w) x_data[(n) * in_channels * x_h * x_w + (c) * x_h * x_w + (h) * x_w + (w)]
 #define GETW(o, i, h, w) w_data[(o) * in_channels * filter_h * filter_w + (i) * filter_h * filter_w + (h) * filter_w + (w)]
     for(int n = 0; n < n_batch; ++n){
         for(int oc = 0; oc < out_channels; ++oc){
-            for(int oh = 0; oh < o_h; oh += 32){
-                for(int ow = 0; ow < o_w; ow += 32){
+            int tmpb = b_data[oc];
+            for(int oh = 0; oh < tmp_o_h; oh += 32){
+                for(int ow = 0; ow < tmp_o_w; ow += 32){
                     int32_t sum[32][32] = {0};
+                    int min_y = oh+32 <= tmp_o_h ? 32 : tmp_o_h%32;
+                    int min_x = ow+32 <= tmp_o_w ? 32 : tmp_o_w%32;
                     for(int ic = 0; ic < in_channels; ++ic){
-                        int32_t bufX[40][40]; //filter_h <= 11
-                        int32_t bufF[11][11];
+                        int32_t bufX[32+12][32+12]; //filter_h <= 11
+                        int32_t bufF[12][12]; //filter_h <= 11
                         for(int i = 0; i < 32; i++){
                             for(int j = 0; j < 32; j++){
-                                if((oh+i)*stride_h-padding < 0 || (ow+j)*stride_h-padding<0 || (oh+i)*stride_h-padding>= x_h || (ow+j)*stride_h-padding>=x_w)
+                                if(oh+i-padding < 0 || ow+j-padding<0 || oh+i-padding>= x_h || ow+j-padding>=x_w)
                                     bufX[i][j] = 0;
                                 else
-                                    bufX[i][j] = x_data[n*in_channels*x_h*x_w + ic*x_h*x_w + (oh+i)*x_w + ow+j];
+                                    bufX[i][j] = x_data[n*in_channels*x_h*x_w + ic*x_h*x_w + (oh+i-padding)*x_w + ow+j-padding];
                                 if(i < filter_h-1){
-                                    for(int ti = oh+i; ti < filter_h-1; ti+=)
-                                    bufX[i+32][j] = x_data[n*in_channels*x_h*x_w + ic*x_h*x_w + (oh+i+32)*x_w + ow+j];
+                                    for(int ti = i; ti < filter_h-1; ti+=min_y){
+                                        if(ti+oh+min_y-padding<0 || ow+j-padding < 0 || ti+oh+min_y-padding>=x_h || ow+j-padding>=x_w){
+                                            bufX[ti+min_y][j] = 0;
+                                        }
+                                        else{
+                                            bufX[ti+min_y][j] = x_data[n*in_channels*x_h*x_w + ic*x_h*x_w + (ti+oh+min_y-padding)*x_w + ow+j-padding];
+                                        }
+                                    }
                                 }
                                 if(j < filter_w-1){
-                                    bufX[i][j+32] = x_data[n*in_channels*x_h*x_w + ic*x_h*x_w + (oh+i)*x_w + ow+j+32];
+                                    for(int tj = j; tj < filter_w-1; tj+=min_x){
+                                        if(oh+i-padding<0 || tj+ow+min_x-padding<0 || oh+i-padding>=x_h || tj+ow+min_x-padding>=x_w)
+                                            bufX[i][tj+min_x] = 0;
+                                        else
+                                            bufX[i][tj+min_x] = x_data[n*in_channels*x_h*x_w + ic*x_h*x_w + (oh+i-padding)*x_w + tj+ow+min_x-padding];
+                                    }
                                 }
                                 if(i < filter_h-1 && j < filter_w-1){
-                                    bufX[i+32][j+32] = x_data[n*in_channels*x_h*x_w + ic*x_h*x_w + (oh+i+32)*x_w + ow+j+32];
+                                    for(int ti = i; ti < filter_h-1; ti+=min_y){
+                                        for(int tj = j; tj < filter_w-1; tj+=min_x){
+                                            if(ti+oh+min_y-padding<0 || tj+ow+min_x-padding<0 || ti+oh+min_y-padding>=x_h || tj+ow+min_x-padding>=x_w)
+                                                bufX[ti+min_y][tj+min_x] = 0;
+                                            else
+                                                bufX[ti+min_y][tj+min_x] = x_data[n*in_channels*x_h*x_w + ic*x_h*x_w + (ti+oh+min_y-padding)*x_w + tj+ow+min_x-padding];
+                                        }
+                                    }
                                 }
                                 if(i < filter_h && j < filter_w){
-                                    bufF[i][j] = w_data[oc*in_channels*filter_h*filter_w + ic*filter_h*filter_w + i*filter_w + j];
+                                    for(int ti = i; ti < filter_h; ti+= min_y){
+                                        for(int tj = j; tj < filter_w; tj+=min_x){
+                                            bufF[ti][tj] = w_data[oc*in_channels*filter_h*filter_w + ic*filter_h*filter_w + ti*filter_w + tj];
+                                        }
+                                    }
                                 }
                             }
                         }
-                        for(int i = 0; i < 32; i++){
-                            for(int j = 0; j < 32; j++){
+                        for(int i = 0; i < min_y; i++){
+                            for(int j = 0; j < min_x; j++){
                                 for(int fh = 0; fh < filter_h; ++fh){
                                     for(int fw = 0; fw < filter_w; ++fw){
                                         sum[i][j] += bufX[i+fh][j+fw] * bufF[fh][fw];
@@ -89,9 +116,10 @@ void conv_cpu_v2(int* x_data, int n_batch, int x_h, int x_w, int in_channels,
                             }
                         }
                     }
-                    for(int i = 0; i < 32; i++){
-                        for(int j = 0; j < 32; j++){
-                            y_data[n * out_channels * o_h * o_w + oc * o_h * o_w + (oh+i) * o_w + ow+j] = sum[i][j];
+                    for(int i = 0; i < min_y; i++){
+                        for(int j = 0; j < min_x; j++){
+                            if( (oh+i)%stride_h == 0 && (ow+j)%stride_w == 0) //TODO to be optimized
+                              y_data[n * out_channels * o_h * o_w + oc * o_h * o_w + (oh+i)/stride_h * o_w + (ow+j)/stride_w] = sum[i][j] + tmpb;
                         }
                     }
                 }
@@ -114,13 +142,13 @@ void print(int* data, int n, int c, int h, int w){
 }
 int main(){
     int i_n = 1;
-    int i_c = 1;
-    int i_h = 66;
-    int i_w = 66;
+    int i_c = 64;
+    int i_h = 56;
+    int i_w = 56;
     int f_h = 3;
     int f_w = 3;
-    int o_c = 256;
-    int padding = 0;
+    int o_c = 64;
+    int padding = 1;
     int stride = 1;
     int o_h = (i_h + 2 * padding - f_h) / stride + 1;
     int o_w = (i_w + 2 * padding - f_w) / stride + 1;
@@ -136,7 +164,7 @@ int main(){
     for(int i = 0; i < s_f; i++)
         filter[i] = 1;
     for(int i = 0; i < o_c; i++)
-        b_data[i] = 0;
+        b_data[i] = 1;
 //    print(input, i_c, i_h, i_w);
     clock_t start = clock();
     for(int i = 0; i < 10; i++){
@@ -162,7 +190,7 @@ int main(){
                 padding);
     }
     clock_t end2 = clock();
-//    print(output3, i_n, o_c, o_h, o_w);
+//print(output3, i_n, o_c, o_h, o_w);
     std::cout << "cpu time: " << end2-start2 << std::endl;
     int ret = memcmp(output, output3, s_o*sizeof(int32_t));
     std::cout << (ret == 0 ? "pass" : "failed") << std::endl;
