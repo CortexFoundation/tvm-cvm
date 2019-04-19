@@ -40,6 +40,7 @@ void conv_cpu(int* x_data, int n_batch, int x_h, int x_w, int in_channels,
     }
 }
 
+#define BS 16
 //TODO padding != 0
 void conv_cpu_v2(int* x_data, int n_batch, int x_h, int x_w, int in_channels,
         int *w_data, int filter_h, int filter_w,
@@ -55,16 +56,16 @@ void conv_cpu_v2(int* x_data, int n_batch, int x_h, int x_w, int in_channels,
     for(int n = 0; n < n_batch; ++n){
         for(int oc = 0; oc < out_channels; ++oc){
             int tmpb = b_data[oc];
-            for(int oh = 0; oh < tmp_o_h; oh += 32){
-                for(int ow = 0; ow < tmp_o_w; ow += 32){
-                    int32_t sum[32][32] = {0};
-                    int min_y = oh+32 <= tmp_o_h ? 32 : tmp_o_h%32;
-                    int min_x = ow+32 <= tmp_o_w ? 32 : tmp_o_w%32;
+            for(int oh = 0; oh < tmp_o_h; oh += BS){
+                for(int ow = 0; ow < tmp_o_w; ow += BS){
+                    int32_t sum[BS][BS] = {0};
+                    int min_y = oh+BS <= tmp_o_h ? BS : tmp_o_h%BS;
+                    int min_x = ow+BS <= tmp_o_w ? BS : tmp_o_w%BS;
                     for(int ic = 0; ic < in_channels; ++ic){
-                        int32_t bufX[32+12][32+12]; //filter_h <= 11
+                        int32_t bufX[BS+12][BS+12]; //filter_h <= 11
                         int32_t bufF[12][12]; //filter_h <= 11
-                        for(int i = 0; i < 32; i++){
-                            for(int j = 0; j < 32; j++){
+                        for(int i = 0; i < BS; i++){
+                            for(int j = 0; j < BS; j++){
                                 if(oh+i-padding < 0 || ow+j-padding<0 || oh+i-padding>= x_h || ow+j-padding>=x_w)
                                     bufX[i][j] = 0;
                                 else
@@ -142,11 +143,11 @@ void print(int* data, int n, int c, int h, int w){
 int main(){
     int i_n = 1;
     int i_c = 1;
-    int i_h = 64;
-    int i_w = 64;
+    int i_h = 33;
+    int i_w = 33;
     int f_h = 3;
     int f_w = 3;
-    int o_c = 8;
+    int o_c = 2;
     int padding = 1;
     int stride = 1;
     int o_h = (i_h + 2 * padding - f_h) / stride + 1;
@@ -189,7 +190,7 @@ int main(){
 //                padding);
 //    }
 //    clock_t end2 = clock();
-//print(output3, i_n, o_c, o_h, o_w);
+////  print(output3, i_n, o_c, o_h, o_w);
 //    std::cout << "cpu time: " << end2-start2 << std::endl;
 //    int ret = memcmp(output, output3, s_o*sizeof(int32_t));
 //    std::cout << (ret == 0 ? "pass" : "failed") << std::endl;
@@ -207,8 +208,8 @@ int main(){
 
     clock_t gpu_end = clock();
     std::cout << "gpu all time: " << gpu_end - end << std::endl;
-//    print(output2, i_n, o_c, o_h, o_w);
-    int ret = memcmp(output, output2, sizeof(int) * s_o);
-    std::cout << (ret == 0 ? "pass" : "failed") << std::endl;
+    print(output2, i_n, o_c, o_h, o_w);
+    int ret2 = memcmp(output, output2, sizeof(int) * s_o);
+    std::cout << (ret2 == 0 ? "pass" : "failed") << std::endl;
     return 0;
 }

@@ -37,14 +37,14 @@ void cuda_elemwise_add(int32_t *a, int32_t *b, int32_t *c, int32_t n, bool debug
 #define FS 8
 //template<int F_H, int F_W, int STRIDE>
 __global__ void kernel_conv2d(
-        int32_t *input, int32_t i_n, int32_t i_c, int32_t i_h, int32_t i_w,
-        int32_t *filter, int32_t f_n, int32_t f_c, int32_t f_h, int32_t f_w,
-        int32_t *bias,
-        int32_t padding,
-        int32_t stride,
-        int32_t dilation, // TODO dilation > 1
-        int32_t groups, // TODO groups > 1
-        int32_t *output, int32_t o_n, int32_t o_c, int32_t o_h, int32_t o_w){
+        const int32_t * __restrict__ input, const int32_t i_n, const int32_t i_c, const int32_t i_h, const int32_t i_w,
+        const int32_t * __restrict__ filter, const int32_t f_n, const int32_t f_c, const int32_t f_h, const int32_t f_w,
+        const int32_t * __restrict__ bias,
+        const int32_t padding,
+        const int32_t stride,
+        const int32_t dilation, // TODO dilation > 1
+        const int32_t groups, // TODO groups > 1
+        int32_t *output, const int32_t o_n, const int32_t o_c, const int32_t o_h, const int32_t o_w){
 //    int g_y = blockDim.y * blockIdx.y + threadIdx.y;
     int g_x = blockDim.x * blockIdx.x + threadIdx.x;
     int l_y = threadIdx.y; 
@@ -61,7 +61,6 @@ __global__ void kernel_conv2d(
     int l_o_wi = blockIdx.x % perBlockXOneImage;
     int l_o_h = l_o_hi * BS + l_y;
 //    int l_o_w = l_o_wi * BS + l_x;
-    if(l_o_h >= tmp_o_h || g_x >= tmp_o_w) return;
 
     const int32_t F_H = f_h;
     const int32_t F_W = f_w;
@@ -71,17 +70,27 @@ __global__ void kernel_conv2d(
     extern __shared__ int32_t  share[];
     int32_t *shared_i = (int32_t*)share; 
     int32_t *shared_f = &share[sih * siw];
+    int32_t *shared_b = &shared_f[F_H*F_W*FS];
 
     int32_t sum[FS] = {0}; 
     int min_s_y = (l_o_hi+1) * BS <= tmp_o_h ? BS : tmp_o_h%BS;
     int min_s_x = (l_o_wi+1) * BS <= tmp_o_w ? BS : tmp_o_w%BS;
+
+    //load bias to shared memory
+    int lid = l_y * BS + l_x;
+    for(int i = lid; i < FS; i+=BS*BS){
+        if(l_f_n*FS + i < o_c)
+            shared_b[i] = bias[l_f_n*FS + i];
+        else shared_b[i] = 0;
+    }
+
+    if(l_o_h >= tmp_o_h || g_x >= tmp_o_w) return;
 
     for(int c = 0; c < i_c; c++){
         //load input to shared
         int l_i_h = l_o_h - padding;
         int i_y = c * i_h + l_i_h;
         int i_x = g_x - padding;
-        // 0~2-> -1~1
         if(l_i_h < 0 || i_x < 0 || l_i_h >= i_h || i_x >= i_w)
             shared_i[l_y*siw + l_x] = 0;
         else
@@ -128,8 +137,10 @@ __global__ void kernel_conv2d(
 
         for(int fy = 0; fy < F_H; fy++){
             for(int fx = 0; fx < F_W; fx++){
+                int32_t tmpx = shared_i[(l_y+fy)*siw + l_x+fx];
+#pragma unroll
                 for(int fc = 0; fc < FS; fc++){
-                    sum[fc] += shared_i[(l_y+fy)*siw + l_x+fx] * shared_f[fc*F_H*F_W + fy*F_W + fx];
+                    sum[fc] += tmpx * shared_f[fc*F_H*F_W + fy*F_W + fx];
                 }
             }
         } 
@@ -141,7 +152,7 @@ __global__ void kernel_conv2d(
         for(int fc = 0; fc < FS; fc++){
             if(l_f_n*FS + fc < o_c){
                 int oi = n*o_c*o_h*o_w + (l_f_n*FS+fc) * o_h * o_w + l_o_h/stride * o_w + g_x/stride;
-                output[oi] = sum[fc] + bias[l_f_n*FS+fc];
+                output[oi] = sum[fc] + shared_b[fc];
             }
         }
     }
@@ -178,7 +189,7 @@ void cuda_conv2d(
     int32_t g_w = (tmp_o_w + b_w - 1) / b_w;
     dim3 bDim(b_w, b_h, 1);
     dim3 gDim(g_w, g_h, 1);
-    size_t share_size = (BS + f_h - 1) * (BS + f_w - 1) * sizeof(int32_t) + f_h * f_w * sizeof(int32_t)*FS;
+    size_t share_size = ((BS + f_h - 1) * (BS + f_w - 1) + f_h * f_w * FS + FS) * sizeof(int32_t);
     kernel_conv2d<<<gDim, bDim, share_size>>>(
             dev_i, i_n, i_c, i_h, i_w,
             dev_f, f_n, f_c, f_h, f_w,
@@ -475,7 +486,7 @@ void cuda_max_pool(
     }
 }
 
-#define TILE_WIDTH 32
+#define TILE_WIDTH 16
 __global__ void kernel_dense(
         int32_t *A, // m*k 
         int32_t *B, // was transposed, n*k
@@ -483,13 +494,13 @@ __global__ void kernel_dense(
         int32_t m, int32_t k, int32_t n, int32_t *bias, int32_t useBias){
     __shared__ int32_t sharedM[TILE_WIDTH][TILE_WIDTH];
     __shared__ int32_t sharedN[TILE_WIDTH][TILE_WIDTH];
-    int bx = blockIdx.x;//0
-    int by = blockIdx.y;//0
-    int tx = threadIdx.x;//0~31
-    int ty = threadIdx.y;//0~31
-    int row = by*TILE_WIDTH + ty;//0
-    int col = bx*TILE_WIDTH + tx;//31
-    int v = 0;
+    int bx = blockIdx.x;
+    int by = blockIdx.y;
+    int tx = threadIdx.x;
+    int ty = threadIdx.y;
+    int row = by*TILE_WIDTH + ty;
+    int col = bx*TILE_WIDTH + tx;
+    int sum = 0;
 
     for (int i = 0; i < (int)(ceil((float)k/TILE_WIDTH)); i++)
     {
@@ -505,12 +516,12 @@ __global__ void kernel_dense(
         __syncthreads();
 
         for(int j = 0; j < TILE_WIDTH; j++)
-            v += sharedM[ty][j] * sharedN[tx][j];
+            sum += sharedM[ty][j] * sharedN[tx][j];
         __syncthreads();
     }
     if (row < m && col < n){
-        if(useBias == 1) v += bias[col];
-        C[row*n + col] = v;
+        if(useBias == 1) sum += bias[col];
+        C[row*n + col] = sum;
     }
 }
 

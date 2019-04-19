@@ -118,12 +118,12 @@ int main()
 //    TVMArrayCopyFromTo(x, t_gpu_x, stream);
 
     clock_t start = clock();
-    for(int i = 0; i < 1; i++){
+    for(int i = 0; i < 10; i++){
         RunCVM(x, params_arr, json_data_org, mod_org, "graph_runtime", y1,(int)kDLCPU);
     }
     clock_t end = clock();
 //    TVMArrayCopyFromTo(t_gpu_y, y1, stream);
-    std::cout << "graph runtime : " << end-start << std::endl;
+    std::cout << "graph runtime : " << (end-start)*1.0/CLOCKS_PER_SEC << " s" << std::endl;
     for(int i = 0; i < 10; i++){
         std::cout << static_cast<int32_t*>(y1->data)[i] << " ";
     }
@@ -144,11 +144,11 @@ int main()
     DLTensor* y2;
     TVMArrayAlloc(out_shape, out_ndim, dtype_code, dtype_bits, dtype_lanes, device_type, device_id, &y2);
     clock_t cvm_start = clock();
-    for (int i = 0; i < 1; i++) {
+    for (int i = 0; i < 10; i++) {
         RunCVM(gpu_x, params_arr, json_data, mod_syslib, "cvm_runtime", gpu_y, (int)kDLGPU);
     }
     clock_t cvm_end = clock();
-    std::cout << "cvm runtime: " << cvm_end - cvm_start << std::endl;
+    std::cout << "cvm runtime: " << (cvm_end - cvm_start)*1.0 / CLOCKS_PER_SEC << " s" << std::endl;
     TVMArrayCopyFromTo(gpu_y, y2, stream1);
     //TVMArrayFree(y_cpu);
 
@@ -157,10 +157,12 @@ int main()
     }
     std::cout << std::endl;
 
-    std::cout << (std::memcmp(y1->data, y2->data, 1000*sizeof(int32_t)) == 0 ? "pass" : "failed") << std::endl;
+//    std::cout << (std::memcmp(y1->data, y2->data, 1000*sizeof(int32_t)) == 0 ? "pass" : "failed") << std::endl;
     TVMArrayFree(x);
     TVMArrayFree(gpu_x);
     TVMArrayFree(gpu_y);
+//    TVMArrayFree(t_gpu_x);
+//    TVMArrayFree(t_gpu_y);
     TVMArrayFree(y2);
 
     }
