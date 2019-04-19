@@ -308,6 +308,14 @@ nnvm_identity_ext = {
     'broadcast_div': OpExt('broadcast_div', [INT32_TYPE], [INT32_TYPE]),
     'broadcast_mul': OpExt('broadcast_mul', [INT32_TYPE], [INT32_TYPE]),
     'broadcast_add': OpExt('broadcast_add', [INT32_TYPE], [INT32_TYPE]),
+    'broadcast_sub': OpExt('broadcast_sub', [INT32_TYPE], [INT32_TYPE]),
+    'broadcast_max': OpExt('broadcast_max', [INT32_TYPE], [INT32_TYPE]),
+
+    '__div_scalar__': {},
+
+    'max': {},
+    'abs': {},
+    'log2': {},
 
     'clip': OpExt('clip', [INT32_TYPE], [INT8_TYPE]),
 }

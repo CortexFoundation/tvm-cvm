@@ -32,7 +32,7 @@ def mx_const(number):
 
     return const_var_dict[name]['symbol']
 
-def quantize(data, shift_bits, target_bits=relay.const(7, dtype='int32')):
+def quantize(data, shift_bits):
     """Quantize output of layer, to be consistent with source code @yx
 
     Question: should the shift_bits participating to network control flow?
@@ -49,13 +49,9 @@ def quantize(data, shift_bits, target_bits=relay.const(7, dtype='int32')):
         The shift_bits parameter is never used according to @yx's source code,
         which always be constant Expr(-1).
     """
-    neg_data = mx.sym.negative(data)
-    abs_data = mx.sym.maximum(data, neg_data)
+    abs_data = mx.sym.abs(data)
     max_v = mx.sym.max(abs_data)
 
-    #  ln_bit = mx.sym.log(max_v)
-    #  ln_2 = mx.sym.log(mx_const(2))
-    #  total_bits = mx.sym.broadcast_div(ln_bit, ln_2)
     total_bits = mx.sym.log2(max_v)
     total_bits = mx.sym.ceil(total_bits)
 
@@ -63,8 +59,8 @@ def quantize(data, shift_bits, target_bits=relay.const(7, dtype='int32')):
     shift_bits = mx.sym.maximum(shift_bits, mx_const(0))
     denominator = mx.sym.pow(2, shift_bits)
     out = mx.sym.broadcast_div(data, denominator)
-    out = mx.sym.clip(out, a_min=-128, a_max=127)
     out = mx.sym.floor(out)
+    out = mx.sym.clip(out, a_min=-128, a_max=127)
     return out, max_v, None, shift_bits
 
 def make_conv_relu(data, kernel_size, padding, strides, channels, prefix="conv", skip_relu=False):
@@ -211,11 +207,10 @@ def test_yxnet_mnist():
     _, bd = load_parameters(mnist_sym, infer_shapes,
             "/home/wlt/warehouse/.tmp/ca3d0286d5758697cdef653c1375960a868ac08a/data/params")
 
-    # dump_sym, dump_par = '/tmp/mnist_yxnet.symbol', '/tmp/mnist_yxnet.params'
-    # with open(dump_sym, 'w') as fout:
-        # fout.write(mnist_sym.tojson())
-    # nd.save(dump_par, bd)
-    # exit()
+    dump_sym, dump_par = '/tmp/mnist_yxnet.symbol', '/tmp/mnist_yxnet.params'
+    with open(dump_sym, 'w') as fout:
+        fout.write(mnist_sym.tojson())
+    nd.save(dump_par, bd)
 
     inputs = [mx.sym.var('data')]
     data = np.load('/home/wlt/warehouse/.tmp/ba9fedfc87ccb6064fcd437fd2287f5edef1bd84/data')
@@ -229,7 +224,7 @@ def test_yxnet_mnist():
         target = "cuda"
         ctx = tvm.context(target, 1)
         nnvm_sym, params = nnvm.frontend.from_mxnet(mnist_sym, bd)
-        nnvm_sym, params = spass.nnvm_realize(nnvm_sym, bd, {'data': {}})
+        nnvm_sym, params = spass.yxnet_realize(nnvm_sym, bd, {'data': {}})
         nnvm_graph = nnvm.graph.create(nnvm_sym)
         use_dtype = "int32"
         with nnvm.compiler.build_config(opt_level=0): #, add_pass=["PrecomputePrune"]):

@@ -120,6 +120,60 @@ def fold_cond_op(symbol, params, graph, quant_flag):
 
     return ret_sym, params
 
+def yxnet_realize(symbol, params, inputs_ext):
+    logger = logging.getLogger("log.quant.nnvm.realize")
+
+    def _realize(sym, params, graph, inputs_ext):
+        name = sym.attr('name')
+        attr = sym.list_attr()
+        op_name = sym.attr('op_name')
+        childs = sym_iter(sym.get_children())
+
+        node = sym
+        if 'scalar' in attr:
+            scalar = float(attr['scalar'])
+
+            msg = "name:%s, op_name:%s, scalar:%s"%(name, op_name, attr)
+            assert scalar >= INT32_MIN and scalar <= INT32_MAX, msg
+            assert float(int(scalar)) == scalar, msg
+
+            attr['scalar'] = int(scalar)
+            node = get_nnvm_op(op_name)(*childs, **attr)
+
+        # remove layer: floor in int8
+        if op_name in ['floor', 'ceil', 'fix']:
+            node = childs[0]
+        elif op_name == '__rpow_scalar__':
+            base = int(attr['scalar'])
+            if base == 2:
+                const_1, const_name = op_const(1, graph, var=nnvm.sym.Variable)
+                params[const_name] = nd.array([1])
+                node = nnvm.sym.broadcast_left_shift(const_1, childs[0])
+        elif op_name not in nnvm_identity_ext:
+            logger.critical(
+                "Unsupported op:%s(name=%s, attr=%s) in INT8 Inference network",
+                op_name, name, attr)
+            pass
+        return node, params
+
+    ops = sym_collect_attr(symbol)
+    print (ops)
+    ret_sym, params = topo_visit(symbol, params, get_op=get_nnvm_op,
+            logger=logger, inputs_ext=inputs_ext, callback=_realize)
+    args = ret_sym.list_input_names()
+    ret_params = {}
+    for key, value in params.items():
+        if key not in args:
+            logger.warn("key:%s not exists in graph", key)
+            ret_params[key] = value
+        else:
+            msg = "key:%s value:%s"%(key, value)
+            flat = value.asnumpy().flatten()
+            assert all(flat >= INT32_MIN) and all(flat <= INT32_MAX), msg
+            assert all(flat.astype('int32').astype('float32') == flat), msg
+            ret_params[key] = tvm.nd.array(value.astype('int32').asnumpy())
+    return ret_sym, ret_params
+
 def nnvm_realize(symbol, params, inputs_ext):
     """Transform Sim-Quant(Float32 Simulate Int8) to Int8-Inference Graph
         Works:

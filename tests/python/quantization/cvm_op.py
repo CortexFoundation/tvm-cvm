@@ -11,8 +11,8 @@ class Clip(mx.operator.CustomOp):
         self.max = int(clip)
 
     def forward(self, is_train, req, in_data, out_data, aux):
-        X = in_data[0]
         assert is_train == False
+        X = in_data[0]
         a_min, a_max = self.min, self.max
         out = X.clip(a_min=a_min, a_max=a_max)
         self.assign(out_data[0], req[0], out)
@@ -30,8 +30,8 @@ class LeftShift(mx.operator.CustomOp):
         assert self.sb > 0
 
     def forward(self, is_train, req, in_data, out_data, aux):
-        X = in_data[0]
         assert is_train == False
+        X = in_data[0]
         a_min, a_max = self.min, self.max
         out = X * (2 ** (self.sb))
         out = out.clip(a_min=a_min, a_max=a_max)
@@ -52,8 +52,6 @@ class RightShift(mx.operator.CustomOp):
     def forward(self, is_train, req, in_data, out_data, aux):
         assert is_train == False
         X = in_data[0]
-
-        assert is_train == False
         a_min, a_max = self.min, self.max
         out = X / (2 ** (self.sb-1))
         out = out.floor()
