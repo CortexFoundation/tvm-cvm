@@ -64,10 +64,10 @@ void CvmRuntime::Init(const std::string& graph_json,
 }
 
 int64_t CvmRuntime::GetOps(const std::string& graph_json) {
-	std::istringstream is(graph_json);
-	dmlc::JSONReader reader(&is);
-	this->Load(&reader);
-	return this->GetOps();
+  std::istringstream is(graph_json);
+  dmlc::JSONReader reader(&is);
+  this->Load(&reader);
+  return this->GetOps();
 }
 
 
@@ -358,8 +358,8 @@ std::function<void()> CvmRuntime::CreateCVMOp(
   //    std::cout << kv << " " << val << "\n";
       TVMValue v;
       //TODO leak
-	  auto tmp = new char[val.size()  + 1];
-	  strcpy(tmp, val.c_str());
+    auto tmp = new char[val.size()  + 1];
+    strcpy(tmp, val.c_str());
       v.v_str = const_cast<const char*>(tmp);
       arg_ptr->arg_values.push_back(v);
       arg_ptr->arg_tcodes.push_back(kStr);
@@ -385,11 +385,11 @@ std::function<void()> CvmRuntime::CreateCVMOp(
   for (auto& op : ops) {
     if (param.func_name.size() >= op.size() && param.func_name.substr(0, op.size()) == op) {
         int device_type = static_cast<int>(ctxs_[0].device_type);
-	  return [arg_ptr, op, device_type](){
-		  TVMRetValue rv;
-		  TVMArgs targs(arg_ptr->arg_values.data(),
-				  arg_ptr->arg_tcodes.data(),
-				  static_cast<int>(arg_ptr->arg_values.size()));
+    return [arg_ptr, op, device_type](){
+      TVMRetValue rv;
+      TVMArgs targs(arg_ptr->arg_values.data(),
+          arg_ptr->arg_tcodes.data(),
+          static_cast<int>(arg_ptr->arg_values.size()));
 //          std::cout << "tvm.runtime.cvm_cuda." + op << std::endl;
           std::string module_name = "tvm.runtime.cvm";
           if(device_type == kDLGPU)

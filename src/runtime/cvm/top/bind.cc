@@ -9,41 +9,41 @@ using dmlc::any;
 using namespace top;
 
 bool OpParamBinding::has(const std::string& name) {
-	auto it = _map.find(name);
-	return it != _map.end();
+  auto it = _map.find(name);
+  return it != _map.end();
 }
 
 any OpParamBinding::get(const std::string& name, const std::string& json_) {
-	auto it = _map.find(name);
-	return std::move(it->second(json_));
+  auto it = _map.find(name);
+  return std::move(it->second(json_));
 }
 
 void OpParamBinding::reg(const std::string& name, PtrCreateParam method) {
-	_map[name] = method;
+  _map[name] = method;
 }
 
 OpParamBinding& OpParamBinding::instance() {
-	static OpParamBinding binding;
-	return binding;
+  static OpParamBinding binding;
+  return binding;
 }
 
 class BindingOpParamAction {
-	public:
-		BindingOpParamAction(const std::string& name, PtrCreateParam ptr) {
-			OpParamBinding::instance().reg(name, ptr);
-		}
+  public:
+    BindingOpParamAction(const std::string& name, PtrCreateParam ptr) {
+      OpParamBinding::instance().reg(name, ptr);
+    }
 };
 
 #define BIND_OP_PARAM(OpName, Param)                            \
-	any paramCreator##OpName(const std::string& json_) {          \
+  any paramCreator##OpName(const std::string& json_) {          \
     std::istringstream is(json_);                               \
-		dmlc::JSONReader reader(&is);                               \
-		Param t;										                                \
-		t.Load(&reader);                                            \
-		return t;                                                   \
-	}                                                             \
+    dmlc::JSONReader reader(&is);                               \
+    Param t;                                                    \
+    t.Load(&reader);                                            \
+    return t;                                                   \
+  }                                                             \
   BindingOpParamAction g_bindOp##OpName(                        \
-		#OpName, (PtrCreateParam)paramCreator##OpName)
+    #OpName, (PtrCreateParam)paramCreator##OpName)
 
 BIND_OP_PARAM(conv2d, Conv2DParam);
 BIND_OP_PARAM(dense, DenseParam);
