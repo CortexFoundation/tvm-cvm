@@ -39,7 +39,6 @@ void RunCVM(DLTensor* x, TVMByteArray& params_arr, std::string json_data,
     tvm::runtime::PackedFunc run = mod.GetFunction("run");
     run();
 
-
     // get the function from the module(get output data)
     tvm::runtime::PackedFunc get_output = mod.GetFunction("get_output");
     get_output(0, y);

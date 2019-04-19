@@ -193,7 +193,7 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.conv2d").set_body([]
     DLTensor *w = args[1];
 	DLTensor *b = args[2];
     DLTensor *y = args[3];
-    auto time_start = clock();
+    //auto time_start = clock();
 	std::string groups_str = args[4];
 	std::string dilation_str = args[5];
 	std::string channels_str = args[6];
@@ -256,7 +256,7 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.conv2d").set_body([]
         const int y_n_offset = out_channels * o_h * o_w;
         const int y_c_offset = o_h * o_w;
         const int y_h_offset = o_w;
-        const int x_n_offset = in_channels * x_h * x_w;
+        //const int x_n_offset = in_channels * x_h * x_w;
         const int x_c_offset = x_h * x_w;
         const int x_h_offset = x_w;
         const int w_o_offset = in_channels * filter_h * filter_w;
@@ -617,6 +617,57 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.reshape")
 		 std::memcpy(y->data, x->data, getSize(x) * sizeof(int32_t));
     });
 
+/*\brief:
+ * x, input data
+ * y, output data
+ * precision, clip precision
+ */
+TVM_REGISTER_GLOBAL("tvm.runtime.cvm.cvm_clip")
+    .set_body([](TVMArgs args, TVMRetValue *ret){
+         DLTensor *x = args[0];
+		 DLTensor *y = args[1];
+         int32_t *x_data = static_cast<int32_t*>(x->data);
+         int32_t *y_data = static_cast<int32_t*>(y->data);
+         int32_t precision = static_cast<int32_t>(args[2]);
+         CHECK_GT(precision, 0) << "precision must greater zero";
+         int32_t min = -(1 << (precision-1));
+         int32_t max = -min;
+         for(int i = 0; i < getSize(x); i++){
+            y_data[i] = std::max(std::min(x_data[i], max), min);
+         }
+    });
+
+/*
+ * a, input data
+ * b, shift b, b>0: right shift,  b<0: left shift
+ * c, output data
+ * precision, clip precision
+ * */
+TVM_REGISTER_GLOBAL("tvm.runtime.cvm.cvm_shift")
+    .set_body([](TVMArgs args, TVMRetValue *ret){
+        DLTensor *a = args[0];
+        int32_t b = static_cast<int32_t>(args[1]);
+        DLTensor *c = args[2];
+        int32_t precision = static_cast<int32_t>(args[3]);
+        int32_t* a_data = static_cast<int32_t*>(a->data);
+        int32_t* c_data = static_cast<int32_t*>(c->data);
+        CHECK_GT(precision, 0) << "precision must greater zero";
+        int32_t min = -(1 << (precision-1));
+        int32_t max = -min;
+
+        for(int i = 0; i < getSize(a); i++){
+            int32_t shift_a = a_data[i];
+            if(b == 0) c_data[i] = shift_a;
+            else if(b > 0){
+                shift_a = ((a_data[i] >> (b-1)) +1) >> 1;
+            }else{
+                shift_a = shift_a << (-b);
+            }
+            c_data[i] = std::max(std::min(shift_a, max), min);
+        }
+    });
+
+/*********************************cuda op*********************************************/
 TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.elemwise_add")
 .set_body([](tvm::runtime::TVMArgs args, tvm::runtime::TVMRetValue *rv){
     DLTensor *a = args[0];
@@ -626,7 +677,8 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.elemwise_add")
     int32_t *b_data = static_cast<int32_t*>(b->data);
     int32_t *c_data = static_cast<int32_t*>(c->data);
     int32_t n = getSize(a);
-    cuda_elemwise_add(a_data, b_data, c_data, n, DEBUG_OP);
+    const char *errorStr = cuda_elemwise_add(a_data, b_data, c_data, n, DEBUG_OP);
+    CHECK_EQ(errorStr == NULL, true) << errorStr;
 });
 
 TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.conv2d")
@@ -676,25 +728,27 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.conv2d")
 //	int o_w = static_cast<int>(y->shape[3]);
 
     if(groups == 1){
-        cuda_conv2d(
+        const char* errorStr = cuda_conv2d(
                 x_data, n_batch, in_channels, x_h, x_w,
                 w_data, out_channels, in_channels, filter_h, filter_w,
                 b_data,
-                padding[0],
-                strides[0],
-                dilation[0],
+                padding[0], padding[1],
+                strides[0], strides[1],
+                dilation[0], dilation[1],
                 groups,
                 y_data, n_batch, out_channels, o_h, o_w, DEBUG_OP);
+        CHECK_EQ(errorStr == NULL, true) << errorStr;
     }else{
-        cuda_depthwise_conv2d(
+        const char* errorStr = cuda_depthwise_conv2d(
                 x_data, n_batch, in_channels, x_h, x_w,
                 w_data, out_channels, in_channels, filter_h, filter_w,
                 b_data,
-                padding[0],
-                strides[0],
-                dilation[0],
+                padding[0], padding[1],
+                strides[0], strides[1],
+                dilation[0], dilation[1],
                 groups,
                 y_data, n_batch, out_channels, o_h, o_w, DEBUG_OP);
+        CHECK_EQ(errorStr == NULL, true) << errorStr;
 
     }
  });
@@ -730,12 +784,13 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.cuda_max_pool2d")
 	int o_h = static_cast<int>(y->shape[2]);
 	int o_w = static_cast<int>(y->shape[3]);
 
-    cuda_max_pool(
+    const char* errorStr = cuda_max_pool(
             x_data, n_batch, in_channels, x_h, x_w,
             filter_h, filter_w,
-            padding[0],
-            strides[0],
+            padding[0], padding[1],
+            strides[0], strides[1],
             y_data, n_batch, out_channels, o_h, o_w, DEBUG_OP);
+    CHECK_EQ(errorStr == NULL, true) << errorStr;
     });
 TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.dense")
 .set_body([](TVMArgs args, TVMRetValue* rv) {
@@ -756,13 +811,14 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.dense")
   auto dy = static_cast<int32_t*>(y->data);
   auto dw = static_cast<int32_t*>(w->data);
 
-  cuda_dense(
+  const char* errorStr = cuda_dense(
           dx, dw, dy,
           static_cast<int32_t>(x->shape[0]),
           static_cast<int32_t>(x->shape[1]),
           static_cast<int32_t>(y->shape[1]),
           db,
           DEBUG_OP);
+    CHECK_EQ(errorStr == NULL, true) << errorStr;
 });
 
 TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.clip").set_body([](TVMArgs args, TVMRetValue* rv) {
@@ -907,8 +963,8 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.max_pool2d")
     cuda_max_pool(
             x_data, n_batch, in_channels, x_h, x_w,
             filter_h, filter_w,
-            padding[0],
-            strides[0],
+            padding[0], padding[1],
+            strides[0], padding[1],
             y_data, n_batch, out_channels, o_h, o_w, DEBUG_OP);
 });
 

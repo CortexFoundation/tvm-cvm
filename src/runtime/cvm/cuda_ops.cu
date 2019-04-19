@@ -5,17 +5,22 @@
 #include <memory>
 #include <string.h>
 
+const char* check_cuda_error(cudaError_t error){
+    if(error == cudaSuccess) return NULL;
+    else return cudaGetErrorString(error);
+}
+
 __global__ void kernel_elemwise_add(int32_t *a, int32_t *b, int32_t *c, int32_t n){
     int i = threadIdx.x + blockDim.x * blockIdx.x;
     if(i < n)
         c[i] = a[i] + b[i];
 }
 
-void cuda_elemwise_add(int32_t *a, int32_t *b, int32_t *c, int32_t n, bool debug){
+const char* cuda_elemwise_add(int32_t *a, int32_t *b, int32_t *c, int32_t n, bool debug){
     int32_t *dev_a = a, *dev_b = b, *dev_c = c;
     size_t size = sizeof(int32_t) * n;
     if(debug){
-        cudaMalloc((void**)&dev_a, size);
+        check_cuda_error(cudaMalloc((void**)&dev_a, size));
         cudaMalloc((void**)&dev_b, size);
         cudaMalloc((void**)&dev_c, size);
         cudaMemcpy(dev_a, a, size, cudaMemcpyHostToDevice);
@@ -31,6 +36,7 @@ void cuda_elemwise_add(int32_t *a, int32_t *b, int32_t *c, int32_t n, bool debug
         cudaFree(dev_b);
         cudaFree(dev_c);
     }
+    return check_cuda_error(cudaGetLastError());
 }
 
 #define BS 16
@@ -40,17 +46,17 @@ __global__ void kernel_conv2d(
         const int32_t * __restrict__ input, const int32_t i_n, const int32_t i_c, const int32_t i_h, const int32_t i_w,
         const int32_t * __restrict__ filter, const int32_t f_n, const int32_t f_c, const int32_t f_h, const int32_t f_w,
         const int32_t * __restrict__ bias,
-        const int32_t padding,
-        const int32_t stride,
-        const int32_t dilation, // TODO dilation > 1
+        const int32_t padding_h, const int32_t padding_w,
+        const int32_t stride_h, const int32_t stride_w,
+        const int32_t dilation_h, const int32_t dilation_w, // TODO dilation > 1
         const int32_t groups, // TODO groups > 1
         int32_t *output, const int32_t o_n, const int32_t o_c, const int32_t o_h, const int32_t o_w){
 //    int g_y = blockDim.y * blockIdx.y + threadIdx.y;
     int g_x = blockDim.x * blockIdx.x + threadIdx.x;
     int l_y = threadIdx.y; 
     int l_x = threadIdx.x;
-    int tmp_o_h = i_h + 2 * padding - f_h + 1; // for stride
-    int tmp_o_w = i_w + 2 * padding - f_w + 1;
+    int tmp_o_h = i_h + 2 * padding_h - f_h + 1; // for stride
+    int tmp_o_w = i_w + 2 * padding_w - f_w + 1;
     int perBlockYOneImage = (tmp_o_h+BS-1) / BS;
     int perBlockXOneImage = (tmp_o_w+BS-1) / BS;
     int l_o_c = blockIdx.y / perBlockYOneImage;
@@ -88,9 +94,9 @@ __global__ void kernel_conv2d(
 
     for(int c = 0; c < i_c; c++){
         //load input to shared
-        int l_i_h = l_o_h - padding;
+        int l_i_h = l_o_h - padding_h;
         int i_y = c * i_h + l_i_h;
-        int i_x = g_x - padding;
+        int i_x = g_x - padding_w;
         if(l_i_h < 0 || i_x < 0 || l_i_h >= i_h || i_x >= i_w)
             shared_i[l_y*siw + l_x] = 0;
         else
@@ -147,23 +153,23 @@ __global__ void kernel_conv2d(
         __syncthreads();
     }
 
-    if(l_o_h % stride == 0 && g_x % stride == 0){ //TODO to be optimized
+    if(l_o_h % stride_h == 0 && g_x % stride_w == 0){ //TODO to be optimized
         //int oi = l_o_c * o_h * o_w + l_o_h * o_w + g_x;
         for(int fc = 0; fc < FS; fc++){
             if(l_f_n*FS + fc < o_c){
-                int oi = n*o_c*o_h*o_w + (l_f_n*FS+fc) * o_h * o_w + l_o_h/stride * o_w + g_x/stride;
+                int oi = n*o_c*o_h*o_w + (l_f_n*FS+fc) * o_h * o_w + l_o_h/stride_h * o_w + g_x/stride_w;
                 output[oi] = sum[fc] + shared_b[fc];
             }
         }
     }
 }
-void cuda_conv2d(
+const char* cuda_conv2d(
         int32_t *input, int32_t i_n, int32_t i_c, int32_t i_h, int32_t i_w,
         int32_t *filter, int32_t f_n, int32_t f_c, const int32_t f_h, const int32_t f_w,
         int32_t *bias,
-        int32_t padding,
-        int32_t stride,
-        int32_t dilation, //TODO dilation > 1
+        const int32_t padding_h, const int32_t padding_w,
+        const int32_t stride_h, const int32_t stride_w,
+        const int32_t dilation_h, const int32_t dilation_w, //TODO dilation > 1
         int32_t groups, //TODO groups > 1
         int32_t *output, int32_t o_n, int32_t o_c, int32_t o_h, int32_t o_w, bool debug){
     int32_t *dev_i = input, *dev_f = filter, *dev_o = output, *dev_b = bias;
@@ -183,8 +189,8 @@ void cuda_conv2d(
 //    clock_t start = clock();
     int b_h = BS;
     int b_w = BS;
-    int tmp_o_h = i_h + 2 * padding - f_h + 1; //for stride > 1 , TODO to be optimized
-    int tmp_o_w = i_w + 2 * padding - f_w + 1;
+    int tmp_o_h = i_h + 2 * padding_h - f_h + 1; //for stride > 1 , TODO to be optimized
+    int tmp_o_w = i_w + 2 * padding_w - f_w + 1;
     int32_t g_h = o_n * ((o_c+FS-1)/FS) * ((tmp_o_h + b_h - 1) / b_h);
     int32_t g_w = (tmp_o_w + b_w - 1) / b_w;
     dim3 bDim(b_w, b_h, 1);
@@ -194,9 +200,9 @@ void cuda_conv2d(
             dev_i, i_n, i_c, i_h, i_w,
             dev_f, f_n, f_c, f_h, f_w,
             dev_b, 
-            padding, 
-            stride,
-            dilation,
+            padding_h, padding_w,
+            stride_h, stride_w,
+            dilation_h, dilation_w,
             groups,
             dev_o, o_n, o_c, o_h, o_w);
 //    cudaDeviceSynchronize();
@@ -209,22 +215,23 @@ void cuda_conv2d(
         cudaFree(dev_o);
         cudaFree(dev_b);
     }
+    return check_cuda_error(cudaGetLastError());
 }
 __global__ void kernel_depthwise_conv2d(
         int32_t *input, int32_t i_n, int32_t i_c, int32_t i_h, int32_t i_w,
         int32_t *filter, int32_t f_n, int32_t f_c, int32_t f_h, int32_t f_w,
         int32_t *bias,
-        int32_t padding,
-        int32_t stride,
-        int32_t dilation, // TODO dilation > 1
+        int32_t padding_h, int32_t padding_w,
+        int32_t stride_h, int32_t stride_w,
+        int32_t dilation_h, int32_t dilation_w, // TODO dilation > 1
         int32_t groups, // TODO groups > 1
         int32_t *output, int32_t o_n, int32_t o_c, int32_t o_h, int32_t o_w){
     //    int g_y = blockDim.y * blockIdx.y + threadIdx.y;
     int g_x = blockDim.x * blockIdx.x + threadIdx.x;
     int l_y = threadIdx.y; 
     int l_x = threadIdx.x;
-    int tmp_o_h = i_h + 2 * padding - f_h + 1; // for stride
-    int tmp_o_w = i_w + 2 * padding - f_w + 1;
+    int tmp_o_h = i_h + 2 * padding_h - f_h + 1; // for stride
+    int tmp_o_w = i_w + 2 * padding_w - f_w + 1;
     int perBlockYOneImage = (tmp_o_h+BS-1) / BS;
     int perBlockXOneImage = (tmp_o_w+BS-1) / BS;
     int l_o_c = blockIdx.y / perBlockYOneImage;
@@ -248,9 +255,9 @@ __global__ void kernel_depthwise_conv2d(
     int min_s_x = (l_o_wi+1) * BS <= tmp_o_w ? BS : tmp_o_w%BS;
 
     //load input to shared
-    int l_i_h = l_o_h - padding;
+    int l_i_h = l_o_h - padding_h;
     int i_y = l_o_c * i_h + l_i_h;
-    int i_x = g_x - padding;
+    int i_x = g_x - padding_w;
     // 0~2-> -1~1
     if(l_i_h < 0 || i_x < 0 || l_i_h >= i_h || i_x >= i_w)
         shared_i[l_y*siw + l_x] = 0;
@@ -299,19 +306,19 @@ __global__ void kernel_depthwise_conv2d(
     } 
     __syncthreads();
 
-    if(l_o_h % stride == 0 && g_x % stride == 0){
+    if(l_o_h % stride_h == 0 && g_x % stride_w == 0){
         //int oi = l_o_c * o_h * o_w + l_o_h * o_w + g_x;
-        int oi = l_o_c * o_h * o_w + l_o_h/stride * o_w + g_x/stride;
+        int oi = l_o_c * o_h * o_w + l_o_h/stride_h * o_w + g_x/stride_w;
         output[oi] = sum + bias[l_o_c];
     }
 }
-void cuda_depthwise_conv2d(
+const char* cuda_depthwise_conv2d(
         int32_t *input, int32_t i_n, int32_t i_c, int32_t i_h, int32_t i_w,
         int32_t *filter, int32_t f_n, int32_t f_c, int32_t f_h, int32_t f_w,
         int32_t *bias,
-        int32_t padding,
-        int32_t stride,
-        int32_t dilation,
+        int32_t padding_h, int32_t padding_w,
+        int32_t stride_h, int32_t stride_w,
+        int32_t dilation_h, int32_t dilation_w,
         int32_t groups,
         int32_t *output, int32_t o_n, int32_t o_c, int32_t o_h, int32_t o_w, bool debug){
     int32_t *dev_i = input, *dev_f = filter, *dev_o = output, *dev_b = bias;
@@ -331,8 +338,8 @@ void cuda_depthwise_conv2d(
 //    clock_t start = clock();
     int b_h = BS;
     int b_w = BS;
-    int tmp_o_h = i_h + 2 * padding - f_h + 1; //for stride > 1
-    int tmp_o_w = i_w + 2 * padding - f_w + 1;
+    int tmp_o_h = i_h + 2 * padding_h - f_h + 1; //for stride > 1
+    int tmp_o_w = i_w + 2 * padding_w - f_w + 1;
     int32_t g_h = o_n * o_c * ((tmp_o_h + b_h - 1) / b_h);
     int32_t g_w = (tmp_o_w + b_w - 1) / b_w;
     dim3 bDim(b_w, b_h, 1);
@@ -342,9 +349,9 @@ void cuda_depthwise_conv2d(
             dev_i, i_n, i_c, i_h, i_w,
             dev_f, f_n, f_c, f_h, f_w,
             dev_b, 
-            padding, 
-            stride,
-            dilation,
+            padding_h, padding_w,
+            stride_h, stride_w,
+            dilation_h, dilation_w,
             groups,
             dev_o, o_n, o_c, o_h, o_w);
     //cudaDeviceSynchronize();
@@ -357,20 +364,21 @@ void cuda_depthwise_conv2d(
         cudaFree(dev_o);
         cudaFree(dev_b);
     }
+    return check_cuda_error(cudaGetLastError());
 }
 
 __global__ void kernel_max_pool(
         int32_t *input, int32_t i_n/*TODO i_n > 1*/, int32_t i_c, int32_t i_h, int32_t i_w,
         int32_t f_h, int32_t f_w,
-        int32_t padding,
-        int32_t stride,
+        int32_t padding_h, int32_t padding_w,
+        int32_t stride_h, int32_t stride_w,
         int32_t *output, int32_t o_n, int32_t o_c, int32_t o_h, int32_t o_w){
 //    int g_y = blockDim.y * blockIdx.y + threadIdx.y;
     int g_x = blockDim.x * blockIdx.x + threadIdx.x;
     int l_y = threadIdx.y; 
     int l_x = threadIdx.x;
-    int tmp_o_h = i_h + 2 * padding - f_h + 1; // for stride
-    int tmp_o_w = i_w + 2 * padding - f_w + 1;
+    int tmp_o_h = i_h + 2 * padding_h - f_h + 1; // for stride
+    int tmp_o_w = i_w + 2 * padding_w - f_w + 1;
     int perBlockYOneImage = (tmp_o_h+BS-1) / BS;
     int perBlockXOneImage = (tmp_o_w+BS-1) / BS;
     int l_o_c = blockIdx.y / perBlockYOneImage;
@@ -393,9 +401,9 @@ __global__ void kernel_max_pool(
     int min_s_x = (l_o_wi+1) * BS <= tmp_o_w ? BS : tmp_o_w%BS;
 
     //load input to shared
-    int l_i_h = l_o_h - padding;
+    int l_i_h = l_o_h - padding_h;
     int i_y = l_o_c * i_h + l_i_h;
-    int i_x = g_x - padding;
+    int i_x = g_x - padding_w;
     // 0~2-> -1~1
     if(l_i_h < 0 || i_x < 0 || l_i_h >= i_h || i_x >= i_w)
         shared_i[l_y*siw + l_x] = 0;
@@ -438,18 +446,18 @@ __global__ void kernel_max_pool(
     } 
     __syncthreads();
 
-    if(l_o_h % stride == 0 && g_x % stride == 0){
+    if(l_o_h % stride_h == 0 && g_x % stride_w == 0){
         //int oi = l_o_c * o_h * o_w + l_o_h * o_w + g_x;
-        int oi = l_o_c * o_h * o_w + l_o_h/stride * o_w + g_x/stride;
+        int oi = l_o_c * o_h * o_w + l_o_h/stride_h * o_w + g_x/stride_w;
         output[oi] = max_elem;
     }
 }
 
-void cuda_max_pool(
+const char* cuda_max_pool(
         int32_t *input, int32_t i_n/*TODO i_n > 1*/, int32_t i_c, int32_t i_h, int32_t i_w,
         const int32_t f_h, const int32_t f_w,
-        int32_t padding,
-        int32_t stride,
+        int32_t padding_h, int32_t padding_w,
+        int32_t stride_h, int32_t stride_w,
         int32_t *output, int32_t o_n, int32_t o_c, int32_t o_h, int32_t o_w, bool debug){
     int32_t *dev_i = input, *dev_o = output;
     size_t s_i = i_n * i_c * i_h * i_w * sizeof(int32_t);
@@ -463,8 +471,8 @@ void cuda_max_pool(
 //    clock_t start = clock();
     int b_h = BS;
     int b_w = BS;
-    int tmp_o_h = i_h + 2 * padding - f_h + 1; //for stride > 1
-    int tmp_o_w = i_w + 2 * padding - f_w + 1;
+    int tmp_o_h = i_h + 2 * padding_h - f_h + 1; //for stride > 1
+    int tmp_o_w = i_w + 2 * padding_w - f_w + 1;
     int32_t g_h = o_n * o_c * ((tmp_o_h + b_h - 1) / b_h);
     int32_t g_w = (tmp_o_w + b_w - 1) / b_w;
     dim3 bDim(b_w, b_h, 1);
@@ -473,8 +481,8 @@ void cuda_max_pool(
     kernel_max_pool<<<gDim, bDim, share_size>>>(
             dev_i, i_n, i_c, i_h, i_w,
             f_h, f_w,
-            padding, 
-            stride,
+            padding_h, padding_w, 
+            stride_h, stride_w,
             dev_o, o_n, o_c, o_h, o_w);
     //cudaDeviceSynchronize();
 //    clock_t end = clock();
@@ -484,6 +492,7 @@ void cuda_max_pool(
         cudaFree(dev_i);
         cudaFree(dev_o);
     }
+    return check_cuda_error(cudaGetLastError());
 }
 
 #define TILE_WIDTH 16
@@ -525,7 +534,7 @@ __global__ void kernel_dense(
     }
 }
 
-void cuda_dense(
+const char* cuda_dense(
         int32_t *a,
         int32_t *b,
         int32_t *c,
@@ -562,6 +571,7 @@ void cuda_dense(
         cudaFree(dev_c);
         cudaFree(dev_bias);
     }
+    return check_cuda_error(cudaGetLastError());
 }
 
 __global__ void kernel_clip(const int32_t *x, int32_t *y,
@@ -571,7 +581,7 @@ __global__ void kernel_clip(const int32_t *x, int32_t *y,
         y[i] = max(min(x[i], maxV), minV);
     }
 }
-void cuda_clip(const int32_t *x, int32_t *y, const int32_t n, const int32_t max, const int32_t min, bool debug){
+const char* cuda_clip(const int32_t *x, int32_t *y, const int32_t n, const int32_t max, const int32_t min, bool debug){
     const int32_t *dev_x = x;
     int32_t *tmp_x;
     int32_t *dev_y = y;
@@ -592,6 +602,7 @@ void cuda_clip(const int32_t *x, int32_t *y, const int32_t n, const int32_t max,
         cudaFree(tmp_x);
         cudaFree(dev_y);
     }
+    return check_cuda_error(cudaGetLastError());
 }
 
 __global__ void kernel_relu(const int32_t *x, int32_t*y, const int32_t n){
@@ -600,7 +611,7 @@ __global__ void kernel_relu(const int32_t *x, int32_t*y, const int32_t n){
         y[i] = max(x[i], 0);
     }
 }
-void cuda_relu(const int32_t *x, int32_t *y, const int32_t n, bool debug){
+const char* cuda_relu(const int32_t *x, int32_t *y, const int32_t n, bool debug){
     const int32_t *dev_x = x;
     int32_t *tmp_x;
     int32_t *dev_y = y;
@@ -621,6 +632,7 @@ void cuda_relu(const int32_t *x, int32_t *y, const int32_t n, bool debug){
         cudaFree(tmp_x);
         cudaFree(dev_y);
     }
+    return check_cuda_error(cudaGetLastError());
 }
 
 __global__ void kernel_flatten(const int32_t *x, int32_t*y, const int32_t n){
@@ -629,7 +641,7 @@ __global__ void kernel_flatten(const int32_t *x, int32_t*y, const int32_t n){
         y[i] = x[i];
     }
 }
-void cuda_flatten(const int32_t *x, int32_t *y, const int32_t n, bool debug){
+const char* cuda_flatten(const int32_t *x, int32_t *y, const int32_t n, bool debug){
     const int32_t *dev_x = x;
     int32_t *tmp_x;
     int32_t *dev_y = y;
@@ -650,6 +662,7 @@ void cuda_flatten(const int32_t *x, int32_t *y, const int32_t n, bool debug){
         cudaFree(tmp_x);
         cudaFree(dev_y);
     }
+    return check_cuda_error(cudaGetLastError());
 }
 
 __global__ void kernel_broadcast_add(const int32_t *a, const int32_t *b, int32_t*c, const int32_t n){
@@ -658,7 +671,7 @@ __global__ void kernel_broadcast_add(const int32_t *a, const int32_t *b, int32_t
         c[i] = a[i] + b[0];
     }
 }
-void cuda_broadcast_add(const int32_t *a, const int32_t *b, int32_t* c, const int32_t n, bool debug){
+const char* cuda_broadcast_add(const int32_t *a, const int32_t *b, int32_t* c, const int32_t n, bool debug){
     const int32_t *dev_a = a, *dev_b = b;
     int32_t *tmp_a, *tmp_b;
     int32_t *dev_c = c;
@@ -683,6 +696,7 @@ void cuda_broadcast_add(const int32_t *a, const int32_t *b, int32_t* c, const in
         cudaFree(dev_c);
         cudaFree(tmp_b);
     }
+    return check_cuda_error(cudaGetLastError());
 }
 __global__ void kernel_broadcast_sub(const int32_t *a, const int32_t *b, int32_t*c, const int32_t n){
     int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -690,7 +704,7 @@ __global__ void kernel_broadcast_sub(const int32_t *a, const int32_t *b, int32_t
         c[i] = a[i] - b[0];
     }
 }
-void cuda_broadcast_sub(const int32_t *a, const int32_t *b, int32_t* c, const int32_t n, bool debug){
+const char* cuda_broadcast_sub(const int32_t *a, const int32_t *b, int32_t* c, const int32_t n, bool debug){
     const int32_t *dev_a = a, *dev_b = b;
     int32_t *tmp_a, *tmp_b;
     int32_t *dev_c = c;
@@ -715,6 +729,7 @@ void cuda_broadcast_sub(const int32_t *a, const int32_t *b, int32_t* c, const in
         cudaFree(dev_c);
         cudaFree(tmp_b);
     }
+    return check_cuda_error(cudaGetLastError());
 }
 __global__ void kernel_broadcast_mul(const int32_t *a, const int32_t *b, int32_t*c, const int32_t n){
     int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -722,7 +737,7 @@ __global__ void kernel_broadcast_mul(const int32_t *a, const int32_t *b, int32_t
         c[i] = a[i] * b[0];
     }
 }
-void cuda_broadcast_mul(const int32_t *a, const int32_t *b, int32_t* c, const int32_t n, bool debug){
+const char* cuda_broadcast_mul(const int32_t *a, const int32_t *b, int32_t* c, const int32_t n, bool debug){
     const int32_t *dev_a = a, *dev_b = b;
     int32_t *tmp_a, *tmp_b;
     int32_t *dev_c = c;
@@ -747,6 +762,7 @@ void cuda_broadcast_mul(const int32_t *a, const int32_t *b, int32_t* c, const in
         cudaFree(dev_c);
         cudaFree(tmp_b);
     }
+    return check_cuda_error(cudaGetLastError());
 }
 __global__ void kernel_broadcast_div(const int32_t *a, const int32_t *b, int32_t*c, const int32_t n){
     int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -754,7 +770,7 @@ __global__ void kernel_broadcast_div(const int32_t *a, const int32_t *b, int32_t
         c[i] = a[i] / b[0];
     }
 }
-void cuda_broadcast_div(const int32_t *a, const int32_t *b, int32_t* c, const int32_t n, bool debug){
+const char* cuda_broadcast_div(const int32_t *a, const int32_t *b, int32_t* c, const int32_t n, bool debug){
     const int32_t *dev_a = a, *dev_b = b;
     int32_t *tmp_a, *tmp_b;
     int32_t *dev_c = c;
@@ -779,6 +795,7 @@ void cuda_broadcast_div(const int32_t *a, const int32_t *b, int32_t* c, const in
         cudaFree(dev_c);
         cudaFree(tmp_b);
     }
+    return check_cuda_error(cudaGetLastError());
 }
 __global__ void kernel_broadcast_right_shift(const int32_t *a, const int32_t *b, int32_t*c, const int32_t n){
     int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -786,7 +803,7 @@ __global__ void kernel_broadcast_right_shift(const int32_t *a, const int32_t *b,
         c[i] = a[i] >> b[0];
     }
 }
-void cuda_broadcast_right_shift(const int32_t *a, const int32_t* b, int32_t* c, const int32_t n, bool debug){
+const char* cuda_broadcast_right_shift(const int32_t *a, const int32_t* b, int32_t* c, const int32_t n, bool debug){
     const int32_t *dev_a = a;
     const int32_t *dev_b = b;
     int32_t *tmp_a, *tmp_b;
@@ -812,6 +829,7 @@ void cuda_broadcast_right_shift(const int32_t *a, const int32_t* b, int32_t* c, 
         cudaFree(dev_c);
         cudaFree(tmp_b);
     }
+    return check_cuda_error(cudaGetLastError());
 }
 __global__ void kernel_broadcast_left_shift(const int32_t *a, const int32_t *b, int32_t*c, const int32_t n){
     int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -819,7 +837,7 @@ __global__ void kernel_broadcast_left_shift(const int32_t *a, const int32_t *b, 
         c[i] = a[i] << b[0];
     }
 }
-void cuda_broadcast_left_shift(const int32_t *a, const int32_t *b, int32_t* c, const int32_t n, bool debug){
+const char* cuda_broadcast_left_shift(const int32_t *a, const int32_t *b, int32_t* c, const int32_t n, bool debug){
     const int32_t *dev_a = a, *dev_b = b;
     int32_t *tmp_a, *tmp_b;
     int32_t *dev_c = c;
@@ -844,6 +862,7 @@ void cuda_broadcast_left_shift(const int32_t *a, const int32_t *b, int32_t* c, c
         cudaFree(dev_c);
         cudaFree(tmp_b);
     }
+    return check_cuda_error(cudaGetLastError());
 }
 
 //TODO use reduce
@@ -866,7 +885,7 @@ __global__ void kernel_sum(const int32_t *x,
     }
     
 }
-void cuda_sum(
+const char* cuda_sum(
         const int32_t *x,
         const int32_t n_batch, const int32_t channels, const int32_t h, const int32_t w,
         int32_t *y,
@@ -892,12 +911,14 @@ void cuda_sum(
         cudaFree(tmp_x);
         cudaFree(dev_y);
     }
+    return check_cuda_error(cudaGetLastError());
 }
 
-void cuda_reshape(const int32_t *x, int32_t *y, int32_t n, bool debug){
-    if(x == y) return;
+const char* cuda_reshape(const int32_t *x, int32_t *y, int32_t n, bool debug){
+    if(x == y) return NULL;
     if(debug)
 		 memcpy(y, x, n * sizeof(int32_t));
     else
         cudaMemcpy(y, x, n*sizeof(int32_t), cudaMemcpyDeviceToDevice);
+    return check_cuda_error(cudaGetLastError());
 }
