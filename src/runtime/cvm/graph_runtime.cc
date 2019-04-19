@@ -184,6 +184,8 @@ void CvmRuntime::LoadParams(dmlc::Stream* strm) {
   }
 }
 
+std::vector<std::pair<int64_t, NDArray> > CvmRuntime::history_storage_pool_;
+
 void CvmRuntime::SetupStorage() {
   // Grab saved optimization plan from graph.
   std::vector<TVMType> vtype;
@@ -222,10 +224,10 @@ void CvmRuntime::SetupStorage() {
     pool_entry[sid].size = std::max(pool_entry[sid].size, bytes);
     pool_entry[sid].device_type = device_type;
   }
-
+	std::vector<std::tuple<int64_t, TVMContext, int, int> > pool_elements; 
   // Allocate the space.
-  for (const auto& pit : pool_entry) {
-    std::vector<int64_t> shape;
+  for (auto i = 0; i < pool_entry.size(); ++i) {
+		PoolEntry& pit = pool_entry[i];
     // This for loop is very fast since there are usually only a couple of
     // devices available on the same hardware.
     const auto& cit =
@@ -233,10 +235,54 @@ void CvmRuntime::SetupStorage() {
           return pit.device_type == static_cast<int>(c.device_type);
         });
     TVMContext ctx = cit == ctxs_.end() ? ctxs_[0] : *cit;
-    shape.push_back(static_cast<int64_t>(pit.size + 3) / 4);
-    storage_pool_.push_back(
-        NDArray::Empty(shape, DLDataType{kDLFloat, 32, 1}, ctx));
+		pool_elements.push_back(std::make_tuple(static_cast<int64_t>((pit.size + 3) / 4), ctx, i, -1));
   }
+
+	std::sort(pool_elements.begin(), pool_elements.end(), [](
+				const std::tuple<int64_t, TVMContext, int, int> &a,
+				const std::tuple<int64_t, TVMContext, int, int> &b){
+				return std::get<0>(a) > std::get<0>(b);
+			});
+
+	int it = 0;
+	auto &history_pool = CvmRuntime::history_storage_pool_;
+	std::cout << "pool_size: " << history_pool.size() << std::endl;
+	for (auto &e: pool_elements) {
+		while (it < history_pool.size() && history_pool.at(it).first < std::get<0>(e)) {
+			it++;
+		}
+		if (it < history_pool.size()) {
+			e = std::make_tuple(std::get<0>(e), std::get<1>(e), std::get<2>(e), it++);
+		}
+	}
+
+	std::sort(pool_elements.begin(), pool_elements.end(), [](
+				const std::tuple<int64_t, TVMContext, int, int> &a,
+				const std::tuple<int64_t, TVMContext, int, int> &b){
+				return std::get<2>(a) < std::get<2>(b);
+			});
+
+	for (auto &e: pool_elements) {
+		auto size = std::get<0>(e);
+		auto pool_id = std::get<3>(e);
+  	std::vector<int64_t> shape{size};
+		auto ctx = std::get<1>(e);
+		if (ctx.device_type != 2) std::cout << ctx.device_id << ctx.device_type << std::endl;
+		auto default_type = DLDataType{kDLInt, 32, 1};
+	  if (pool_id == -1) {
+			auto mem = NDArray::Empty(shape, default_type, ctx);
+			storage_pool_.push_back(mem);
+			history_pool.push_back(std::make_pair(size, mem));
+		} else {
+			storage_pool_.push_back(
+				history_pool.at(pool_id).second.CreateView(shape, default_type)
+			);
+		}
+	}
+	std::sort(history_pool.begin(), history_pool.end(), []
+			(const std::pair<int64_t, NDArray>& a, const std::pair<int64_t, NDArray>& b){
+				return a.first > b.first;
+			});
 
   // Assign the pooled entries. A unified memory pool is used to simplifiy
   // memory assignment for each node entry. The allocated memory on each device

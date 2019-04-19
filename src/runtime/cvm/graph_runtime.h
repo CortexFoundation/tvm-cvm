@@ -444,7 +444,8 @@ class CvmRuntime : public ModuleNode {
   std::vector<TVMContext> ctxs_;
   /*! \brief Common storage pool for all devices. */
   std::vector<NDArray> storage_pool_;
-  /*! \brief Data entry of each node. */
+	static std::vector<std::pair<int64_t, NDArray> > history_storage_pool_;
+	/*! \brief Data entry of each node. */
   std::vector<NDArray> data_entry_;
   /*! \brief Operator on each node. */
   std::vector<std::function<void()> > op_execs_;
