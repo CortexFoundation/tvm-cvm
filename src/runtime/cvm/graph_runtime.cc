@@ -335,22 +335,28 @@ std::function<void()> CvmRuntime::CreateCVMOp(
   // Get compiled function from the module that contains both host and device
   // code.
   auto ops = std::vector<std::string>{"dense", "conv2d", "flatten", "broadcast_add", "broadcast_sub", "broadcast_mul", "broadcast_div",
-      "broadcast_right_shift", "broadcast_left_shift", "clip", "relu", "max_pool2d", "sum", "elemwise_add", "reshap"};
+      "broadcast_right_shift", "broadcast_left_shift", "clip", "relu", "max_pool2d", "sum", "elemwise_add", "reshape"};
   for (auto& op : ops) {
     if (param.func_name.size() >= op.size() && param.func_name.substr(0, op.size()) == op) {
-	  return [arg_ptr, op](){
+        int device_type = static_cast<int>(ctxs_[0].device_type);
+	  return [arg_ptr, op, device_type](){
 		  TVMRetValue rv;
 		  TVMArgs targs(arg_ptr->arg_values.data(),
 				  arg_ptr->arg_tcodes.data(),
 				  static_cast<int>(arg_ptr->arg_values.size()));
-          //std::cout << "tvm.runtime.cvm." + op << std::endl;
-          auto func = tvm::runtime::Registry::Get("tvm.runtime.cvm." + op);
+//          std::cout << "tvm.runtime.cvm_cuda." + op << std::endl;
+          std::string module_name = "tvm.runtime.cvm";
+          if(device_type == kDLGPU)
+            module_name += "_cuda";
+          module_name += ".";
+          auto func = tvm::runtime::Registry::Get(module_name + op);
           assert(func != NULL);
           func->CallPacked(targs, &rv);
 
       };
     }
   }
+  std::cout << "param.func_name not found : " << param.func_name << std::endl;
 
 //  std::cout << param.func_name << " " << param.attrs << "\n";
   return [](){};
