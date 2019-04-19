@@ -13,6 +13,7 @@ from sym_pass import *
 from quant_utils import *
 from utils import *
 import sim_quant_helper as sim
+import cvm_op as cvm
 
 from scipy import stats
 
@@ -22,6 +23,23 @@ disable_requant_ops = [
     'Activation', 'Pooling', 'Flatten',
     'slice', 'clip',
 ]
+
+def _collect_symbol_ext(sym, params, graph, inputs_ext, scale_shapes):
+    name = sym.attr('name')
+    op_name = sym.attr('op_name')
+    attr = sym.list_attr()
+    childs = sym_iter(sym.get_children())
+
+    scale_shapes[name] = (1,)
+    # if op_name == 'Convolution' and attr['num_group'] == attr['num_filter']:
+    #     X, W = childs[0], childs[1]
+    #     channel = int(attr['num_filter'])
+    #     scale_shapes[W.attr('name')] = (channel, 1, 1, 1)
+    #     scale_shapes[X.attr('name')] = (1, channel, 1, 1)
+    #     if attr['no_bias'] == 'False':
+    #         B_name = childs[2].attr('name')
+    #         scale_shapes[B_name] = (channel,)
+    return sym, params
 
 def _smooth_distribution(p, eps=0.0001):
     """Given a discrete distribution (may have not been normalized to 1),
@@ -141,32 +159,50 @@ def _get_thresholds(output, calib_mode='naive'):
         max_range = opt_th
     return (min_range, max_range)
 def _calib_sym_collect_thresholds(sym, params, graph, inputs_ext,
-        th_dict, calib_data, calib_mode='naive', ctx=mx.gpu()):
+        scale_shapes, th_dict, calib_data, last_out=[None],
+        calib_mode='naive', ctx=mx.gpu()):
     logger = logging.getLogger('log.calib.sym.collect.thresholds')
 
     name = sym.attr('name')
     op_name = sym.attr('op_name')
     childs = sym_iter(sym.get_children())
+    attr = sym.list_attr()
 
     if op_name == 'null':
         if name in inputs_ext:
-            output = calib_data
+            last_out[0] = output = calib_data
         else:
-            output = params[name]
+            last_out[0] = output = params[name]
     elif op_name in disable_requant_ops:
         assert len(childs) == 1
-        output = nd.array(th_dict[childs[0].attr('name')])
+        output = last_out[0]
     else:
         args = sym.list_inputs()
         inputs = [mx.sym.var(n) for n in inputs_ext if n in args]
         graph = SymbolBlock(sym, inputs)
         load_parameters(graph, params, ctx=ctx)
-        output = graph.forward(calib_data.as_in_context(ctx))
+        last_out[0] = output = graph.forward(calib_data.as_in_context(ctx))
 
-    th_dict[name] = _get_thresholds(output, calib_mode)
-    logger.debug("collect symbol %-40s output min_range=%-20s, max_range=%-20s",
-            name, th_dict[name][0], th_dict[name][1])
+    slices = [output]
+    shape = scale_shapes[name]
+    for idx, s in enumerate(shape):
+        if s == 1 :
+            continue
+        begin, end = [None]*len(shape), [None]*len(shape)
+        tmp_slices = []
+        for sli in slices:
+            for start in range(s):
+                begin[idx], end[idx] = start, start+1
+                tmp = sli.slice(begin=begin, end=end)
+                tmp_slices.append(tmp)
+        slices = tmp_slices
 
+    th_dict[name] = nd.zeros((len(slices), 2))
+    for idx, out in enumerate(slices):
+        th_dict[name][idx] = _get_thresholds(out, calib_mode)
+    logger.debug("collect symbol %-30s output shape %-20s vs. %-20s th_dict: (%s, %s)",
+            name, output.shape, shape,
+            th_dict[name].min().asscalar(), th_dict[name].max().asscalar())
     return sym, params
 
 def _calib_sym_zero_symmetric(sym, params, graph, inputs_ext,
@@ -339,7 +375,8 @@ def _calib_sym_zero_rewrite(sym, params, graph, inputs_ext,
 def _sim_requantize_op(sym, scale, params, graph):
     name = sym.attr('name')
     scale_name = name + '_requant_scale'
-    assert scale_name not in graph
+    assert scale_name not in graph, "scale name %s has existed in graph" \
+            % (scale_name)
     scale_sym = graph[scale_name] = mx.sym.var(scale_name, shape=scale.shape)
     params[scale_name] = scale
 
@@ -392,24 +429,231 @@ def _realize_sim_requant_op(sym, sb, params, graph, target_bit=8):
     out = mx.sym.floor(out)
     out = mx.sym.clip(out, a_min=-clip_range, a_max=clip_range)
     return out
+def _realize_cvm_requant_op(sym, sb, params, graph, target_bit=8):
+    name = sym.attr('name')
+    requant_op = name + '_cvm_shift'
+    assert requant_op not in graph
+    if sb == 0:
+        return mx.sym.Custom(sym, precision=target_bit,
+                name=requant_op, op_type='cvm_clip')
+    elif sb < 0:
+        return mx.sym.Custom(sym, shift_bit=-sb, precision=target_bit,
+                name=requant_op, op_type='cvm_left_shift')
+    else:
+        return mx.sym.Custom(sym, shift_bit=sb, precision=target_bit,
+                name=requant_op, op_type='cvm_right_shift')
 
-# simlutate and realize graph pass
+def _annotate_symbol(sym, params, graph, inputs_ext,
+        scale_shapes, th_dict, scale_helper, target_bits, get_scale):
+    logger = logging.getLogger('log.calib.sym.sim.rewrite')
+    name = sym.attr('name')
+    op_name = sym.attr('op_name')
+    childs = sym_iter(sym.get_children())
+    attr = sym.list_attr()
+
+    node = sym
+    scale = get_scale(th_dict[name], default_target_bit)
+    scale_helper[name] = scale.reshape(scale_shapes[name])
+    target_bits[name] = default_target_bit
+    if op_name == 'null':
+        if name in inputs_ext:
+            inputs_ext[name]['target_bit'] = target_bits[name]
+        return node, params
+    elif op_name in disable_requant_ops:
+        X_name = childs[0].name
+        requant_scale = scale_helper[name] / scale_helper[X_name]
+    elif op_name in ['Convolution']:
+        X, W = childs[0], childs[1]
+        X_name, W_name = X.attr('name'), W.attr('name')
+        X_scale = scale_helper[X_name]
+        W_scale = scale_helper[W_name]
+        in_scale = X_scale * W_scale.reshape(scale_shapes[X_name])
+        if attr['no_bias'] == 'False':
+            B_name = childs[2].attr('name')
+            scale_helper[B_name] = in_scale.reshape(scale_shapes[B_name])
+            target_bits[B_name] = bias_target_bit
+        requant_scale = scale_helper[name] / in_scale
+    elif op_name in ['FullyConnected']:
+        X, W = childs[0], childs[1]
+        X_name, W_name = X.attr('name'), W.attr('name')
+        if attr['no_bias'] == 'False':
+            B_name = childs[2].attr('name')
+            scale_helper[B_name] = scale_helper[X_name] * scale_helper[W_name]
+            target_bits[B_name] = bias_target_bit
+
+        in_scale = scale_helper[X_name] * scale_helper[W_name]
+        out_scale = scale_helper[name]
+        requant_scale = out_scale / in_scale
+    elif op_name == 'broadcast_mul':
+        X, W = childs[0], childs[1]
+        X_name, W_name = X.attr('name'), W.attr('name')
+        in_scale = scale_helper[X_name] * scale_helper[W_name]
+        out_scale = scale_helper[name]
+        requant_scale = out_scale / in_scale
+    elif op_name in ['elemwise_add', 'broadcast_add', 'broadcast_sub']:
+        A, B = childs[0], childs[1]
+        A_name, B_name = A.attr('name'), B.attr('name')
+
+        A_scale, B_scale = scale_helper[A_name], scale_helper[B_name]
+        in_scale = A_scale
+        if A_scale > B_scale:
+            in_scale, offset = B_scale, B_scale / A_scale
+            A = _sim_requantize_op(A, offset, params, graph)
+            logger.debug("symbol %s requant scale=%s out=%s",
+                    A_name, offset.min().asscalar(),
+                    scale_helper[A_name].min().asscalar())
+        elif A_scale < B_scale:
+            in_scale, offset = A_scale, A_scale / B_scale
+            B = _sim_requantize_op(B, offset, params, graph)
+            logger.debug("symbol %s requant scale=%s out=%s",
+                    B_name, offset.min().asscalar(),
+                    scale_helper[A_name].min().asscalar())
+
+        requant_scale = scale_helper[name] / in_scale
+        node = get_mxnet_op(op_name)(A, B, **attr, name=name)
+    elif op_name in ['sum']:
+        X_name = childs[0].attr('name')
+        requant_scale = scale_helper[name] / scale_helper[X_name]
+    else:
+        logger.critical('Unrecognized op:%s(%s) . attrs(%s)', op_name, name, attr)
+
+    if (requant_scale.asnumpy() != 1).any():
+        node = _sim_requantize_op(node, requant_scale, params, graph)
+        logger.debug("symbol %-40s requant scale=%-20s out=%-20s in=%s",
+                name, requant_scale.shape, scale_helper[name].shape,
+                [scale_helper[c.attr('name')].shape for c in childs] if childs else [])
+    scale_helper[node.attr('name')] = scale_helper[name]
+    scale_shapes[node.attr('name')] = scale_shapes[name]
+    return node, params
+def _annotate_parameters(sym, params, graph, inputs_ext,
+        scale_helper, target_bits):
+    logger = logging.getLogger('log.annotate.parameters')
+    if sym.attr('op_name') != 'null':
+        return sym, params
+    name = sym.attr('name')
+    if name in inputs_ext:
+        inputs_ext[name]['scale'] = scale_helper[name]
+    elif name in scale_helper:
+        params[name] = params[name] * scale_helper[name]
+    return sym, params
+def _annotate_requantize_op(sym, params, graph, inputs_ext):
+    logger = logging.getLogger('log.calib.sim.post.scale')
+    if not _is_sim_requantize_op(sym):
+        return sym, params
+    childs = sym_iter(sym.get_children())
+    A, B = childs[0], childs[1]
+    scales = params[B.attr('name')]
+    scale_shape = scales.shape
+    size = np.product(scale_shape)
+    if size == 1:
+        return sym, params
+
+    slices = [A]
+    for idx, s in enumerate(scale_shape):
+        if s == 1:
+            continue
+        begin, end = [None] * len(scale_shape), [None] * len(scale_shape)
+        tmp_slices = []
+        for sli in slices:
+            for start in range(s):
+                begin[idx], end[idx] = start, start+1
+                tmp = mx.sym.slice(sli, begin=begin, end=end)
+                tmp_slices.append(tmp)
+        slices = tmp_slices
+
+    logger.info("requantize op %s split into %s slices matching with shape(%s)",
+            sym.attr('name'), size, scale_shape)
+    nodes = []
+    scales = scales.asnumpy().flatten()
+    for i in range(size):
+        tmp = _sim_requantize_op(slices[i], nd.array([scales[i]]), params, graph)
+        nodes.append(tmp)
+
+    for idx, s in enumerate(reversed(scale_shape)):
+        if s == 1:
+            continue
+        assert len(nodes) % s == 0, "nodes: %s, shape: %s" \
+                % (len(nodes), scale_shape)
+        tmp_nodes = []
+        for begin in range(0, len(nodes), s):
+            dim = len(scale_shape)-1-idx
+            tmp = mx.sym.concat(*nodes[begin:begin+s], dim=dim)
+            tmp_nodes.append(tmp)
+        nodes = tmp_nodes
+
+    assert len(nodes) == 1
+    node = nodes[0]
+    return node, params
+def _realize_symbol(sym, params, graph, inputs_ext):
+    logger = logging.getLogger('log.calib.realize')
+    if not _is_sim_requantize_op(sym):
+        return sym, params
+
+    childs = sym_iter(sym.get_children())
+    X, B = childs[0], childs[1]
+    X_name, B_name = X.attr('name'), B.attr('name')
+
+    scale = params[B_name].asscalar()
+    if scale == 1:
+        logger.debug("layer %s skip realize requant with one", sym.attr('name'))
+        return X, params
+    frac, sb = sim.extract_float(scale)
+    Y_range = 2 ** (default_target_bit - 1) - 1
+    A_range = Y_range / scale
+
+    if frac == 0:
+        var0, _ = op_const(0, graph, var=mx.sym.var)
+        params[var0.attr('name')] = nd.array([0])
+        node = mx.sym.broadcast_mul(X, var0)
+        logger.debug("layer %s skip realize requant with zero", sym.attr('name'))
+        return node, params
+
+    # Y = Z * frac * (2 ** sb) <=>
+    # Y = (Z -> Int16) * (frac -> Int16) * (2 ** sb_)
+    A_target_bit, B_target_bit = 16, 16
+    A_bit = math.ceil(math.log2(A_range)) + 1
+    B_bit = math.ceil(math.log2(frac)) + 1
+    A_target_bit = min(A_bit, A_target_bit)
+    B_target_bit = min(B_bit, B_target_bit)
+    A_target_bit = 32 - B_target_bit if B_target_bit < 16 else A_target_bit
+    B_target_bit = 32 - A_target_bit if A_target_bit < 16 else B_target_bit
+    A_target_bit = min(A_bit, A_target_bit)
+    B_target_bit = min(B_bit, B_target_bit)
+    A_sb, B_sb = A_bit - A_target_bit, B_bit - B_target_bit
+    Y_sb = (-sb) - A_sb - B_sb
+
+    X = _realize_cvm_requant_op(X, A_sb, params, graph, A_target_bit)
+    params[B_name] = nd.array([round(frac / (2 ** B_sb))])
+    B_range = 2 ** (B_target_bit - 1) - 1
+    params[B_name] = nd.clip(params[B_name],
+            a_min=-B_range, a_max=B_range)
+    attr = { 'precision': str(B_target_bit) }
+    B = mx.sym.var(B_name, shape=(1,), attr=attr)
+    node = mx.sym.broadcast_mul(X, B)
+    node = _realize_cvm_requant_op(node, Y_sb, params, graph, target_bit=8)
+    logger.debug("layer %s Y(%s >> %s) X(%s|%s >> %s) B(%s|%s vs. %s %s >> %s)",
+            sym.attr('name'), Y_range, Y_sb, A_range, A_bit, A_sb, B_range,
+            B_bit, frac, sb, B_sb)
+    return node, params
 def _realize_parameters(sym, params, graph, inputs_ext, target_bits, params_sim):
     logger = logging.getLogger('log.calib.realize.parameters')
+    if sym.attr('op_name') != 'null':
+        return sym, params
     name = sym.attr('name')
-    if name in params_sim:
-        assert sym.attr('op_name') == 'null'
-        data = params[name]
-        params[name] = sim.int_realize(data, target_bits[name], logger=logger)
-        error = params[name] - data
-        error_rate = error / data
-        rate = nd.norm(error_rate).asscalar() / np.product(data.shape)
-        if rate > 0.001:
-            logger.warn("realize parameter %-60s average rate=%10.9f shape=%s",
-                    name, rate, data.shape)
-        else:
-            logger.debug("realize parameter %-60s average rate=%10.9f shape=%s",
-                    name, rate, data.shape)
+    if name in inputs_ext or name not in target_bits:
+        return sym, params
+    data = params[name]
+    params[name] = sim.int_realize(data, target_bits[name], logger=logger)
+    # calculate error
+    error = params[name].astype('float32') - data
+    error_rate = error / data
+    rate = nd.norm(error_rate).asscalar() / np.product(data.shape)
+    if rate > 0.001:
+        logger.warn("realize parameter %-60s average rate=%10.9f shape=%s",
+                name, rate, data.shape)
+    else:
+        logger.debug("realize parameter %-60s average rate=%10.9f shape=%s",
+                name, rate, data.shape)
     return sym, params
 
 def _sim_scale(sym, params, graph, inputs_ext,
@@ -580,7 +824,6 @@ def _sim_realize(sym, params, graph, inputs_ext):
     frac, sb = sim.extract_float(scale)
     Y_range = 2 ** (default_target_bit - 1) - 1
     A_range = Y_range / scale
-
     if frac == 0:
         var0, _ = op_const(0, graph, var=mx.sym.var)
         params[var0.attr('name')] = nd.array([0])
@@ -740,6 +983,53 @@ def _simple_sim_realize_requantize_op(sym, params, graph, inputs_ext):
     return node, params
 
 # interface API
+def sym_simulate(symbol, params, inputs_ext, calib_data, ctx):
+    logger = logging.getLogger('log.simulate')
+    th_dict, target_bits, scale_helper, params_sim = {}, {}, {}, []
+    scale_shapes = {}
+    topo_visit(symbol, params, get_op=get_mxnet_op,
+            logger=logger, inputs_ext=inputs_ext,
+            callback=_collect_symbol_ext, scale_shapes=scale_shapes)
+    topo_visit(symbol, params, get_op=get_mxnet_op,
+            logger=logger, inputs_ext=inputs_ext,
+            callback=_calib_sym_collect_thresholds, scale_shapes=scale_shapes,
+            th_dict=th_dict, calib_data=calib_data,
+            calib_mode='naive', ctx=ctx)
+    symbol, params = topo_visit(symbol, params, get_op=get_mxnet_op,
+            logger=logger, inputs_ext=inputs_ext,
+            callback=_annotate_symbol, th_dict=th_dict, scale_shapes=scale_shapes,
+            scale_helper=scale_helper, target_bits=target_bits,
+            get_scale=sim.get_sim_scale)
+    _, params = topo_visit(symbol, params, get_op=get_mxnet_op,
+            logger=logger, inputs_ext=inputs_ext,
+            callback=_annotate_parameters,
+            scale_helper=scale_helper, target_bits=target_bits)
+    symbol, params = topo_visit(symbol, params, get_op=get_mxnet_op,
+            logger=logger, inputs_ext=inputs_ext,
+            callback=_annotate_requantize_op)
+    return symbol, params, target_bits
+
+def sym_realize(symbol, params, inputs_ext, target_bits):
+    logger = logging.getLogger('log.realize')
+    _, params = topo_visit(symbol, params, get_op=get_mxnet_op,
+           logger=logger, inputs_ext=inputs_ext,
+           callback=_realize_parameters,
+           target_bits=target_bits, params_sim={})
+    symbol, params = topo_visit(symbol, params, get_op=get_mxnet_op,
+           logger=logger, inputs_ext=inputs_ext,
+           callback=_realize_symbol)
+
+    def _check_int_params(params, arg):
+       param = params[arg]
+       msg = "key:%s value:%s"%(arg, param)
+       flat = param.asnumpy().flatten()
+       assert all(flat >= INT32_MIN) and all(flat <= INT32_MAX), msg
+       assert all(flat.astype('int32').astype(flat.dtype) == flat), msg
+
+    params = examine_parameters(symbol, params, inputs_ext,
+          callback=_check_int_params)
+    return symbol, params
+
 def sym_calib_sim_quant(symbol, params, inputs_ext, calib_data, ctx):
     logger = logging.getLogger('log.simulate')
 

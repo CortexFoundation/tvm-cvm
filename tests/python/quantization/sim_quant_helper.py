@@ -12,6 +12,25 @@ def get_zero_symmetric(threshold):
     else:
         return (max_range + min_range) / 2
 
+def save_ins_ext(params, inputs_ext):
+    for name in inputs_ext:
+        ext = inputs_ext[name]
+        scale, target_bit = ext['scale'], ext['target_bit']
+        params[name+'_scale'] = ext['scale']
+        params[name+'_target_bit'] = nd.array([ext['target_bit']])
+def load_ins_ext(params, inputs_ext):
+    for name in inputs_ext:
+        ext = inputs_ext[name]
+        ext['scale'] = params[name+'_scale']
+        ext['target_bit'] = params[name+'_target_bit']
+def load_sim_data(data, name, inputs_ext):
+    return data * inputs_ext[name]['scale']
+def load_real_data(data, name, inputs_ext):
+    logger = logging.getLogger('log.data.load')
+    data = load_sim_data(data, name, inputs_ext)
+    return int_realize(data, inputs_ext[name]['target_bit'].asscalar(),
+            logger=logger)
+
 def save_data_scale(name, scale, params):
     params[name+'_scale'] = scale
 
@@ -29,13 +48,16 @@ def get_simple_sim_scale(threshold, target_bit):
     shift_bit = target_bit - 1 - bit
     return 2 ** shift_bit
 
-def get_sim_scale(threshold, target_bit):
-    min_range, max_range = threshold
-    alpha = max(abs(min_range), abs(max_range))
-
-    sim_max = 2 ** (target_bit - 1) - 1
-    scale = sim_max / alpha
-    return scale
+def get_sim_scale(thresholds, target_bit):
+    assert len(thresholds.shape) == 2
+    size = thresholds.shape[0]
+    assert thresholds.shape[1] == 2
+    scales = []
+    for value in thresholds:
+        alpha = value.abs().max().asscalar()
+        sim_max = 2 ** (target_bit - 1) - 1
+        scales.append(sim_max / alpha)
+    return nd.array(scales)
 
 def int_realize(data, target_bit, logger=logging):
     out = data.round()
@@ -48,7 +70,6 @@ def int_realize(data, target_bit, logger=logging):
                 out.min().asnumpy())
 
     out = out.clip(a_min=-clip_range, a_max=clip_range)
-
     return out
 
 def parse_nd_float(array):

@@ -469,6 +469,29 @@ def sym_quant_prepare(symbol, params, inputs_ext):
 
     return sym, params
 
+def sym_attach_attrs(symbol, params, inputs_ext, **kwargs):
+    logger = logging.getLogger('log.sym.attach.attrs')
+    def _attach_attr(sym, params, graph, inputs_ext, **kwargs):
+        name = sym.attr('name')
+        op_name = sym.attr('op_name')
+        attr = sym.list_attr()
+        childs = sym_iter(sym.get_children())
+        for k,v in kwargs.items():
+            if name not in v:
+                continue
+            attr[k] = str(v[name])
+
+        if op_name == 'null':
+            sym = mx.sym.var(name, attr=attr)
+        return sym, params
+
+    return topo_visit(symbol, params, get_op=get_mxnet_op,
+            logger=logger, inputs_ext=inputs_ext,
+            callback=_attach_attr, **kwargs)
+
+
+
+
 
 
 

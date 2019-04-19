@@ -4,6 +4,7 @@ from mxnet import ndarray as nd
 from mxnet.gluon import nn
 
 import tvm
+from tvm.contrib import graph_runtime
 import nnvm
 
 import sym_calib as calib
@@ -11,8 +12,10 @@ import utils
 import gluon_zoo as zoo
 import sym_pass as spass
 import sim_quant_helper as sim
+import cvm_op as cvm
 
 import logging
+import numpy as np
 
 def get_dump_fname(suffix="quant"):
     return './data/mobilenet1_0.json.%s'%suffix, \
@@ -44,10 +47,11 @@ def test_sym_nnvm(batch_size=10, iter_num=10):
 
     load_symbol_fname, load_params_fname = get_dump_fname("sym.sim.pass")
     sym, params = mx.sym.load(load_symbol_fname), nd.load(load_params_fname)
+    sim.load_ins_ext(params, inputs_ext)
     graph = nn.SymbolBlock(sym, inputs)
     utils.load_parameters(graph, params, ctx=mx_ctx)
     def graph_func(data):
-        data = sim.load_quant_data(data, 'data', params)
+        data = sim.load_real_data(data, 'data', inputs_ext)
         return graph.forward(data.as_in_context(mx_ctx))
 
     nnvm_sym, _ = nnvm.frontend.from_mxnet(sym)
@@ -76,7 +80,7 @@ def test_sym_nnvm(batch_size=10, iter_num=10):
     module = graph_runtime.create(deploy_graph, lib, tvm_ctx)
     module.load_params(param_bytes)
     def nnvm_real(data):
-        data = sim.load_quant_data(data, 'data', params)
+        data = sim.load_real_data(data, 'data', inputs_ext)
         data = tvm.nd.array(data.asnumpy(), tvm_ctx)
         module.run(data=data.asnumpy())
         return nd.array(module.get_output(0).asnumpy())
@@ -104,24 +108,33 @@ def test_sym_pass(batch_size=10, iter_num=10):
 
     symbol_file, params_file = "./data/mobilenet1_0.json", "./data/mobilenet1_0.params"
     sym, params = mx.sym.load(symbol_file), nd.load(params_file)
+    sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
+    dump_sym, dump_params = get_dump_fname('sym.sim.prepare')
+    nd.save(dump_params, params)
+    with open(dump_sym, 'w') as fout:
+       fout.write(sym.tojson())
     graph_comp = nn.SymbolBlock(sym, inputs)
     utils.load_parameters(graph_comp, params, ctx=ctx)
     def graph_func(data):
         return graph_comp.forward(data.as_in_context(ctx))
 
-    qsym, qparams = spass.sym_quant_prepare(sym, params, inputs_ext)
-    qsym, qparams, th_dict = calib.sym_calib_sim_quant(qsym,
-            qparams, inputs_ext, data, ctx)
+    qsym, qparams, target_bits = calib.sym_simulate(sym,
+            params, inputs_ext, data, ctx)
+    qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, target_bits)
+    qsym, qparams = spass.sym_attach_attrs(qsym, qparams, inputs_ext, precision=target_bits)
+
+    sim.save_ins_ext(qparams, inputs_ext)
     dump_sym, dump_params = get_dump_fname('sym.sim.pass')
     nd.save(dump_params, qparams)
     with open(dump_sym, 'w') as fout:
        fout.write(qsym.tojson())
     qsym, qparams = mx.sym.load(dump_sym), nd.load(dump_params)
+    sim.load_ins_ext(qparams, inputs_ext)
     qgraph = nn.SymbolBlock(qsym, inputs)
     utils.load_parameters(qgraph, qparams, ctx=ctx)
     def simulate(data):
-        data = sim.load_quant_data(data, 'data', qparams)
-        data = sim.int_realize(data, 8)
+        # data = sim.load_sim_data(data, 'data', inputs_ext)
+        data = sim.load_real_data(data, 'data', inputs_ext)
         return qgraph.forward(data.as_in_context(ctx))
 
     utils.multi_eval_accuracy(graph_func, data_iter_func, simulate,
@@ -131,5 +144,5 @@ if __name__ == '__main__':
     utils.log_init()
 
     # zoo.save_mobilenet1_0()
-    #  test_sym_pass(16, 0)
-    test_sym_nnvm(16, 100)
+    test_sym_pass(16, 10)
+    # test_sym_nnvm(1, 100)
