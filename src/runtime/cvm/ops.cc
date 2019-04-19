@@ -964,7 +964,7 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.max_pool2d")
             x_data, n_batch, in_channels, x_h, x_w,
             filter_h, filter_w,
             padding[0], padding[1],
-            strides[0], padding[1],
+            strides[0], strides[1],
             y_data, n_batch, out_channels, o_h, o_w, DEBUG_OP);
 });
 
