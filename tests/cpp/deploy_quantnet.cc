@@ -47,10 +47,10 @@ long RunCVM(DLTensor* x, TVMByteArray& params_arr, std::string json_data,
     get_output(0, y);
 
 		auto t3 = clock();
-		printf("load time: %d ms, calc time: %d ms\n", 
+		printf("load time: %d ms, calc time: %d ms\n",
 				(t2 - t1) * 1000 / CLOCKS_PER_SEC,
 				(t3 - t2) * 1000 / CLOCKS_PER_SEC);
-		return t3 - t1; 
+		return t3 - t1;
 //    auto y_iter = static_cast<int*>(y->data);
 //    // get the maximum position in output vector
 //    auto max_iter = std::max_element(y_iter, y_iter + out_shape[1]);
@@ -124,21 +124,19 @@ int main()
 	//    TVMStreamHandle stream;
 	//    TVMStreamCreate(kDLGPU, device_id, &stream);
 	//    TVMArrayCopyFromTo(x, t_gpu_x, stream);
-/*
 			clock_t start = clock();
-			for(int i = 0; i < 10; i++){
+			for(int i = 0; i < 1; i++){
 					RunCVM(x, params_arr, json_data_org, mod_org, "graph_runtime", y1,(int)kDLCPU);
 			}
 			clock_t end = clock();
 
 			//    TVMArrayCopyFromTo(t_gpu_y, y1, stream);
 			std::cout << "graph runtime : " << (end-start)*1.0/CLOCKS_PER_SEC << " s" << std::endl;
-			for(int i = 0; i < 10; i++){
+			for(int i = 0; i < 1; i++){
 					std::cout << static_cast<int32_t*>(y1->data)[i] << " ";
 			}
 			std::cout << std::endl;
 
-*/
 			std::ifstream json_in("/tmp/imagenet_cuda_cvm.json", std::ios::in);
 			std::string json_data((std::istreambuf_iterator<char>(json_in)), std::istreambuf_iterator<char>());
 			json_in.close();
