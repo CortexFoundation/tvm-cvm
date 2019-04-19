@@ -39,6 +39,7 @@ struct CVMOpParam {
   uint32_t num_inputs;
   uint32_t num_outputs;
   uint32_t flatten_data;
+  std::string attrs;
 };
 
 /*!
@@ -234,6 +235,7 @@ class CvmRuntime : public ModuleNode {
     std::vector<int> storage_id;
     std::vector<int> device_index;
     std::vector<std::string> dltype;
+    std::vector<std::string> op_attrs;
     std::vector<std::vector<int64_t> > shape;
     // The graph attribute fields.
     void Load(dmlc::JSONReader *reader) {
@@ -276,6 +278,14 @@ class CvmRuntime : public ModuleNode {
           CHECK(reader->NextArrayItem());
           reader->Read(&device_index);
           CHECK(!reader->NextArrayItem());
+        } else if (key == "op_attrs") {
+          reader->BeginArray();
+          CHECK(reader->NextArrayItem());
+          reader->Read(&type);
+          CHECK_EQ(type, "list_str");
+          CHECK(reader->NextArrayItem());
+          reader->Read(&op_attrs);
+          CHECK(!reader->NextArrayItem());
         } else {
           reader->BeginArray();
           CHECK(reader->NextArrayItem());
@@ -288,8 +298,8 @@ class CvmRuntime : public ModuleNode {
             CHECK(reader->NextArrayItem());
             size_t temp;
             reader->Read(&temp);
-          } else {
-            LOG(FATAL) << "cannot skip graph attr " << key;
+          }            else {
+              LOG(FATAL) << "cannot skip graph attr " << key;
           }
           CHECK(!reader->NextArrayItem());
         }
@@ -337,7 +347,7 @@ class CvmRuntime : public ModuleNode {
    * \param num_inputs Number of inputs.
    * \return The created executor.
    */
-  std::function<void()> CreateCVMOp(const CVMOpParam& attrs,
+  std::function<void()> CreateCVMOp(const CVMOpParam& attrs, std::string op_attrs,
                                     const std::vector<DLTensor>& args,
                                     size_t num_inputs);
   // Get node entry index.
@@ -377,8 +387,11 @@ class CvmRuntime : public ModuleNode {
 std::vector<TVMContext> CVMGetAllContext(const TVMArgs& args);
 
 
-void CVMClip(TVMArgs args, TVMRetValue* rv);
-void CVMAdd(TVMArgs args, TVMRetValue* rv);
+// void CVMClip(TVMArgs args, TVMRetValue* rv);
+// void CVMAdd(TVMArgs args, TVMRetValue* rv);
+// void CVMDense(TVMArgs args, TVMRetValue* rv);
+// void CVMFlat(TVMArgs args, TVMRetValue* rv);
+// void CVMConv(TVMArgs args, TVMRetValue* rv);
 
 }  // namespace runtime
 }  // namespace tvm
