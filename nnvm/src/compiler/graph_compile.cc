@@ -152,9 +152,9 @@ nnvm::Graph GraphCompile(const nnvm::Graph& g) {
     FuseEntry& fe = fuse_entries[root_id];
     const IndexedGraph& subidx = fe.subgraph.indexed_graph();
     nnvm::NodePtr np = nnvm::Node::Create();
-    np->attrs.op = tvm_op;
+    np->attrs.op = cvm_op;
     np->attrs.name = inode.source->attrs.name;
-    TVMOpParam param;
+    CVMOpParam param;
     param.func_name = fe.compiled_func->func_name;
     std::cout << "param.func_name = " << param.func_name << "\n";
     param.num_inputs = static_cast<uint32_t>(fe.imap.size());
@@ -249,7 +249,7 @@ nnvm::Graph GraphCompile(const nnvm::Graph& g) {
           !(idx[rhs.node_id].source->is_variable()) &&
           pattern_vec[group_vec[rhs.node_id]] <= kBroadcast) {
         assign_flag[new_nid] = 2;
-        TVMOpParam& param = dmlc::get<TVMOpParam>(kv.second->attrs.parsed);
+        CVMOpParam& param = dmlc::get<CVMOpParam>(kv.second->attrs.parsed);
         param.func_name = "__nop";
         param.UpdateDict(&(kv.second->attrs.dict));
       } else {
