@@ -47,6 +47,7 @@ struct CVMOpParam {
   std::string attrs;
 };
 
+
 /*!
  * \brief Tiny graph runtime.
  *
@@ -444,7 +445,10 @@ class CvmRuntime : public ModuleNode {
   std::vector<TVMContext> ctxs_;
   /*! \brief Common storage pool for all devices. */
   std::vector<NDArray> storage_pool_;
-	static std::vector<std::pair<int64_t, NDArray> > history_storage_pool_;
+	static std::unordered_map<
+		int,
+		std::vector<std::pair<int64_t, NDArray> >
+		>history_storage_pool_;
 	/*! \brief Data entry of each node. */
   std::vector<NDArray> data_entry_;
   /*! \brief Operator on each node. */

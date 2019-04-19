@@ -47,7 +47,7 @@ long RunCVM(DLTensor* x, TVMByteArray& params_arr, std::string json_data,
     get_output(0, y);
 
 		auto t3 = clock();
-		printf("load time: %d ms, calc time: %d ms\n", 
+		if (false) printf("load time: %d ms, calc time: %d ms\n", 
 				(t2 - t1) * 1000 / CLOCKS_PER_SEC,
 				(t3 - t2) * 1000 / CLOCKS_PER_SEC);
 		return t3 - t1; 
@@ -156,7 +156,7 @@ int main()
 			clock_t delta = 0;
 			clock_t last;
 			for (int i = 0; i < 10; i++) {
-				if (i) std::cout << (clock() - last) * 1000 / CLOCKS_PER_SEC << std::endl;
+//				if (i) std::cout << (clock() - last) * 1000 / CLOCKS_PER_SEC << std::endl;
 					delta += RunCVM(gpu_x, params_arr, json_data, mod_syslib, "cvm_runtime", gpu_y, (int)kDLGPU);
 				last = clock();
 			}

@@ -46,13 +46,21 @@ class BindingOpParamAction {
 		#OpName, (PtrCreateParam)paramCreator##OpName)
 
 BIND_OP_PARAM(conv2d, Conv2DParam);
+
 BIND_OP_PARAM(dense, DenseParam);
+
 BIND_OP_PARAM(conv2dt, Conv2DTransposeParam);
+
 BIND_OP_PARAM(max_pool2d, MaxPool2DParam);
+
 BIND_OP_PARAM(clip, ClipParam);
+
 BIND_OP_PARAM(reshape, ReshapeParam);
+
 BIND_OP_PARAM(flatten, ReshapeParam);
+
 BIND_OP_PARAM(broadcast_add, BroadcastToParam);
+
 BIND_OP_PARAM(broadcast_sub, BroadcastToParam);
 BIND_OP_PARAM(broadcast_div, BroadcastToParam);
 BIND_OP_PARAM(broadcast_mul, BroadcastToParam);
