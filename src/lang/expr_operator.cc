@@ -449,7 +449,7 @@ Expr log2(Expr x) {
 			if (px->value <= (int64_t(1) << i)) return IntImm::make(x.type(), i);
 		return IntImm::make(x.type(), 64);
 	}
-	return ir::Call::make(x.type(), ir::Call::log2, {x}, ir::Call::PureIntrinsic);
+	return ir::Call::make(x.type(), "log2", {x}, ir::Call::PureIntrinsic);
 }
 
 }  // namespace tvm
