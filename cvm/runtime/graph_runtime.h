@@ -5,17 +5,14 @@
  *        containing only tvm PackedFunc.
  * \file graph_runtime.h
  */
-#ifndef TVM_RUNTIME_GRAPH_GRAPH_RUNTIME_H_
-#define TVM_RUNTIME_GRAPH_GRAPH_RUNTIME_H_
+#ifndef CVM_RUNTIME_GRAPH_GRAPH_RUNTIME_H_
+#define CVM_RUNTIME_GRAPH_GRAPH_RUNTIME_H_
 
 #include <dlpack/dlpack.h>
 #include <dmlc/memory_io.h>
 #include <dmlc/json.h>
 #include <tvm/runtime/ndarray.h>
 #include <tvm/runtime/packed_func.h>
-#include <cvm/node.h>
-#include <cvm/bind.h>
-#include <cvm/top/nn.h>
 
 #include <memory>
 #include <utility>
@@ -24,8 +21,6 @@
 
 namespace tvm {
 namespace runtime {
-
-using cvm::NodeAttrs;
 
 /*! \brief macro to do C API call */
 #define TVM_CCALL(func)                                            \
@@ -39,12 +34,11 @@ using cvm::NodeAttrs;
 constexpr uint64_t kTVMNDArrayListMagic = 0xF7E58D4F05049CB7;
 
 /*! \brief operator attributes about tvm op */
-struct CVMOpParam {
+struct TVMOpParam {
   std::string func_name;
   uint32_t num_inputs;
   uint32_t num_outputs;
   uint32_t flatten_data;
-  std::string attrs;
 };
 
 /*!
@@ -53,7 +47,7 @@ struct CVMOpParam {
  *  This runtime can be acccesibly in various language via
  *  TVM runtime PackedFunc API.
  */
-class CvmRuntime : public ModuleNode {
+class GraphRuntime : public ModuleNode {
  public:
   /*!
    * \brief Get member function to front-end
@@ -68,7 +62,7 @@ class CvmRuntime : public ModuleNode {
    * \return The type key of the executor.
    */
   const char* type_key() const final {
-    return "CvmRuntime";
+    return "GraphRuntime";
   }
   void Run();
 
@@ -85,15 +79,7 @@ class CvmRuntime : public ModuleNode {
             tvm::runtime::Module module,
             const std::vector<TVMContext>& ctxs);
 
-  int64_t GetOps();
-	int64_t GetOps(const std::string& sym_json);
- 
-	static int64_t EstimateOps(const std::string& sym_json) {
-		CvmRuntime rt;
-		auto ret = rt.GetOps(sym_json);
-		return ret;
-	} 
-	/*!
+  /*!
    * \brief Get the input index given the name of input.
    * \param name The name of the input.
    * \return The index of input.
@@ -189,17 +175,13 @@ class CvmRuntime : public ModuleNode {
     // name of the op
     std::string name;
     // parameters
-    CVMOpParam param;
-    // precision
-    int precision;
+    TVMOpParam param;
     // inputs
     std::vector<NodeEntry> inputs;
-		// op attr
-		NodeAttrs attrs;
-		// control deps
+    // control deps
     std::vector<uint32_t> control_deps;
-		// JSON Loader
-    void LoadAttrs(dmlc::JSONReader *reader, CVMOpParam* param) {
+    // JSON Loader
+    void LoadAttrs(dmlc::JSONReader *reader, TVMOpParam* param) {
       int bitmask = 0;
       std::string key, value;
       reader->BeginObject();
@@ -240,46 +222,18 @@ class CvmRuntime : public ModuleNode {
           this->LoadAttrs(reader, &param);
         } else if (key == "control_deps") {
           reader->Read(&control_deps);
-        } else if (key == "precision") {
-          reader->Read(&precision);
         } else {
           LOG(FATAL) << "do not support key " << key;
         }
       }
       CHECK_EQ(bitmask, 1|2|4) << "invalid format";
     }
-		
-		std::string GetOpName(std::string name) {
-			std::string ret = name;
-			for (int i = name.size() - 1; i >= 0; --i) {
-				if (name[i] >= '0' && name[i] <= '9') continue;
-				else if (name[i] == '_') ret = name.substr(0, i);
-				else ret = name.substr(0, i + 1);
-				break;
-			}
-			return ret;
-		}
-	
-		void LoadOp() {
-			if (op_type == "null") return;
-			attrs.name = GetOpName(param.func_name);
-			attrs.op = cvm::Op::Get(attrs.name);
-		}
-
-		void LoadOpAttr(std::string json_) {
-			if (json_ == "") json_ = "{}";
-			auto& binding = cvm::OpParamBinding::instance();
-			if (!binding.has(attrs.name)) return;
-			attrs.parsed = std::move(binding.get(attrs.name, json_));
-		}
   };
   struct GraphAttr {
     size_t storage_num_not_alloctaed{0};
     std::vector<int> storage_id;
     std::vector<int> device_index;
     std::vector<std::string> dltype;
-    std::vector<int> precision;
-    std::vector<std::string> op_attrs;
     std::vector<std::vector<int64_t> > shape;
     // The graph attribute fields.
     void Load(dmlc::JSONReader *reader) {
@@ -322,14 +276,6 @@ class CvmRuntime : public ModuleNode {
           CHECK(reader->NextArrayItem());
           reader->Read(&device_index);
           CHECK(!reader->NextArrayItem());
-        } else if (key == "op_attrs") {
-          reader->BeginArray();
-          CHECK(reader->NextArrayItem());
-          reader->Read(&type);
-          CHECK_EQ(type, "list_str");
-          CHECK(reader->NextArrayItem());
-          reader->Read(&op_attrs);
-          CHECK(!reader->NextArrayItem());
         } else {
           reader->BeginArray();
           CHECK(reader->NextArrayItem());
@@ -343,7 +289,7 @@ class CvmRuntime : public ModuleNode {
             size_t temp;
             reader->Read(&temp);
           } else {
-              LOG(FATAL) << "cannot skip graph attr " << key;
+            LOG(FATAL) << "cannot skip graph attr " << key;
           }
           CHECK(!reader->NextArrayItem());
         }
@@ -353,55 +299,33 @@ class CvmRuntime : public ModuleNode {
   };
   // The graph attribute fields.
   void Load(dmlc::JSONReader *reader) {
-		reader->BeginObject();
-		int bitmask = 0;
-		std::string key;
-		while (reader->NextObjectItem(&key)) {
-			if (key == "nodes") {
-				reader->Read(&nodes_);
-				bitmask |= 1;
-			} else if (key == "arg_nodes") {
-				reader->Read(&input_nodes_);
-				bitmask |= 2;
-			} else if (key == "node_row_ptr") {
-				reader->Read(&node_row_ptr_);
-				bitmask |= 4;
-			} else if (key == "heads") {
-				reader->Read(&outputs_);
-				bitmask |= 8;
-			} else if (key == "attrs") {
-				reader->Read(&attrs_);
-				bitmask |= 16;
-			} else if (key == "metadata") {
-				break;
-			} else {
-				LOG(FATAL) << "key " << key << " is not supported";
-			}
-		}
-		CHECK_EQ(bitmask, 1|2|4|8|16) << "invalid format";
-		CHECK_EQ(nodes_.size(), attrs_.op_attrs.size());
-		for (auto i = 0; i < nodes_.size(); ++i) {
-			if (nodes_[i].op_type != "null") {
-				nodes_[i].LoadOp();
-				if (nodes_[i].attrs.op->name == "flatten") {
-					uint64_t size = 1;
-					for (auto x: attrs_.shape[i]) {
-						size *= x;
-					}
-					std::ostringstream size_s;
-					size_s << "{\"shape\":\"(" << size << ")\"}";
-					nodes_[i].LoadOpAttr(size_s.str());
-				} else {
-					nodes_[i].LoadOpAttr(attrs_.op_attrs[i]);
-				}
-			}
-		}
-	}
-  /*! \brief Setup the shape, type, and precision */
-  void SetupShape();
-  void SetupType();
-  void SetupPrecision();
-  void SetupAttr();
+      reader->BeginObject();
+      int bitmask = 0;
+      std::string key;
+      while (reader->NextObjectItem(&key)) {
+        if (key == "nodes") {
+          reader->Read(&nodes_);
+          bitmask |= 1;
+        } else if (key == "arg_nodes") {
+          reader->Read(&input_nodes_);
+          bitmask |= 2;
+        } else if (key == "node_row_ptr") {
+          reader->Read(&node_row_ptr_);
+          bitmask |= 4;
+        } else if (key == "heads") {
+          reader->Read(&outputs_);
+          bitmask |= 8;
+        } else if (key == "attrs") {
+          reader->Read(&attrs_);
+          bitmask |= 16;
+        } else if (key == "metadata") {
+          break;
+        } else {
+          LOG(FATAL) << "key " << key << " is not supported";
+        }
+      }
+      CHECK_EQ(bitmask, 1|2|4|8|16) << "invalid format";
+  }
   /*! \brief Setup the temporal storage */
   void SetupStorage();
   /*! \brief Setup the executors. */
@@ -413,7 +337,7 @@ class CvmRuntime : public ModuleNode {
    * \param num_inputs Number of inputs.
    * \return The created executor.
    */
-  std::function<void()> CreateCVMOp(const CVMOpParam& attrs, std::string op_attrs,
+  std::function<void()> CreateTVMOp(const TVMOpParam& attrs,
                                     const std::vector<DLTensor>& args,
                                     size_t num_inputs);
   // Get node entry index.
@@ -444,23 +368,13 @@ class CvmRuntime : public ModuleNode {
   std::vector<TVMContext> ctxs_;
   /*! \brief Common storage pool for all devices. */
   std::vector<NDArray> storage_pool_;
-	static std::vector<std::pair<int64_t, NDArray> > history_storage_pool_;
-	/*! \brief Data entry of each node. */
+  /*! \brief Data entry of each node. */
   std::vector<NDArray> data_entry_;
   /*! \brief Operator on each node. */
   std::vector<std::function<void()> > op_execs_;
 };
 
-std::vector<TVMContext> GetAllContext(const TVMArgs& args);
-
-
-// void CVMClip(TVMArgs args, TVMRetValue* rv);
-// void CVMAdd(TVMArgs args, TVMRetValue* rv);
-// void CVMDense(TVMArgs args, TVMRetValue* rv);
-// void CVMFlat(TVMArgs args, TVMRetValue* rv);
-// void CVMConv(TVMArgs args, TVMRetValue* rv);
-
 }  // namespace runtime
-}  // namespace tvm
+}  // namespace cvm
 
 #endif  // TVM_RUNTIME_GRAPH_GRAPH_RUNTIME_H_

@@ -829,32 +829,35 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.clip").set_body([](TVMArgs args, TVMRe
    int min = std::atoi(min_str.c_str());
    int max = std::atoi(max_str.c_str());
 
-    cuda_clip(
-            static_cast<int32_t*>(x->data),
-            static_cast<int32_t*>(y->data),
-            static_cast<int32_t>(x->shape[0]),
-            max, min, DEBUG_OP);
+   const char *errorStr = cuda_clip(
+           static_cast<int32_t*>(x->data),
+           static_cast<int32_t*>(y->data),
+           static_cast<int32_t>(x->shape[0]),
+           max, min, DEBUG_OP);
+   CHECK_EQ(errorStr == NULL, true) << errorStr;
  });
 
  TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.relu").set_body([](TVMArgs args, TVMRetValue* rv) {
    DLTensor *x = args[0];
    DLTensor *y = args[1];
-    cuda_relu(
-            static_cast<int32_t*>(x->data),
-            static_cast<int32_t*>(y->data),
-            static_cast<int32_t>(x->shape[0]),
-            DEBUG_OP);
+   const char* errorStr = cuda_relu(
+           static_cast<int32_t*>(x->data),
+           static_cast<int32_t*>(y->data),
+           static_cast<int32_t>(x->shape[0]),
+           DEBUG_OP);
+    CHECK_EQ(errorStr == NULL, true) << errorStr;
  });
 TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.flatten").set_body([]
 (TVMArgs args, TVMRetValue* rv){
      DLTensor *x = args[0];
      DLTensor *y = args[1];
 
-    cuda_flatten(
+     const char* errorStr = cuda_flatten(
             static_cast<int32_t*>(x->data),
             static_cast<int32_t*>(y->data),
             static_cast<int32_t>(x->shape[0]),
             DEBUG_OP);
+     CHECK_EQ(errorStr == NULL, true) << errorStr;
 });
 TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.broadcast_add")
     .set_body([](TVMArgs args, TVMRetValue *ret){
@@ -865,7 +868,8 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.broadcast_add")
         int32_t *b = static_cast<int32_t*>(args1->data);
         int32_t *c = static_cast<int32_t*>(args2->data);
 
-        cuda_broadcast_add(a, b, c, getSize(args0), DEBUG_OP);
+        const char* errorStr = cuda_broadcast_add(a, b, c, getSize(args0), DEBUG_OP);
+        CHECK_EQ(errorStr == NULL, true) << errorStr;
     });
 
 TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.broadcast_sub")
@@ -877,7 +881,8 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.broadcast_sub")
         int32_t *b = static_cast<int32_t*>(args1->data);
         int32_t *c = static_cast<int32_t*>(args2->data);
 
-        cuda_broadcast_sub(a, b, c, getSize(args0), DEBUG_OP);
+        const char* errorStr = cuda_broadcast_sub(a, b, c, getSize(args0), DEBUG_OP);
+        CHECK_EQ(errorStr == NULL, true) << errorStr;
     });
 TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.broadcast_mul")
     .set_body([](TVMArgs args, TVMRetValue *ret){
@@ -888,7 +893,8 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.broadcast_mul")
         int32_t *b = static_cast<int32_t*>(args1->data);
         int32_t *c = static_cast<int32_t*>(args2->data);
 
-        cuda_broadcast_mul(a, b, c, getSize(args0), DEBUG_OP);
+        const char* errorStr = cuda_broadcast_mul(a, b, c, getSize(args0), DEBUG_OP);
+        CHECK_EQ(errorStr == NULL, true) << errorStr;
     });
 TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.broadcast_div")
     .set_body([](TVMArgs args, TVMRetValue *ret){
@@ -899,7 +905,8 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.broadcast_div")
         int32_t *b = static_cast<int32_t*>(args1->data);
         int32_t *c = static_cast<int32_t*>(args2->data);
 
-        cuda_broadcast_div(a, b, c, getSize(args0), DEBUG_OP);
+        const char* errorStr = cuda_broadcast_div(a, b, c, getSize(args0), DEBUG_OP);
+        CHECK_EQ(errorStr == NULL, true) << errorStr;
     });
 TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.broadcast_right_shift")
     .set_body([](TVMArgs args, TVMRetValue *ret){
@@ -910,7 +917,8 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.broadcast_right_shift")
         int32_t *b = static_cast<int32_t*>(args1->data);
         int32_t *c = static_cast<int32_t*>(args2->data);
 
-        cuda_broadcast_right_shift(a, b, c, getSize(args0), DEBUG_OP);
+        const char* errorStr = cuda_broadcast_right_shift(a, b, c, getSize(args0), DEBUG_OP);
+        CHECK_EQ(errorStr == NULL, true) << errorStr;
     });
 TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.broadcast_left_shift")
     .set_body([](TVMArgs args, TVMRetValue *ret){
@@ -921,7 +929,8 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.broadcast_left_shift")
         int32_t *b = static_cast<int32_t*>(args1->data);
         int32_t *c = static_cast<int32_t*>(args2->data);
 
-        cuda_broadcast_left_shift(a, b, c, getSize(args0), DEBUG_OP);
+        const char* errorStr = cuda_broadcast_left_shift(a, b, c, getSize(args0), DEBUG_OP);
+        CHECK_EQ(errorStr == NULL, true) << errorStr;
     });
 
 /*
@@ -960,12 +969,13 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.max_pool2d")
 //	int o_w = (x_w + 2 * padding[1] - filter_w) / strides[1] + 1;
 	int o_h = static_cast<int>(y->shape[2]);
 	int o_w = static_cast<int>(y->shape[3]);
-    cuda_max_pool(
+    const char* errorStr = cuda_max_pool(
             x_data, n_batch, in_channels, x_h, x_w,
             filter_h, filter_w,
             padding[0], padding[1],
             strides[0], strides[1],
             y_data, n_batch, out_channels, o_h, o_w, DEBUG_OP);
+    CHECK_EQ(errorStr == NULL, true) << errorStr;
 });
 
 /*
@@ -985,18 +995,20 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.sum")
 		int channels = static_cast<int>(x->shape[1]);
 		int x_h = static_cast<int>(x->shape[2]);
 		int x_w = static_cast<int>(x->shape[3]);
-        cuda_sum(x_data, n_batch, channels, x_h, x_w, y_data, DEBUG_OP);
+        const char* errorStr = cuda_sum(x_data, n_batch, channels, x_h, x_w, y_data, DEBUG_OP);
+        CHECK_EQ(errorStr == NULL, true) << errorStr;
     });
 
 TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.reshape")
     .set_body([](TVMArgs args, TVMRetValue *ret){
          DLTensor *x = args[0];
 		 DLTensor *y = args[1];
-         cuda_reshape(
+         const char* errorStr = cuda_reshape(
                  static_cast<int32_t*>(x->data),
                  static_cast<int32_t*>(y->data),
                  getSize(x),
                  DEBUG_OP);
+         CHECK_EQ(errorStr == NULL, true) << errorStr;
     });
 
 }

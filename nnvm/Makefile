@@ -65,6 +65,20 @@ RT_DEP = build/src/top/nn/pooling.o build/src/top/nn/convolution.o build/src/top
 		 build/src/core/graph.o build/src/pass/gradient.o build/src/pass/infer_shape_type.o build/src/pass/correct_layout.o\
 		 build/src/pass/order_mutation.o build/src/pass/plan_memory.o build/src/pass/print_graph_ir.o build/src/pass/saveload_json.o build/src/pass/place_device.o build/src/top/nn/nn.o 
 
+NNVM_RT_OBJ	 = build/src/compiler/simplify_inference.o build/src/compiler/compile_engine.o\
+							 build/src/compiler/precompute_prune.o build/src/compiler/graph_fuse.o\
+							 build/src/compiler/packed_func_ext.o build/src/compiler/alter_op_layout.o\
+							 build/src/compiler/graph_compile.o build/src/compiler/graph_hash.o\
+							 build/src/compiler/graph_runtime.o build/src/compiler/fold_scale_axis.o\
+							 build/src/core/op.o build/src/core/graph.o build/src/core/pass.o build/src/core/symbolic.o build/src/top/nn/nn.o
+
+lib/libnnvm_rt.a: $(NNVM_RT_OBJ)
+	@mkdir -p $(@D)
+	$(AR) crv $@ $(filter %.o, $?)
+
+
+#NNVM_RT_OBJ = $(build/src/core/*.o build/src/top/*.o build/src/compiler/*.o)
+
 include tests/cpp/unittest.mk
 
 test: $(TEST)

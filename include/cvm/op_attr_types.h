@@ -1,6 +1,6 @@
 /*!
  *  Copyright (c) 2016 by Contributors
- * \file nnvm/op_attr_types.h
+ * \file cvm/op_attr_types.h
  * \brief Data structures that can appear in operator attributes.
  */
 #ifndef NNVM_OP_ATTR_TYPES_H_
@@ -16,7 +16,7 @@
 #include "tuple.h"
 #include "layout.h"
 
-namespace nnvm {
+namespace cvm {
 
 // These types are optional attributes in each operator.
 // Each attribute can be required by some passes.
@@ -226,6 +226,6 @@ using FCorrectLayout = std::function<bool(
  */
 using FInputGraph = std::function<std::vector<uint32_t>(const NodeAttrs& attrs)>;
 
-}  // namespace nnvm
+}  // namespace cvm
 
 #endif  // NNVM_OP_ATTR_TYPES_H_

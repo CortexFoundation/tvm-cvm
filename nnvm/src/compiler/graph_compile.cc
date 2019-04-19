@@ -230,7 +230,8 @@ nnvm::Graph GraphCompile(const nnvm::Graph& g) {
   DTypeVector new_dtype_vec = DTypeVector(new_idx.num_node_entries());
   std::vector<std::string> new_dltype_vec(new_idx.num_node_entries());
   std::vector<std::string>  new_op_attrs(new_idx.num_node_entries());
-  std::cout << "old_new\n";
+	std::vector<std::string> attr_parsed(new_idx.num_node_entries());
+	std::cout << "old_new\n";
   for (const auto& kv : old_new) {
     uint32_t nid = kv.first;
     const auto& inode = idx[nid];

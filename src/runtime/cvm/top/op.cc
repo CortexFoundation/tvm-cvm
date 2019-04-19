@@ -3,8 +3,8 @@
  * \file op.cc
  * \brief Support for operator registry.
  */
-#include <nnvm/base.h>
-#include <nnvm/op.h>
+#include <cvm/base.h>
+#include <cvm/op.h>
 
 #include <memory>
 #include <atomic>
@@ -13,10 +13,10 @@
 
 namespace dmlc {
 // enable registry
-DMLC_REGISTRY_ENABLE(nnvm::Op);
+DMLC_REGISTRY_ENABLE(cvm::Op);
 }  // namespace dmlc
 
-namespace nnvm {
+namespace cvm {
 
 // single manager of operator information.
 struct OpManager {
@@ -53,10 +53,6 @@ Op& Op::add_alias(const std::string& alias) {  // NOLINT(*)
 const Op* Op::Get(const std::string& name) {
   const Op* op = dmlc::Registry<Op>::Find(name);
   auto allnames = dmlc::Registry<Op>::ListAllNames();
-  std::cout << allnames.size() << std::endl;
-  for (auto s:allnames) {
-    std::cout << s << std::endl;
-  }
   CHECK(op != nullptr)
       << "Operator " << name << " is not registered";
   return op;
@@ -115,4 +111,4 @@ Op& Op::include(const std::string& group_name) {
   return *this;
 }
 
-}  // namespace nnvm
+}  // namespace cvm
