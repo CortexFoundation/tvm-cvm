@@ -29,11 +29,12 @@ tvm_option(USE_METAL "Build with Metal" OFF)
 tvm_option(USE_ROCM "Build with ROCM" OFF)
 tvm_option(ROCM_PATH "The path to rocm" /opt/rocm)
 tvm_option(USE_RPC "Build with RPC" ON)
-tvm_option(USE_LLVM "Build with LLVM, can be set to specific llvm-config path" OFF)
+tvm_option(USE_LLVM "Build with LLVM, can be set to specific llvm-config path" ON)
 tvm_option(USE_STACKVM_RUNTIME "Include stackvm into the runtime" OFF)
 tvm_option(USE_GRAPH_RUNTIME "Build with tiny graph runtime" ON)
 tvm_option(USE_CVM_RUNTIME "Build with tiny cvm runtime" ON)
 tvm_option(USE_GRAPH_RUNTIME_DEBUG "Build with tiny graph runtime debug mode" OFF)
+tvm_option(USE_CVM_GRAPH_RUNTIME "Build with CVM graph runtime" ON)
 tvm_option(USE_SGX "Build with SGX" OFF)
 tvm_option(USE_RTTI "Build with RTTI" ON)
 tvm_option(USE_MSVC_MT "Build with MT" OFF)
@@ -57,6 +58,8 @@ include_directories("3rdparty/dlpack/include")
 include_directories("3rdparty/dmlc-core/include")
 include_directories("3rdparty/rang/include")
 include_directories("3rdparty/compiler-rt")
+include_directories("nnvm/include")
+include_directories("3rdparty/HalideIR/src")
 
 # initial variables
 set(TVM_LINKER_LIBS "")
@@ -142,6 +145,8 @@ file(GLOB TOPI_SRCS
 file(GLOB_RECURSE HALIDEIR_SRCS 3rdparty/HalideIR/src/*.cpp)
 list(APPEND COMPILER_SRCS ${HALIDEIR_SRCS})
 file(GLOB RUNTIME_SRCS src/runtime/*.cc)
+#file(GLOB CVM_RUNTIME_SRCS src/runtime/*.cc)
+file(GLOB RUNTIME_STATIC_SRCS src/runtime/*.cc)
 
 # Package runtime rules
 if(NOT USE_RTTI)
@@ -168,6 +173,12 @@ if(USE_CVM_RUNTIME)
     message(STATUS "Build with CVM runtime support...")
     file(GLOB RUNTIME_CVM_SRCS src/runtime/cvm/*.cc)
     list(APPEND RUNTIME_SRCS ${RUNTIME_CVM_SRCS})
+    file(GLOB NNVM_TOP_SRCS src/runtime/cvm/top/*.cc
+            src/runtime/cvm/top/nn/*.cc
+            src/runtime/cvm/top/tensor/*.cc)
+    list(APPEND RUNTIME_SRCS ${NNVM_TOP_SRCS})
+    #list(APPEND RUNTIME_SRCS ${NNVM_COMPILER_SRCS})
+    #list(APPEND RUNTIME_SRCS ${TOPI_SRCS})
 endif(USE_CVM_RUNTIME)
 
 if(USE_GRAPH_RUNTIME)
@@ -183,6 +194,7 @@ if(USE_GRAPH_RUNTIME)
       PROPERTIES COMPILE_DEFINITIONS "TVM_GRAPH_RUNTIME_DEBUG")
   endif(USE_GRAPH_RUNTIME_DEBUG)
 endif(USE_GRAPH_RUNTIME)
+
 
 # Module rules
 include(cmake/modules/VTA.cmake)
@@ -252,10 +264,10 @@ endif()
 add_custom_target(runtime DEPENDS tvm_runtime)
 
 # Installation rules
-install(TARGETS tvm DESTINATION lib${LIB_SUFFIX})
-install(TARGETS tvm_topi DESTINATION lib${LIB_SUFFIX})
+#install(TARGETS tvm DESTINATION lib${LIB_SUFFIX})
+#install(TARGETS tvm_topi DESTINATION lib${LIB_SUFFIX})
 install(TARGETS tvm_runtime DESTINATION lib${LIB_SUFFIX})
-install(TARGETS nnvm_compiler DESTINATION lib${LIB_SUFFIX})
+#install(TARGETS nnvm_compiler DESTINATION lib${LIB_SUFFIX})
 
 if (INSTALL_DEV)
   install(

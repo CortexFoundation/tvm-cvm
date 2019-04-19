@@ -107,6 +107,17 @@ using FInferShape = FInferNodeEntryAttr<TShape>;
  */
 using FInferType = FInferNodeEntryAttr<int>;
 
+
+/*!
+ * \brief Precision inference function.
+ *  Update the precision given the known precision information.
+ *
+ * \note Register under "FInferPrecision",
+ *  by default set all the output precisions to 8.
+ */
+using FInferPrecision = FInferNodeEntryAttr<int>;
+
+
 /*!
  * \brief Whether this op is an explicit backward operator,
  * If TIsBackward is true:

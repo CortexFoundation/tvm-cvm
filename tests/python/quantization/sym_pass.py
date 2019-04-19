@@ -13,16 +13,13 @@ def fold_cond_op(symbol, params, graph, quant_flag):
     logger = logging.getLogger("log.quant.fold.condition")
     logger.setLevel(quant_flag.log_level)
     logger.info("fold _cond op in graph")
-
     gh = GraphHelper(graph)
-
     added_params_name, deleted_params_name = set(), []
     for sym in topo_sort(symbol, logger):
         name = sym.attr('name')
         attr = sym.list_attr()
         op_name = sym.attr('op_name')
         childs = sym_iter(sym.get_children())
-
         # update inputs layer symbol
         if childs is not None:
             childs = [gh.get_node(childs[idx]) for idx in range(len(childs))]
@@ -34,14 +31,12 @@ def fold_cond_op(symbol, params, graph, quant_flag):
         else:
             # inputs or params
             node = sym
-
         if op_name == '_cond':
             logger.debug("Fold condition op:%s(%s)", name,
                     [c.attr('name') for c in childs])
             # cond_func, then_func, else_func = sym.attr('subgraph')
             sb_param_idx, lesser_scalar_idx, others = None, None, []
             for idx, child in enumerate(childs):
-                child = childs[idx]
                 child_op_name = child.attr('op_name')
                 if child_op_name == 'null':
                     assert sb_param_idx is None
@@ -50,30 +45,24 @@ def fold_cond_op(symbol, params, graph, quant_flag):
                     lesser_scalar_idx = idx
                 else:
                     others.append(idx)
-
             shift_bits_sym = childs[sb_param_idx]
             sb_param_name = shift_bits_sym.attr('name')
             assert sb_param_name in params, sb_param_name
-
             assert len(others) == 2
             # _cond op must be created by same input
             assert childs[others[0]].attr('name') == childs[others[1]].attr('name')
             input_sym = childs[others[0]]
-
             shift_bits = params[sb_param_name]
             assert shift_bits.shape == (1,)
-
             if not quant_flag.use_scalar:
                 assert "_shift_bits" in sb_param_name
                 scale_name = sb_param_name.replace("_shift_bits", "_scale")
                 scale_sym = mx.sym.var(scale_name, shape=(1,))
-
                 one_name, two_name = "const_var_one", "const_var_two"
                 const_var_one = gh.get_node(one_name,
                         mx.sym.var(one_name, shape=(1,)))
                 const_var_two = gh.get_node(two_name,
                         mx.sym.var(two_name, shape=(1,)))
-
                 if shift_bits < 1:
                     scale = 2 ** (-shift_bits)
                     node = mx.sym.broadcast_mul(input_sym, scale_sym)
@@ -83,13 +72,10 @@ def fold_cond_op(symbol, params, graph, quant_flag):
                     node = mx.sym.broadcast_add(node, const_var_one)
                     node = mx.sym.floor(node)
                     node = mx.sym.broadcast_div(node, const_var_two)
-
                 params[one_name] = mx.ndarray.array([1])
                 params[two_name] = mx.ndarray.array([2])
                 params[scale_name] = scale
-
                 added_params_name.update([scale_name, one_name, two_name])
-
             else:
                 shift_bits = shift_bits.asnumpy()[0]
                 if shift_bits < 1:
@@ -99,25 +85,19 @@ def fold_cond_op(symbol, params, graph, quant_flag):
                     scale = 2 ** (shift_bits-1)
                     node = mx.sym.floor(input_sym / scale)
                     node = mx.sym.floor((node+1) / 2)
-
             node = mx.sym.floor(node)
-
             del params[sb_param_name]
             deleted_params_name.append(sb_param_name)
-
         graph[name] = node
     logger.debug("[ added_params_name       ]: %s", added_params_name)
     logger.debug("[ deleted_params_name     ]: %s", deleted_params_name)
-
     nodes = []
     for sym in symbol:
         node = gh.get_node(sym)
         nodes.append(node)
-
     ret_sym = nodes[0]
     if len(nodes) > 1:
         ret_sym = mx.sym.Group(nodes)
-
     return ret_sym, params
 
 def yxnet_realize(symbol, params, inputs_ext):
@@ -211,6 +191,7 @@ def nnvm_realize(symbol, params, inputs_ext):
             assert scalar >= INT32_MIN and scalar <= INT32_MAX, msg
             assert float(int(scalar)) == scalar, msg
 
+            #  attr['scalar'] = max(min(int(scalar), INT8_MAX), INT8_MIN)
             attr['scalar'] = int(scalar)
             node = get_nnvm_op(op_name)(*childs, **attr)
 
@@ -361,7 +342,6 @@ def sym_infer_shape(symbol, params, inputs_ext):
 
     def _infer_shape(sym, params, graph, inputs_ext, infer_shapes):
         logger = logging.getLogger('log.symbol.infer_shape')
-
         name = sym.attr('name')
         op_name = sym.attr('op_name')
         args = sym.list_inputs()
@@ -542,17 +522,6 @@ def sym_attach_attrs(symbol, params, inputs_ext, **kwargs):
     return topo_visit(symbol, params, get_op=get_mxnet_op,
             logger=logger, inputs_ext=inputs_ext,
             callback=_attach_attr, **kwargs)
-
-
-
-
-
-
-
-
-
-
-
 
 
 
