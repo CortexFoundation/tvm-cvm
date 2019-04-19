@@ -20,19 +20,10 @@
 namespace tvm {
 namespace runtime {
 
-template<class T>
-void CVMPrint(std::vector<T> data, std::string name = "") {
-    std::cout << name << " = [";
-    for (auto x: data) {
-        std::cout << x << " ";
-    }
-    std::cout << "]\n";
-}
-
 /*!
  * \brief Run all the operations one by one.
  */
-void CvmRuntime::Run() {
+void GraphRuntime::Run() {
   // setup the array and requirements.
   for (size_t i = 0; i < op_execs_.size(); ++i) {
     if (op_execs_[i]) op_execs_[i]();
@@ -46,7 +37,7 @@ void CvmRuntime::Run() {
  * \param ctxs The context of the host and devices where graph nodes will be
  * executed on.
  */
-void CvmRuntime::Init(const std::string& graph_json,
+void GraphRuntime::Init(const std::string& graph_json,
                         tvm::runtime::Module module,
                         const std::vector<TVMContext>& ctxs) {
 #ifndef _LIBCPP_SGX_NO_IOSTREAMS
@@ -66,7 +57,7 @@ void CvmRuntime::Init(const std::string& graph_json,
  * \param name The name of the input.
  * \return The index of input.
  */
-int CvmRuntime::GetInputIndex(const std::string& name) {
+int GraphRuntime::GetInputIndex(const std::string& name) {
   for (size_t i = 0; i< input_nodes_.size(); ++i) {
     uint32_t nid = input_nodes_[i];
     if (nodes_[nid].name == name) {
@@ -81,7 +72,7 @@ int CvmRuntime::GetInputIndex(const std::string& name) {
  * \param index The input index.
  * \param data_in The input data.
  */
-void CvmRuntime::SetInput(int index, DLTensor* data_in) {
+void GraphRuntime::SetInput(int index, DLTensor* data_in) {
   CHECK_LT(static_cast<size_t>(index), input_nodes_.size());
   uint32_t eid = this->entry_id(input_nodes_[index], 0);
   data_entry_[eid].CopyFrom(data_in);
@@ -91,7 +82,7 @@ void CvmRuntime::SetInput(int index, DLTensor* data_in) {
  *
  * \return The number of outputs from graph.
  */
-int CvmRuntime::NumOutputs() const {
+int GraphRuntime::NumOutputs() const {
   return outputs_.size();
 }
 /*!
@@ -100,7 +91,7 @@ int CvmRuntime::NumOutputs() const {
  *
  * \return NDArray corresponding to given input node index.
  */
-NDArray CvmRuntime::GetInput(int index) const {
+NDArray GraphRuntime::GetInput(int index) const {
   CHECK_LT(static_cast<size_t>(index), input_nodes_.size());
   uint32_t eid = this->entry_id(input_nodes_[index], 0);
   return data_entry_[eid];
@@ -111,7 +102,7 @@ NDArray CvmRuntime::GetInput(int index) const {
  *
  * \return NDArray corresponding to given output node index.
  */
-NDArray CvmRuntime::GetOutput(int index) const {
+NDArray GraphRuntime::GetOutput(int index) const {
   CHECK_LT(static_cast<size_t>(index), outputs_.size());
   uint32_t eid = this->entry_id(outputs_[index]);
   return data_entry_[eid];
@@ -121,7 +112,7 @@ NDArray CvmRuntime::GetOutput(int index) const {
  * \param index The output index.
  * \param data_out the output data.
  */
-void CvmRuntime::CopyOutputTo(int index, DLTensor* data_out) {
+void GraphRuntime::CopyOutputTo(int index, DLTensor* data_out) {
   CHECK_LT(static_cast<size_t>(index), outputs_.size());
   uint32_t eid = this->entry_id(outputs_[index]);
 
@@ -139,12 +130,12 @@ void CvmRuntime::CopyOutputTo(int index, DLTensor* data_out) {
  * \brief Load parameters from parameter blob.
  * \param param_blob A binary blob of parameter.
  */
-void CvmRuntime::LoadParams(const std::string& param_blob) {
+void GraphRuntime::LoadParams(const std::string& param_blob) {
   dmlc::MemoryStringStream strm(const_cast<std::string*>(&param_blob));
   this->LoadParams(&strm);
 }
 
-void CvmRuntime::LoadParams(dmlc::Stream* strm) {
+void GraphRuntime::LoadParams(dmlc::Stream* strm) {
   uint64_t header, reserved;
   CHECK(strm->Read(&header))
       << "Invalid parameters file format";
@@ -174,7 +165,7 @@ void CvmRuntime::LoadParams(dmlc::Stream* strm) {
   }
 }
 
-void CvmRuntime::SetupStorage() {
+void GraphRuntime::SetupStorage() {
   // Grab saved optimization plan from graph.
   std::vector<TVMType> vtype;
   for (const std::string& s_type : attrs_.dltype) {
@@ -240,7 +231,7 @@ void CvmRuntime::SetupStorage() {
   }
 }
 
-void CvmRuntime::SetupOpExecs() {
+void GraphRuntime::SetupOpExecs() {
   op_execs_.resize(this->GetNumOfNodes());
   // setup the array and requirements.
   for (uint32_t nid = 0; nid < this->GetNumOfNodes(); ++nid) {
@@ -254,15 +245,14 @@ void CvmRuntime::SetupOpExecs() {
       uint32_t eid = this->entry_id(nid, index);
       args.push_back(*(data_entry_[eid].operator->()));
     }
-    CHECK(inode.op_type == "cvm_op") << "Can only take tvm_op as op";
+    CHECK(inode.op_type == "tvm_op") << "Can only take tvm_op as op";
 
-    op_execs_[nid] = CreateCVMOp(inode.param, attrs_.op_attrs[nid], args, inode.inputs.size());
+    op_execs_[nid] = CreateTVMOp(inode.param, args, inode.inputs.size());
   }
 }
 
-std::function<void()> CvmRuntime::CreateCVMOp(
-    const CVMOpParam& param,
-    const std::string op_attrs,
+std::function<void()> GraphRuntime::CreateTVMOp(
+    const TVMOpParam& param,
     const std::vector<DLTensor>& args,
     size_t num_inputs) {
   struct OpArgs {
@@ -290,24 +280,6 @@ std::function<void()> CvmRuntime::CreateCVMOp(
       t->shape = &(arg_ptr->shape_data[i]);
     }
   }
-  std::stringstream ss; ss << op_attrs;
-// std::cout << "op_attr = " << op_attrs << "\n";
-  dmlc::JSONReader reader(&ss);
-  std::string kv;
-  reader.BeginObject();
-// std::cout << param.func_name << std::endl;
-  while (reader.NextObjectItem(&kv)) {
-      std::string val;
-      reader.Read(&val);
-  //    std::cout << kv << " " << val << "\n";
-      TVMValue v;
-      //TODO leak
-	  auto tmp = new char[val.size()  + 1];
-	  strcpy(tmp, val.c_str());
-      v.v_str = const_cast<const char*>(tmp);
-      arg_ptr->arg_values.push_back(v);
-      arg_ptr->arg_tcodes.push_back(kStr);
-  }
 
   if (param.func_name == "__nop") {
     return [](){};
@@ -324,29 +296,20 @@ std::function<void()> CvmRuntime::CreateCVMOp(
 
   // Get compiled function from the module that contains both host and device
   // code.
-  auto ops = std::vector<std::string>{"dense", "conv2d", "flatten", "broadcast_add", "broadcast_sub", "broadcast_mul", "broadcast_div",
-      "broadcast_right_shift", "broadcast_left_shift", "clip", "relu", "max_pool2d", "sum", "elemwise_add", "reshap"};
-  for (auto& op : ops) {
-    if (param.func_name.size() >= op.size() && param.func_name.substr(0, op.size()) == op) {
-	  return [arg_ptr, op](){
-		  TVMRetValue rv;
-		  TVMArgs targs(arg_ptr->arg_values.data(),
-				  arg_ptr->arg_tcodes.data(),
-				  static_cast<int>(arg_ptr->arg_values.size()));
-          //std::cout << "tvm.runtime.cvm." + op << std::endl;
-          auto func = tvm::runtime::Registry::Get("tvm.runtime.cvm." + op);
-          assert(func != NULL);
-          func->CallPacked(targs, &rv);
+  tvm::runtime::PackedFunc pf = module_.GetFunction(param.func_name, false);
+  CHECK(pf != nullptr) << "no such function in module: " << param.func_name;
 
-      };
-    }
-  }
-
-//  std::cout << param.func_name << " " << param.attrs << "\n";
-  return [](){};
+  auto fexec = [arg_ptr, pf]() {
+    TVMRetValue rv;
+    TVMArgs targs(arg_ptr->arg_values.data(),
+                  arg_ptr->arg_tcodes.data(),
+                  static_cast<int>(arg_ptr->arg_values.size()));
+    pf.CallPacked(targs, &rv);
+  };
+  return fexec;
 }
 
-PackedFunc CvmRuntime::GetFunction(
+PackedFunc GraphRuntime::GetFunction(
     const std::string& name,
     const std::shared_ptr<ModuleNode>& sptr_to_self) {
   // Return member functions during query.
@@ -395,16 +358,16 @@ PackedFunc CvmRuntime::GetFunction(
   }
 }
 
-Module CvmRuntimeCreate(const std::string& sym_json,
+Module GraphRuntimeCreate(const std::string& sym_json,
                           const tvm::runtime::Module& m,
                           const std::vector<TVMContext>& ctxs) {
-  std::shared_ptr<CvmRuntime> exec = std::make_shared<CvmRuntime>();
+  std::shared_ptr<GraphRuntime> exec = std::make_shared<GraphRuntime>();
   exec->Init(sym_json, m, ctxs);
   return Module(exec);
 }
 
 // Get all context for the host and other runtime devices.
-std::vector<TVMContext> CVMGetAllContext(const TVMArgs& args) {
+std::vector<TVMContext> GetAllContext(const TVMArgs& args) {
   // Reserve the first item as the fallback device.
   std::vector<TVMContext> ret;
   TVMContext ctx;
@@ -422,28 +385,28 @@ std::vector<TVMContext> CVMGetAllContext(const TVMArgs& args) {
 // execution support yet. For heterogenenous execution, at least 5 arguments will
 // be passed in. The third one is the number of devices.
 // Eventually, we will only probably pass TVMContext for all the languages.
-TVM_REGISTER_GLOBAL("tvm.cvm_runtime.create")
+/*
+TVM_REGISTER_GLOBAL("tvm.graph_runtime.create")
   .set_body([](TVMArgs args, TVMRetValue* rv) {
     CHECK_GE(args.num_args, 4)
         << "The expected number of arguments for graph_runtime.create is "
            "at least 4, but it has "
         << args.num_args;
-    const auto& contexts = CVMGetAllContext(args);
-	std::cout << "args: " << args.num_args << std::endl;
-
-    *rv = CvmRuntimeCreate(args[0], args[1], contexts);
+    const auto& contexts = GetAllContext(args);
+    *rv = GraphRuntimeCreate(args[0], args[1], contexts);
   });
 
-TVM_REGISTER_GLOBAL("tvm.cvm_runtime.remote_create")
+TVM_REGISTER_GLOBAL("tvm.graph_runtime.remote_create")
   .set_body([](TVMArgs args, TVMRetValue* rv) {
     CHECK_GE(args.num_args, 4) << "The expected number of arguments for "
                                   "graph_runtime.remote_create is "
                                   "at least 4, but it has "
                                << args.num_args;
     void* mhandle = args[1];
-    const auto& contexts = CVMGetAllContext(args);
-    *rv = CvmRuntimeCreate(
+    const auto& contexts = GetAllContext(args);
+    *rv = GraphRuntimeCreate(
         args[0], *static_cast<tvm::runtime::Module*>(mhandle), contexts);
   });
+  */
 }  // namespace runtime
-}  // namespace tvm
+}  // namespace cvm
