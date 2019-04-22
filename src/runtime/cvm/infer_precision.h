@@ -17,7 +17,7 @@ using std::string;
 using std::vector;
 using std::pair;
 using cvm::NodeAttrs;
-using FInferPrecision = 
+using FInferPrecision =
 	std::function<bool (const NodeAttrs& attrs, vector<int>* iattr, vector<int>* oattr)>;
 
 #define REGISTER_OP_INFERPREC(OpName, ComputeRule)                   \
@@ -167,6 +167,13 @@ inline bool Conv2d_(const cvm::NodeAttrs& attrs, vector<int>* iattr, vector<int>
 }
 
 REGISTER_OP_INFERPREC(conv2d, Conv2d_);
+
+inline bool Log_(const cvm::NodeAttrs& attrs, vector<int>* iattr, vector<int>* oattr) {
+    (*oattr)[0] = 6;
+    return true;
+}
+
+REGISTER_OP_INFERPREC(log, Log_);
 
 inline bool Dense_(const cvm::NodeAttrs& attrs, vector<int>* iattr, vector<int> *oattr){
 	auto& param = cvm::get<cvm::top::DenseParam>(attrs.parsed);

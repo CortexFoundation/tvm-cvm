@@ -87,12 +87,12 @@ class CvmRuntime : public ModuleNode {
 
   int64_t GetOps();
 	int64_t GetOps(const std::string& sym_json);
- 
+
 	static int64_t EstimateOps(const std::string& sym_json) {
 		CvmRuntime rt;
 		auto ret = rt.GetOps(sym_json);
 		return ret;
-	} 
+	}
 	/*!
    * \brief Get the input index given the name of input.
    * \param name The name of the input.
@@ -248,18 +248,23 @@ class CvmRuntime : public ModuleNode {
       }
       CHECK_EQ(bitmask, 1|2|4) << "invalid format";
     }
-		
+
 		std::string GetOpName(std::string name) {
 			std::string ret = name;
+            bool has_num = false;
 			for (int i = name.size() - 1; i >= 0; --i) {
-				if (name[i] >= '0' && name[i] <= '9') continue;
-				else if (name[i] == '_') ret = name.substr(0, i);
-				else ret = name.substr(0, i + 1);
+				if (name[i] >= '0' && name[i] <= '9'){ has_num = true; continue; }
+				else if (name[i] == '_') {
+                    if (has_num)
+                        ret = name.substr(0, i);
+                    else
+                        ret = name.substr(0, i + 1);
+                } else ret = name.substr(0, i + 1);
 				break;
 			}
 			return ret;
 		}
-	
+
 		void LoadOp() {
 			if (op_type == "null") return;
 			attrs.name = GetOpName(param.func_name);

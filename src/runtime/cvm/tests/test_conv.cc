@@ -8,7 +8,8 @@ void conv_cpu(int* x_data, int n_batch, int x_h, int x_w, int in_channels,
         int *b_data,
         int *y_data, int o_h, int o_w, int out_channels,
         int stride_h, int stride_w,
-        int padding_h, int32_t padding_w
+        int padding_h, int32_t padding_w,
+        int dilation_h, int dilation_w
         ){
 #define GETX(n, c, h, w) x_data[(n) * in_channels * x_h * x_w + (c) * x_h * x_w + (h) * x_w + (w)]
 #define GETW(o, i, h, w) w_data[(o) * in_channels * filter_h * filter_w + (i) * filter_h * filter_w + (h) * filter_w + (w)]
@@ -18,8 +19,8 @@ void conv_cpu(int* x_data, int n_batch, int x_h, int x_w, int in_channels,
         for (int c = 0; c < in_channels; ++c) {
             for (int r = 0; r < filter_h; ++r) {
                 for (int s = 0; s < filter_w; ++s) {
-                    auto tp = p * stride_h + r - padding_h;
-                    auto tq = q * stride_w + s - padding_w;
+                    auto tp = p * stride_h + r*dilation_h - padding_h;
+                    auto tq = q * stride_w + s*dilation_w - padding_w;
                     if (tp < 0 || tq < 0 || tp >= x_h || tq >= x_w)
                         continue;
                     y_sum += GETX(n, c, tp, tq) * GETW(k, c, r, s);
@@ -142,18 +143,22 @@ void print(int* data, int n, int c, int h, int w){
 }
 int main(){
     int i_n = 1;
-    int i_c = 1;
-    int i_h = 33;
-    int i_w = 33;
+    int i_c = 2;
+    int i_h = 32;
+    int i_w = 32;
     int f_h = 3;
     int f_w = 3;
     int o_c = 2;
     int padding_h = 1;
-    int padding_w = 2;
+    int padding_w = 1;
     int stride_h = 1;
-    int stride_w = 2;
-    int o_h = (i_h + 2 * padding_h - f_h) / stride_h + 1;
-    int o_w = (i_w + 2 * padding_w - f_w) / stride_w + 1;
+    int stride_w = 1;
+    int dilation_h = 1;
+    int dilation_w= 1;
+    int tmp_f_h = (f_h - 1) * dilation_h + 1;
+    int tmp_f_w = (f_w - 1) * dilation_w + 1;
+    int o_h = (i_h + 2 * padding_h - tmp_f_h) / stride_h + 1;
+    int o_w = (i_w + 2 * padding_w - tmp_f_w) / stride_w + 1;
     size_t s_i = i_n * i_c * i_h * i_w;
     size_t s_f = o_c * i_c * f_h * f_w;
     size_t s_o = i_n * o_c * o_h * o_w;
@@ -175,7 +180,8 @@ int main(){
                 b_data,
                 output, o_h, o_w, o_c,
                 stride_h, stride_w,
-                padding_h, padding_w);
+                padding_h, padding_w,
+                dilation_h, dilation_w);
     }
     clock_t end = clock();
 //    print(output, i_n, o_c, o_h, o_w);
@@ -204,7 +210,7 @@ int main(){
         b_data,
         padding_h, padding_w,
         stride_h, stride_w,
-        1, 1,
+        dilation_h, dilation_w,
         1,
         output2, i_n, o_c, o_h, o_w, true);
 

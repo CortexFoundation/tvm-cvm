@@ -43,7 +43,7 @@ def quantize(data, shift_bits, target_bits=relay.const(7, dtype='int32')):
     denominator = relay.left_shift(relay.const(1),
             relay.cast(shift_bits, 'int32'))
     out = relay.divide(data, denominator)
-    # According to @yx's code, use divide operation instead of shift op for 
+    # According to @yx's code, use divide operation instead of shift op for
     # possible negative number round.
     # out = relay.right_shift(data, shift_bits)
 
@@ -180,7 +180,7 @@ def load_parameters(graph, params_name):
             #   Y = X * W + B, instead of correctly format Y = W * X + B
             # which Y is output, X is input, W is weight and B is bias.
             # For more details of matrix computation in c source code, please refer to
-            # file `infernet/src/trivial_mul_kernels.cu`, which leads to weight params 
+            # file `infernet/src/trivial_mul_kernels.cu`, which leads to weight params
             # in python code should be transformed with convert() function.
             if arg.name_hint.startswith("_dense_"):
                 params = params.reshape(list(reversed(list(params.shape)))).transpose()
@@ -205,7 +205,7 @@ def load_parameters(graph, params_name):
 def test_yxnet_mnist():
     graph = make_mnist_graph()
     _, bd = load_parameters(graph,
-            "/home/wlt/warehouse/.tmp/ca3d0286d5758697cdef653c1375960a868ac08a/data/params")
+            "/tmp/mnist_yxnet_deploy.params")
     with relay.build_config(opt_level=0):
         func = graph
         func = relay.ir_pass.infer_type(func)
@@ -215,7 +215,7 @@ def test_yxnet_mnist():
         graph_json, lowered_funcs, params = graph_gen.codegen(func)
         print (graph_json)
 
-    data = np.load('/home/wlt/warehouse/.tmp/ba9fedfc87ccb6064fcd437fd2287f5edef1bd84/data')
+    data = np.load('data.npy')
     executor = relay.create_executor()
 
     res = executor.evaluate(graph)([data.astype(np.int8)], **bd)
@@ -253,7 +253,8 @@ def test_naive():
         print (graph_json)
 
 if __name__ == "__main__":
-    test_naive()
+    #test_naive()
+    test_yxnet_mnist()
 
     #  test_yxnet_dog_cat()
 

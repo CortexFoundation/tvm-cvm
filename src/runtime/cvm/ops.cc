@@ -23,6 +23,14 @@ inline void parseToIntPair(std::string str, int* ret){
 	char a,b;
     sscanf(str.c_str(), "%c%d,%d%c", &a,ret, ret + 1, &b);
 }
+
+inline uint32_t getSize(DLTensor *dlTensor){
+    uint32_t size = 1;
+    for(int i = 0; i < dlTensor->ndim; i++){
+        size *= dlTensor->shape[i];
+    }
+    return size;
+}
 /**
 * x
 * y
@@ -36,7 +44,7 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.clip").set_body([](TVMArgs args, TVMRetValu
    std::string max_str = args[3];
    int min = std::atoi(min_str.c_str());
    int max = std::atoi(max_str.c_str());
-   for (uint32_t i = 0; i < x->shape[0]; i++) {
+   for (uint32_t i = 0; i < getSize(x); i++) {
  		static_cast<int32_t*>(y->data)[i] = std::max(std::min(max, static_cast<int32_t*>(x->data)[i]), min);
    }
  });
@@ -44,7 +52,7 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.clip").set_body([](TVMArgs args, TVMRetValu
  TVM_REGISTER_GLOBAL("tvm.runtime.cvm.relu").set_body([](TVMArgs args, TVMRetValue* rv) {
    DLTensor *x = args[0];
    DLTensor *y = args[1];
-   for (uint32_t i = 0; i < x->shape[0]; i++) {
+   for (uint32_t i = 0; i < getSize(x); i++) {
  		static_cast<int32_t*>(y->data)[i] = std::max(static_cast<int32_t*>(x->data)[i], 0);
    }
  });
@@ -87,31 +95,24 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.dense").set_body([](TVMArgs args, TVMRetVal
           dy[di * y->shape[1] + oi] = sum;
       }
   }
+
 });
 
 TVM_REGISTER_GLOBAL("tvm.runtime.cvm.flatten").set_body([]
 (TVMArgs args, TVMRetValue* rv){
      DLTensor *x = args[0];
      DLTensor *y = args[1];
-     for (uint32_t i = 0; i < x->shape[0]; i++) {
+     for (uint32_t i = 0; i < getSize(x); i++) {
          static_cast<int32_t*>(y->data)[i] = static_cast<int32_t*>(x->data)[i];
      }
 
 });
-
-inline int32_t getSize(DLTensor *dlTensor){
-    int32_t size = 1;
-    for(int i = 0; i < dlTensor->ndim; i++){
-        size *= dlTensor->shape[i];
-    }
-    return size;
-}
 inline void conv2d(
         int32_t *x_data, int32_t n_batch, int32_t in_channels, int32_t x_h, int32_t x_w,
         int32_t *w_data, int32_t filter_h, int32_t filter_w,
         int32_t *y_data, int32_t out_channels, int32_t o_h, int32_t o_w,
         int32_t *b_data,
-        int32_t padding[2], int32_t stride_h, int32_t stride_w){
+        int32_t padding[2], int32_t stride_h, int32_t stride_w, int32_t dilation_h, int32_t dilation_w){
 	#define GETX(n, c, h, w) x_data[(n) * in_channels * x_h * x_w + (c) * x_h * x_w + (h) * x_w + (w)]
 	#define GETW(o, i, h, w) w_data[(o) * in_channels * filter_h * filter_w + (i) * filter_h * filter_w + (h) * filter_w + (w)]
 	#define GETY(n, c, h, w) y_data[(n) * out_channels * o_h * o_w + (c) * o_h * o_w + (h) * o_w + (w)]
@@ -120,8 +121,8 @@ inline void conv2d(
 		for (int c = 0; c < in_channels; ++c) {
 			for (int r = 0; r < filter_h; ++r) {
 				for (int s = 0; s < filter_w; ++s) {
-					auto tp = p * stride_h + r - padding[0];
-					auto tq = q * stride_w + s - padding[1];
+					auto tp = p * stride_h + r*dilation_h - padding[0];
+					auto tq = q * stride_w + s*dilation_w - padding[1];
 					if (tp < 0 || tq < 0 || tp >= x_h || tq >= x_w)
 						continue;
 					y_sum += GETX(n, c, tp, tq) * GETW(k, c, r, s);
@@ -146,11 +147,8 @@ inline void depthwise_conv2d(
         int32_t *w_data, int32_t filter_c, int32_t filter_h, int32_t filter_w,
         int32_t *y_data, int32_t out_channels, int32_t o_h, int32_t o_w,
         int32_t *b_data,
-        int32_t padding[2], int32_t stride_h, int32_t stride_w,
+        int32_t padding[2], int32_t stride_h, int32_t stride_w, int32_t dilation_h, int32_t dilation_w,
         int32_t groups){
-    assert(in_channels == out_channels);
-    assert(in_channels == groups);
-
     for(int n = 0; n < n_batch; ++n){
         for(int c = 0; c < in_channels; ++c){
             for(int h = 0; h < o_h; ++h){
@@ -158,8 +156,8 @@ inline void depthwise_conv2d(
                     int32_t sum = 0;
                     for(int fh = 0; fh < filter_h; ++fh){
                         for(int fw = 0; fw < filter_w; ++fw){
-                            int th = h * stride_h + fh - padding[0];
-                            int tw = w * stride_h + fw - padding[1];
+                            int th = h * stride_h + fh*dilation_h - padding[0];
+                            int tw = w * stride_h + fw*dilation_w - padding[1];
                             if(th < 0 || tw < 0 || th >= x_h || tw >= x_w)
                                 continue;
                             sum += x_data[n * in_channels * x_h * x_w + c * x_h * x_w + th * x_w + tw]
@@ -250,7 +248,7 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.conv2d").set_body([]
                 w_data, filter_c, filter_h, filter_w,
                 y_data, out_channels, o_h, o_w,
                 b_data,
-                padding, stride_h, stride_w,
+                padding, stride_h, stride_w, dilation[0], dilation[1],
                 groups);
     }else{
         const int y_n_offset = out_channels * o_h * o_w;
@@ -382,6 +380,7 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.conv2d").set_body([]
             }
         }
     }
+
 //    std::cout << o_h << " " << o_w << " (" << filter_h << "," << " " << filter_w << ")"
 //              << in_channels << " " << out_channels << " "
 //              << (clock() - time_start + .0) / CLOCKS_PER_SEC << "\n";
@@ -397,7 +396,7 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.broadcast_add")
         int32_t *b = static_cast<int32_t*>(args1->data);
         int32_t *c = static_cast<int32_t*>(args2->data);
 
-        for(int i = 0; i < getSize(args0); i++){
+        for(uint32_t i = 0; i < getSize(args0); i++){
 			if(args1->ndim > 1)
 	            c[i] = a[i] + b[i];
 			else c[i] = a[i] + b[0];
@@ -413,7 +412,7 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.broadcast_sub")
         int32_t *b = static_cast<int32_t*>(args1->data);
         int32_t *c = static_cast<int32_t*>(args2->data);
 
-        for(int i = 0; i < getSize(args0); i++){
+        for(uint32_t i = 0; i < getSize(args0); i++){
 			if(args1->ndim > 1)
             	c[i] = a[i] - b[i];
 			else c[i] = a[i] - b[0];
@@ -428,7 +427,7 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.broadcast_mul")
         int32_t *b = static_cast<int32_t*>(args1->data);
         int32_t *c = static_cast<int32_t*>(args2->data);
 
-        for(int i = 0; i < getSize(args0); i++){
+        for(uint32_t i = 0; i < getSize(args0); i++){
 			if(args1->ndim > 1)
             c[i] = a[i] * b[i];
 			else c[i] = a[i] * b[0];
@@ -443,10 +442,8 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.broadcast_div")
         int32_t *b = static_cast<int32_t*>(args1->data);
         int32_t *c = static_cast<int32_t*>(args2->data);
 
-        for(int i = 0; i < getSize(args0); i++){
-			if(args1->ndim > 1)
-            c[i] = a[i] / b[i];
-			else c[i] = a[i]/b[0];
+        for(uint32_t i = 0; i < getSize(args0); i++){
+			c[i] = a[i]/b[0];
         }
     });
 TVM_REGISTER_GLOBAL("tvm.runtime.cvm.broadcast_right_shift")
@@ -458,7 +455,7 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.broadcast_right_shift")
         int32_t *b = static_cast<int32_t*>(args1->data);
         int32_t *c = static_cast<int32_t*>(args2->data);
 
-        for(int i = 0; i < getSize(args0); i++){
+        for(uint32_t i = 0; i < getSize(args0); i++){
 			if( args1->ndim > 1){
 				int32_t rightA = ((a[i] >> (b[i] - 1)) + 1) >> 1;
 				rightA = (rightA < 127 ? rightA : 127);
@@ -482,7 +479,7 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.broadcast_left_shift")
         int32_t *b = static_cast<int32_t*>(args1->data);
         int32_t *c = static_cast<int32_t*>(args2->data);
 
-        for(int i = 0; i < getSize(args0); i++){
+        for(uint32_t i = 0; i < getSize(args0); i++){
 			if(args1->ndim > 1){
 				int32_t clipA = a[i] < 127 ? a[i] : 127;
 				clipA = clipA > -127 ? clipA : -127;
@@ -539,7 +536,7 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.max_pool2d")
 	#define GETW(o, i, h, w) w_data[(o) * in_channels * filter_h * filter_w + (i) * filter_h * filter_w + (h) * filter_w + (w)]
 	#define GETY(n, c, h, w) y_data[(n) * out_channels * o_h * o_w + (c) * o_h * o_w + (h) * o_w + (w)]
 	auto calc_func = [&](int n, int k, int p, int q) {
-		int y_sum = -(2<<31)-1;
+		int y_sum = int(1)<<31;
 		for (int r = 0; r < filter_h; ++r) {
 			for (int s = 0; s < filter_w; ++s) {
 				auto tp = p * stride_h + r - padding[0];
@@ -562,6 +559,7 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.max_pool2d")
             }
         }
     }
+
 });
 
 /*
@@ -604,7 +602,7 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.elemwise_add")
         int32_t *b = static_cast<int32_t*>(args1->data);
         int32_t *c = static_cast<int32_t*>(args2->data);
 
-        for(int i = 0; i < getSize(args0); i++){
+        for(uint32_t i = 0; i < getSize(args0); i++){
             c[i] = a[i] + b[i];
         }
     });
@@ -632,18 +630,18 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.cvm_clip")
          CHECK_GT(precision, 0) << "precision must greater zero";
          int32_t min = -(1 << (precision-1));
          int32_t max = -min;
-         for(int i = 0; i < getSize(x); i++){
+         for(uint32_t i = 0; i < getSize(x); i++){
             y_data[i] = std::max(std::min(x_data[i], max), min);
          }
     });
 
 /*
  * a, input data
- * b, shift b, b>0: right shift,  b<0: left shift
+ * b, shift b
  * c, output data
  * precision, clip precision
  * */
-TVM_REGISTER_GLOBAL("tvm.runtime.cvm.cvm_shift")
+TVM_REGISTER_GLOBAL("tvm.runtime.cvm.cvm_right_shift")
     .set_body([](TVMArgs args, TVMRetValue *ret){
         DLTensor *a = args[0];
         int32_t b = static_cast<int32_t>(args[1]);
@@ -652,18 +650,96 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.cvm_shift")
         int32_t* a_data = static_cast<int32_t*>(a->data);
         int32_t* c_data = static_cast<int32_t*>(c->data);
         CHECK_GT(precision, 0) << "precision must greater zero";
-        int32_t min = -(1 << (precision-1));
+        int32_t min = -((1 << (precision-1)) - 1);
         int32_t max = -min;
 
-        for(int i = 0; i < getSize(a); i++){
+        for(uint32_t i = 0; i < getSize(a); i++){
             int32_t shift_a = a_data[i];
             if(b == 0) c_data[i] = shift_a;
-            else if(b > 0){
-                shift_a = ((a_data[i] >> (b-1)) +1) >> 1;
-            }else{
-                shift_a = shift_a << (-b);
-            }
+            else shift_a = ((a_data[i] >> (b-1)) +1) >> 1;
             c_data[i] = std::max(std::min(shift_a, max), min);
+        }
+    });
+TVM_REGISTER_GLOBAL("tvm.runtime.cvm.cvm_left_shift")
+    .set_body([](TVMArgs args, TVMRetValue *ret){
+        DLTensor *a = args[0];
+        int32_t b = static_cast<int32_t>(args[1]);
+        DLTensor *c = args[2];
+        int32_t precision = static_cast<int32_t>(args[3]);
+        int32_t* a_data = static_cast<int32_t*>(a->data);
+        int32_t* c_data = static_cast<int32_t*>(c->data);
+        CHECK_GT(precision, 0) << "precision must greater zero";
+        int32_t min = -((1 << (precision-1)) - 1);
+        int32_t max = -min;
+
+        for(uint32_t i = 0; i < getSize(a); i++){
+            int32_t shift_a = a_data[i];
+            if(b == 0) c_data[i] = shift_a;
+            else shift_a = a_data[i] << b;
+            c_data[i] = std::max(std::min(shift_a, max), min);
+        }
+    });
+TVM_REGISTER_GLOBAL("tvm.runtime.cvm.log")
+    .set_body([](TVMArgs args, TVMRetValue *ret){
+//        std::string x_str = args[0];
+        DLTensor *dlx = args[0];
+        DLTensor *y = args[1];
+        int32_t *y_data = static_cast<int32_t*>(y->data);
+        int32_t *x = static_cast<int32_t*>(dlx->data);
+        for(int i = 0; i < 64; i++){
+            int64_t tmp = (int64_t)1 << i;
+            if(x[0] <= tmp){
+                y_data[0] = i;
+                return;
+            }
+        }
+        y_data[0] = 64;
+    });
+TVM_REGISTER_GLOBAL("tvm.runtime.cvm.__div_scalar__")
+    .set_body([](TVMArgs args, TVMRetValue *ret){
+        DLTensor *dlx = args[0];
+        DLTensor *y = args[1];
+        std::string scalar_str = args[2];
+        int32_t *y_data = static_cast<int32_t*>(y->data);
+        int32_t scalar = std::atoi(scalar_str.c_str());
+        int32_t* x = static_cast<int32_t*>(dlx->data);
+        for(uint32_t i = 0; i < getSize(dlx); i++){
+            y_data[i] = x[i] / scalar;
+        }
+    });
+TVM_REGISTER_GLOBAL("tvm.runtime.cvm.abs")
+    .set_body([](TVMArgs args, TVMRetValue *ret){
+        DLTensor *dlx = args[0];
+        DLTensor *y = args[1];
+        int32_t *y_data = static_cast<int32_t*>(y->data);
+        int32_t* x = static_cast<int32_t*>(dlx->data);
+        for(uint32_t i = 0; i < getSize(dlx); i++){
+            y_data[i] = std::abs(x[i]);
+        }
+    });
+TVM_REGISTER_GLOBAL("tvm.runtime.cvm.max")
+    .set_body([](TVMArgs args, TVMRetValue *ret){
+        DLTensor *dlx = args[0];
+        DLTensor *y = args[1];
+        int32_t *y_data = static_cast<int32_t*>(y->data);
+        int32_t* x = static_cast<int32_t*>(dlx->data);
+        int max = x[0];
+        for(uint32_t i = 1; i < getSize(dlx); i++){
+            if(max < x[i]) max = x[i];
+        }
+        y_data[0] = max;
+    });
+TVM_REGISTER_GLOBAL("tvm.runtime.cvm.broadcast_max")
+    .set_body([](TVMArgs args, TVMRetValue *ret){
+        DLTensor *a = args[0];
+        DLTensor *b = args[1];
+        DLTensor *c = args[2];
+        int32_t *a_data = static_cast<int32_t*>(a->data);
+        int32_t* b_data = static_cast<int32_t*>(b->data);
+        int32_t* c_data = static_cast<int32_t*>(c->data);
+
+        for(uint32_t i = 0; i < getSize(a); i++){
+            c_data[i] = (a_data[i] > b_data[i] ? a_data[i] : b_data[i]);
         }
     });
 
@@ -676,7 +752,7 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.elemwise_add")
     int32_t *a_data = static_cast<int32_t*>(a->data);
     int32_t *b_data = static_cast<int32_t*>(b->data);
     int32_t *c_data = static_cast<int32_t*>(c->data);
-    int32_t n = getSize(a);
+    uint32_t n = getSize(a);
     const char *errorStr = cuda_elemwise_add(a_data, b_data, c_data, n, DEBUG_OP);
     CHECK_EQ(errorStr == NULL, true) << errorStr;
 });
