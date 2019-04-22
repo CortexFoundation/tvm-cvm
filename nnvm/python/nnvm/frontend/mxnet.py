@@ -171,6 +171,19 @@ def _leaky_relu(inputs, attrs):
         _raise_not_supported('act_type: ' + act_type)
     return sym
 
+def _custom(inputs, attrs):
+    op_type = _required_attr(attrs, 'op_type')
+    assert op_type in ['cvm_clip', 'cvm_left_shift', 'cvm_right_shift']
+    new_attrs = {}
+    new_attrs['precision'] = _required_attr(attrs, 'precision')
+    if op_type == 'cvm_clip':
+        sym = _get_nnvm_op(op_type)(*inputs, **new_attrs)
+    else:
+        new_attrs['shift_bit'] = _required_attr(attrs, 'shift_bit')
+        sym = _get_nnvm_op(op_type)(*inputs, **new_attrs)
+
+    return sym
+
 def _activations(inputs, attrs):
     act_type = _required_attr(attrs, 'act_type')
     if act_type in ['relu', 'sigmoid', 'tanh']:
@@ -327,6 +340,7 @@ _identity_list = ['__add_scalar__', '__add_symbol__', '__div_scalar__',
                   'reshape_like', 'where', 'floor', 'ceil']
 
 _convert_map = {
+    'Custom'        : _custom,
     '_copy'         : _rename('copy'),
     '_div_scalar'   : _rename('__div_scalar__'),
     '_minus_scalar' : _rename('__sub_scalar__'),

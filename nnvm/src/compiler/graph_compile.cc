@@ -94,10 +94,6 @@ nnvm::Graph GraphCompile(const nnvm::Graph& g) {
 
   for (uint32_t nid = 0; nid < idx.num_nodes(); ++nid) {
     const auto& inode = idx[nid];
-    std::cout << inode.source->attrs.name << " attrs.dict.size = " << inode.source->attrs.dict.size() << "\n";
-    for (auto& item: inode.source->attrs.dict) {
-        std::cout << item.first << " " << item.second << "\n";
-    }
     if (inode.source->is_variable()) continue;
     int root_id = group_vec[nid];
         if (static_cast<int>(nid) != root_id) continue;
@@ -132,6 +128,20 @@ nnvm::Graph GraphCompile(const nnvm::Graph& g) {
     }
   }
 
+  // collect op attributes
+  std::vector<int> prec_vec;
+  for (uint32_t nid = 0; nid < idx.num_nodes(); ++nid) {
+    const auto& inode = idx[nid];
+    const auto& attrs_dict = inode.source->attrs.dict;
+    auto search = attrs_dict.find("precision");
+    if (search != attrs_dict.end()) {
+      int precision = std::stoi(search->second);
+      prec_vec.emplace_back(precision);
+    } else {
+      prec_vec.emplace_back(-1);
+    }
+  }
+
   const nnvm::Op* tvm_op = nnvm::Op::Get("tvm_op");
   const nnvm::Op* cvm_op = nnvm::Op::Get("cvm_op");
 
@@ -156,7 +166,6 @@ nnvm::Graph GraphCompile(const nnvm::Graph& g) {
     np->attrs.name = inode.source->attrs.name;
     CVMOpParam param;
     param.func_name = fe.compiled_func->func_name;
-    std::cout << "param.func_name = " << param.func_name << "\n";
     param.num_inputs = static_cast<uint32_t>(fe.imap.size());
     param.num_outputs = static_cast<uint32_t>(fe.subgraph.outputs.size());
     param.flatten_data = fe.flatten_data;
@@ -177,7 +186,6 @@ nnvm::Graph GraphCompile(const nnvm::Graph& g) {
     }
     ss << "}";
     param.op_attrs = ss.str();
-    std::cout << "param.attrs" << ss.str() << "\n";
     np->attrs.parsed = std::move(param);
 
     for (uint32_t sub_input_id : subidx.input_nodes()) {
@@ -228,17 +236,16 @@ nnvm::Graph GraphCompile(const nnvm::Graph& g) {
   std::vector<int> assign_flag(new_idx.num_nodes(), 0);
   ShapeVector new_shape_vec = ShapeVector(new_idx.num_node_entries(), TShape());
   DTypeVector new_dtype_vec = DTypeVector(new_idx.num_node_entries());
+  std::vector<int> new_prec_vec(new_idx.num_node_entries(), -1);
   std::vector<std::string> new_dltype_vec(new_idx.num_node_entries());
   std::vector<std::string>  new_op_attrs(new_idx.num_node_entries());
-	std::vector<std::string> attr_parsed(new_idx.num_node_entries());
-	std::cout << "old_new\n";
+  std::vector<std::string> attr_parsed(new_idx.num_node_entries());
   for (const auto& kv : old_new) {
     uint32_t nid = kv.first;
     const auto& inode = idx[nid];
     uint32_t new_nid = new_idx.node_id(kv.second.get());
     if (!inode.source->is_variable()) {
         CVMOpParam& param = dmlc::get<CVMOpParam>(kv.second->attrs.parsed);
-        std::cout << param.op_attrs << "\n";
         new_op_attrs[new_nid] = param.op_attrs;
     }
     if (inode.source->op() == assign_op) {
@@ -262,12 +269,14 @@ nnvm::Graph GraphCompile(const nnvm::Graph& g) {
       uint32_t old_eid = idx.entry_id(nid, i);
       new_shape_vec[new_eid] = shape_vec[old_eid];
       new_dtype_vec[new_eid] = dtype_vec[old_eid];
+      new_prec_vec[new_eid] = prec_vec[nid];
       new_dltype_vec[new_eid] = tvm::runtime::TVMType2String(
           GetDLType(dtype_vec[old_eid]));
     }
   }
   ret.attrs["shape"] = std::make_shared<any>(std::move(new_shape_vec));
   ret.attrs["dtype"] = std::make_shared<any>(std::move(new_dtype_vec));
+  ret.attrs["precision"] = std::make_shared<any>(std::move(new_prec_vec));
   ret.attrs["dltype"] = std::make_shared<any>(std::move(new_dltype_vec));
   ret.attrs["op_attrs"] = std::make_shared<any>(std::move(new_op_attrs));
 

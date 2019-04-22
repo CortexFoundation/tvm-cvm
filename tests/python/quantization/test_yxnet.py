@@ -226,6 +226,7 @@ def test_yxnet_mnist():
         nnvm_sym, params = nnvm.frontend.from_mxnet(mnist_sym, bd)
         nnvm_sym, params = spass.yxnet_realize(nnvm_sym, bd, {'data': {}})
         nnvm_graph = nnvm.graph.create(nnvm_sym)
+
         use_dtype = "int32"
         with nnvm.compiler.build_config(opt_level=0): #, add_pass=["PrecomputePrune"]):
          deploy_graph, lib, params = nnvm.compiler.build(
@@ -239,6 +240,8 @@ def test_yxnet_mnist():
         with open(dump_params, 'wb') as fout:
             param_bytes = nnvm.compiler.save_param_dict(params)
             fout.write(param_bytes)
+
+        exit()
 
         module = graph_runtime.create(deploy_graph, lib, ctx=tvm.context("cuda", 1))
         module.load_params(param_bytes)

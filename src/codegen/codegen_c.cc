@@ -521,7 +521,7 @@ void CodeGenC::VisitExpr_(const Call *op, std::ostream& os) {  // NOLINT(*)
     os << ')';
 	} else if (op->is_intrinsic("log2")) {
 		CHECK_EQ(op->args.size(), 1U);
-		os << "log2(";
+		os << "(";
 		this->PrintExpr(op->args[0], os);
 		os << ')';
   } else if (op->is_intrinsic(Call::shift_left)) {

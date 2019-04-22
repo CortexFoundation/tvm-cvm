@@ -75,7 +75,8 @@ def test_sym_nnvm(batch_size=10, iter_num=10):
     with open(dump_params, "wb") as fout:
         param_bytes = nnvm.compiler.save_param_dict(real_params)
         fout.write(param_bytes)
-    lib.export_library(dump_lib)
+
+    exit()
 
     module = graph_runtime.create(deploy_graph, lib, tvm_ctx)
     module.load_params(param_bytes)
@@ -118,10 +119,9 @@ def test_sym_pass(batch_size=10, iter_num=10):
     def graph_func(data):
         return graph_comp.forward(data.as_in_context(ctx))
 
-    qsym, qparams, target_bits = calib.sym_simulate(sym,
+    qsym, qparams= calib.sym_simulate(sym,
             params, inputs_ext, data, ctx)
-    qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, target_bits)
-    qsym, qparams = spass.sym_attach_attrs(qsym, qparams, inputs_ext, precision=target_bits)
+    qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext)
 
     sim.save_ins_ext(qparams, inputs_ext)
     dump_sym, dump_params = get_dump_fname('sym.sim.pass')
@@ -133,7 +133,7 @@ def test_sym_pass(batch_size=10, iter_num=10):
     qgraph = nn.SymbolBlock(qsym, inputs)
     utils.load_parameters(qgraph, qparams, ctx=ctx)
     def simulate(data):
-        # data = sim.load_sim_data(data, 'data', inputs_ext)
+        #  data = sim.load_sim_data(data, 'data', inputs_ext)
         data = sim.load_real_data(data, 'data', inputs_ext)
         return qgraph.forward(data.as_in_context(ctx))
 
@@ -144,5 +144,5 @@ if __name__ == '__main__':
     utils.log_init()
 
     # zoo.save_mobilenet1_0()
-    test_sym_pass(16, 10)
-    # test_sym_nnvm(1, 100)
+    # test_sym_pass(16, 10)
+    test_sym_nnvm(1, 100)

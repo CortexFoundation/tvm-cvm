@@ -635,15 +635,16 @@ def _realize_symbol(sym, params, graph, inputs_ext):
             sym.attr('name'), Y_range, Y_sb, A_range, A_bit, A_sb, B_range,
             B_bit, frac, sb, B_sb)
     return node, params
-def _realize_parameters(sym, params, graph, inputs_ext, target_bits, params_sim):
+def _realize_parameters(sym, params, graph, inputs_ext,
+        target_bits={}, params_sim={}):
     logger = logging.getLogger('log.calib.realize.parameters')
-    if sym.attr('op_name') != 'null':
-        return sym, params
     name = sym.attr('name')
-    if name in inputs_ext or name not in target_bits:
+    attr = sym.list_attr()
+    if 'precision' not in attr or name in inputs_ext:
         return sym, params
+    target_bit = int(attr['precision'])
     data = params[name]
-    params[name] = sim.int_realize(data, target_bits[name], logger=logger)
+    params[name] = sim.int_realize(data, target_bit, logger=logger)
     # calculate error
     error = params[name].astype('float32') - data
     error_rate = error / data
@@ -985,16 +986,17 @@ def _simple_sim_realize_requantize_op(sym, params, graph, inputs_ext):
 # interface API
 def sym_simulate(symbol, params, inputs_ext, calib_data, ctx):
     logger = logging.getLogger('log.simulate')
-    th_dict, target_bits, scale_helper, params_sim = {}, {}, {}, []
     scale_shapes = {}
     topo_visit(symbol, params, get_op=get_mxnet_op,
             logger=logger, inputs_ext=inputs_ext,
             callback=_collect_symbol_ext, scale_shapes=scale_shapes)
+    th_dict = {}
     topo_visit(symbol, params, get_op=get_mxnet_op,
             logger=logger, inputs_ext=inputs_ext,
             callback=_calib_sym_collect_thresholds, scale_shapes=scale_shapes,
             th_dict=th_dict, calib_data=calib_data,
             calib_mode='naive', ctx=ctx)
+    scale_helper, target_bits = {}, {}
     symbol, params = topo_visit(symbol, params, get_op=get_mxnet_op,
             logger=logger, inputs_ext=inputs_ext,
             callback=_annotate_symbol, th_dict=th_dict, scale_shapes=scale_shapes,
@@ -1007,14 +1009,15 @@ def sym_simulate(symbol, params, inputs_ext, calib_data, ctx):
     symbol, params = topo_visit(symbol, params, get_op=get_mxnet_op,
             logger=logger, inputs_ext=inputs_ext,
             callback=_annotate_requantize_op)
-    return symbol, params, target_bits
+    symbol, params = sym_attach_attrs(symbol, params, inputs_ext,
+            precision=target_bits)
+    return symbol, params
 
-def sym_realize(symbol, params, inputs_ext, target_bits):
+def sym_realize(symbol, params, inputs_ext):
     logger = logging.getLogger('log.realize')
     _, params = topo_visit(symbol, params, get_op=get_mxnet_op,
            logger=logger, inputs_ext=inputs_ext,
-           callback=_realize_parameters,
-           target_bits=target_bits, params_sim={})
+           callback=_realize_parameters)
     symbol, params = topo_visit(symbol, params, get_op=get_mxnet_op,
            logger=logger, inputs_ext=inputs_ext,
            callback=_realize_symbol)

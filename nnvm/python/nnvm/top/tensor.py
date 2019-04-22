@@ -252,6 +252,16 @@ reg.register_schedule("broadcast_to", _fschedule_broadcast)
 reg.register_pattern("clip", OpPattern.ELEMWISE)
 reg.register_schedule("clip", _fschedule_elemwise)
 
+# cvm op
+reg.register_pattern("cvm_clip", OpPattern.ELEMWISE)
+reg.register_schedule("cvm_clip", _fschedule_elemwise)
+
+reg.register_pattern("cvm_left_shift", OpPattern.ELEMWISE)
+reg.register_schedule("cvm_left_shift", _fschedule_elemwise)
+
+reg.register_pattern("cvm_right_shift", OpPattern.ELEMWISE)
+reg.register_schedule("cvm_right_shift", _fschedule_elemwise)
+
 # elemwise sum
 reg.register_pattern("elemwise_sum", OpPattern.ELEMWISE)
 reg.register_schedule("elemwise_sum", _fschedule_elemwise)
