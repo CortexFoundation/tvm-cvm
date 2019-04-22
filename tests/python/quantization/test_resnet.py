@@ -302,7 +302,7 @@ def test_sym_nnvm(batch_size=10, iter_num=10):
     with nnvm.compiler.build_config(opt_level=0): #, add_pass=["PrecomputePrune"]):
         deploy_graph, lib, real_params = nnvm.compiler.build(
             nnvm_sym, target=target, shape=inputs_shape,
-            params=real_params, dtype=use_dtype)
+            params=real_params, dtype=use_dtype, runtime="tvm")
     with open(dump_symbol, "w") as fout:
         fout.write(deploy_graph.json())
     with open(dump_params, "wb") as fout:
