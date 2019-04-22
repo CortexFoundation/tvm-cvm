@@ -17,13 +17,15 @@ using std::string;
 using std::vector;
 using std::pair;
 using cvm::NodeAttrs;
+using cvm::TShape;
+
 using FInferPrecision =
-  std::function<bool (const NodeAttrs& attrs, vector<int>* iattr, vector<int>* oattr)>;
+  std::function<bool (const NodeAttrs& attrs, vector<TShape>* shapes, vector<int>* iattr, vector<int>* oattr)>;
 
 #define REGISTER_OP_INFERPREC(OpName, ComputeRule)                   \
   RegisterAction g_creatorRegister##OpName(#OpName, ComputeRule)
 
-inline bool Same_(const NodeAttrs& attrs, vector<int>* iattr, vector<int>* oattr) {
+inline bool Same_(const NodeAttrs& attrs, vector<TShape>* shapes, vector<int>* iattr, vector<int>* oattr) {
   int def_v = -1;
   for (int v : *iattr) {
     if (v != -1) {
@@ -86,7 +88,7 @@ public:
   }
 };
 
-inline bool MaxPlus_1_(const cvm::NodeAttrs& attrs, vector<int>* iattr, vector<int>* oattr) {
+inline bool MaxPlus_1_(const NodeAttrs& attrs, vector<TShape>* shapes, vector<int>* iattr, vector<int>* oattr) {
   int def_v = -1;
   for (int v : *iattr) {
     if (v > def_v) {
@@ -103,7 +105,7 @@ inline bool MaxPlus_1_(const cvm::NodeAttrs& attrs, vector<int>* iattr, vector<i
   return true;
 }
 
-inline bool Sum_(const cvm::NodeAttrs& attrs, vector<int>* iattr, vector<int>* oattr) {
+inline bool Sum_(const NodeAttrs& attrs, vector<TShape>* shapes, vector<int>* iattr, vector<int>* oattr) {
   int def_v = 0;
   for (int v : *iattr) {
     if (v == -1) {
@@ -117,7 +119,7 @@ inline bool Sum_(const cvm::NodeAttrs& attrs, vector<int>* iattr, vector<int>* o
   return true;
 }
 
-inline bool First_(const cvm::NodeAttrs& attrs, vector<int>* iattr, vector<int>* oattr) {
+inline bool First_(const NodeAttrs& attrs, vector<TShape>* shapes, vector<int>* iattr, vector<int>* oattr) {
   int def_v = iattr->at(0);
   if (def_v == -1) return false;
   for (int& v : *oattr) {
@@ -161,14 +163,21 @@ REGISTER_OP_INFERPREC(broadcast_div, First_);
 
 REGISTER_OP_INFERPREC(elemwise_div, First_);
 
-inline bool Conv2d_(const cvm::NodeAttrs& attrs, vector<int>* iattr, vector<int>* oattr) {
-  (*oattr)[0] = 32;
+inline bool Conv2d_(const NodeAttrs& attrs, vector<TShape>* shapes, vector<int>* iattr, vector<int>* oattr) {
+	auto& param = cvm::get<cvm::top::Conv2DParam>(attrs.parsed);
+	int64_t max_size = param.kernel_size.Size() * shapes->at(0)[1];
+	int prec = iattr->at(0) * 2;
+	while (max_size) {
+		prec++;
+		max_size >>= 1;
+	}
+	(*oattr)[0] = prec;
   return true;
 }
 
 REGISTER_OP_INFERPREC(conv2d, Conv2d_);
 
-inline bool Dense_(const cvm::NodeAttrs& attrs, vector<int>* iattr, vector<int> *oattr){
+inline bool Dense_(const NodeAttrs& attrs, vector<TShape>* shapes, vector<int>* iattr, vector<int> *oattr){
   auto& param = cvm::get<cvm::top::DenseParam>(attrs.parsed);
   auto use_bias = param.use_bias;
   if (use_bias) {
@@ -176,13 +185,19 @@ inline bool Dense_(const cvm::NodeAttrs& attrs, vector<int>* iattr, vector<int> 
       (*iattr)[2] = 31;
     }
   }
-  (*oattr)[0] = 32;
+	int64_t max_size = shapes->at(0)[1];
+	int prec = iattr->at(0) * 2;
+	while (max_size) {
+		prec++;
+		max_size >>= 1;
+	}
+  (*oattr)[0] = std::max(prec, 31) + 1;
   return true;
 }
 
 REGISTER_OP_INFERPREC(dense, Dense_);
 
-inline bool Clip_(const cvm::NodeAttrs& attrs, vector<int>* iattr, vector<int> *oattr){
+inline bool Clip_(const NodeAttrs& attrs, vector<TShape>* shapes, vector<int>* iattr, vector<int> *oattr){
   auto& param = cvm::get<cvm::top::ClipParam>(attrs.parsed);
   auto a_max = param.a_max;
   auto a_min = param.a_min;
@@ -198,9 +213,17 @@ inline bool Clip_(const cvm::NodeAttrs& attrs, vector<int>* iattr, vector<int> *
 
 REGISTER_OP_INFERPREC(clip, Clip_);
 
-inline bool BroadcastRightShift_(const cvm::NodeAttrs& attrs, vector<int>* iattr, vector<int>* oattr) {
+inline bool BroadcastRightShift_(const NodeAttrs& attrs, vector<TShape>* shapes, vector<int>* iattr, vector<int>* oattr) {
   (*oattr)[0] = 8;
   return true;
 }
 
 REGISTER_OP_INFERPREC(broadcast_right_shift, BroadcastRightShift_);
+
+inline bool BroadcastLeftShift_(const NodeAttrs& attrs, vector<TShape>* shapes, vector<int>* iattr, vector<int>* oattr) {
+  (*oattr)[0] = 8;
+  return true;
+}
+
+REGISTER_OP_INFERPREC(broadcast_left_shift, BroadcastLeftShift_);
+

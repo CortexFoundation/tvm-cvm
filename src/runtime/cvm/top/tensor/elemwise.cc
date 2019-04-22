@@ -342,7 +342,6 @@ NNVM_REGISTER_ELEMWISE_UNARY_OP(block_grad)
   "FInplaceIdentity", [](const NodeAttrs& attrs){
     return std::vector<bool>{true};
 })
-.set_attr<cvm::FGradient>("FGradient", MakeZeroGradNodes)
 .set_support_level(4);
 
 DMLC_REGISTER_PARAMETER(IndicatorParam);

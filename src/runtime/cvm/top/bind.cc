@@ -62,10 +62,17 @@ BIND_OP_PARAM(flatten, ReshapeParam);
 BIND_OP_PARAM(broadcast_add, BroadcastToParam);
 
 BIND_OP_PARAM(broadcast_sub, BroadcastToParam);
+
 BIND_OP_PARAM(broadcast_div, BroadcastToParam);
+
 BIND_OP_PARAM(broadcast_mul, BroadcastToParam);
+
 BIND_OP_PARAM(broadcast_right_shift, BroadcastToParam);
+
 BIND_OP_PARAM(broadcast_left_shift, BroadcastToParam);
+
 BIND_OP_PARAM(cast, CastParam);
+
 BIND_OP_PARAM(sum, ReduceParam);
+
 };

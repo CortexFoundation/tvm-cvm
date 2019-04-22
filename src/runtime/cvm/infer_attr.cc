@@ -21,37 +21,60 @@ using cvm::TShape;
 namespace tvm {
 namespace runtime {
 
-void CvmRuntime::SetupAttr() try {
-
-  SetupShape();
+bool CvmRuntime::CheckAttr() {
+	try {
+		SetupShape();
 #ifdef CHECK_ATTR_DEBUG
-  std::cout << "check shape pass" << std::endl;
+		std::cout << "check shape pass" << std::endl;
 #endif
 
-  SetupType();
+		SetupType();
 #ifdef CHECK_ATTR_DEBUG
-  std::cout << "check type pass" << std::endl;
+		std::cout << "check type pass" << std::endl;
 #endif
 
-  SetupPrecision();
+		SetupPrecision();
 #ifdef CHECK_ATTR_DEBUG
-  std::cout << "infer precision pass" << std::endl;
-  for (auto p:  attrs_.precision) {
-    std::cout << p << ' ';
+		std::cout << "infer precision pass" << std::endl;
+		for (auto p:  attrs_.precision) {
+			std::cout << p << ' ';
+		}
+		std::cout << std::endl;
+#endif
+		return true;
+	} catch (dmlc::Error &e) {
+		std::cout << e.what();
+		return false;
+	}
+}
+
+std::vector<TShape> GetTShapeArray(const std::vector<std::vector<int64_t> > &shapes) {
+  std::vector<TShape> ret;
+  for (auto shape : shapes) {
+    if (shape.size() == 1) {
+      ret.push_back(TShape{shape[0]});
+    } else if (shape.size() == 2) {
+      ret.push_back(TShape{shape[0], shape[1]});
+    } else if (shape.size() == 3) {
+      ret.push_back(TShape{shape[0], shape[1], shape[2]});
+    } else if (shape.size() == 4) {
+      ret.push_back(TShape{shape[0], shape[1], shape[2], shape[3]});
+    } else {
+      ret.push_back(TShape());
+    }
   }
-  std::cout << std::endl;
-#endif
-} catch (dmlc::Error &e) {
-  std::cout << e.what();
+  return ret;
 }
 
 void CvmRuntime::SetupPrecision() {
   std::vector<Node> &idx = nodes_;
   std::vector<int> &precision = attrs_.precision;
-  precision.resize(nodes_.size(), -1);
+	const auto rshape = GetTShapeArray(attrs_.shape);
+	precision.resize(nodes_.size(), -1);
   // Temp space for shape inference.
   std::vector<int> iprec, oprec;
-  auto finfer_prec = FInferPrecisionMap::getInstance();
+	std::vector<TShape> shapes;
+	auto finfer_prec = FInferPrecisionMap::getInstance();
 
   // inference step function for nid
   auto infer_prec = [&](uint32_t nid) {
@@ -66,15 +89,16 @@ void CvmRuntime::SetupPrecision() {
       const uint32_t num_outputs = inode.param.num_outputs;
       // Forward operator inference.
       iprec.resize(num_inputs, -1);
+			shapes.resize(num_inputs, TShape());
       for (uint32_t i = 0; i < iprec.size(); ++i) {
         iprec[i] = precision[entry_id(inode.inputs[i])];
-      }
+				shapes[i] = rshape[entry_id(inode.inputs[i])];
+			}
       CHECK_GE(num_outputs, 1) << "an operator has at least 1 outputs";
       oprec.resize(num_outputs, -1);
       auto finfer = finfer_prec.get(inode.attrs.op->name);
       // Call inference function of the operator.
-      cvm::NodeAttrs attrs;
-      if (!finfer(inode.attrs, &iprec, &oprec)) {
+      if (!finfer(inode.attrs, &shapes, &iprec, &oprec)) {
         throw dmlc::Error(std::string("error with ") + inode.attrs.op->name);
       }
       // Save to the result map.
@@ -96,24 +120,6 @@ void CvmRuntime::SetupPrecision() {
   }
 }
 
-std::vector<TShape> GetTShapeArray(const std::vector<std::vector<int64_t> > &shapes) {
-  std::vector<TShape> ret;
-  for (auto shape : shapes) {
-    if (shape.size() == 1) {
-      ret.push_back(TShape{shape[0]});
-    } else if (shape.size() == 2) {
-      ret.push_back(TShape{shape[0], shape[1]});
-    } else if (shape.size() == 3) {
-      ret.push_back(TShape{shape[0], shape[1], shape[2]});
-    } else if (shape.size() == 4) {
-      ret.push_back(TShape{shape[0], shape[1], shape[2], shape[3]});
-    } else {
-      ret.push_back(TShape());
-    }
-  }
-  return ret;
-}
-
 int64_t CvmRuntime::GetOps() {
   auto &idx = nodes_;
   const auto rshape = GetTShapeArray(attrs_.shape);
@@ -132,25 +138,25 @@ int64_t CvmRuntime::GetOps() {
         ops.push_back(op);
       }
 
+			int64_t t;
       if (op == "dense") {
         auto shape1 = rshape[inode.inputs[0].node_id];
         auto shape2 = rshape[inode.inputs[1].node_id];
-        auto t = shape1[0] * shape1[1] * shape2[0];
-        ret += t;
-        opcount[op] += t;
+        t = static_cast<int64_t>(shape1[0]) * shape1[1] * shape2[0];
       } else if (op == "conv2d") {
         auto shape1 = rshape[inode.inputs[0].node_id];
         auto shape2 = rshape[inode.inputs[1].node_id];
-        auto oshape = rshape[nid];
-        auto t = ((int64_t)shape2[1] * shape2[2] * shape2[3] + 1)
-                * shape1[2] * shape1[3] * shape2[0] * 2;
-        ret += t;
-        opcount[op] += t;
-      } else {
-        auto t = rshape[nid].Size();
-        ret += t;
-        opcount[op] += t;
+        t = (static_cast<int64_t>(shape2[1]) * shape2[2] * shape2[3] + 1)
+           * static_cast<int64_t>(shape1[2]) * shape1[3] * shape2[0] * 2;
+      } else if (op == "max_pool2d") {
+				t = rshape[nid].Size();
+				auto& param = cvm::get<cvm::top::MaxPool2DParam>(inode.attrs.parsed);
+				t *= param.pool_size.Size();
+			} else {
+        t = rshape[nid].Size();
       }
+			ret += t;
+      opcount[op] += t;
     }
   }
 #ifdef CHECK_ATTR_DEBUG

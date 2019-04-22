@@ -32,58 +32,45 @@ struct DenseParam : public dmlc::Parameter<DenseParam> {
   static const constexpr int kBias = 2;
 };
 
-/*
-struct DropoutParam : public dmlc::Parameter<DropoutParam> {
-  float rate;
-
-  DMLC_DECLARE_PARAMETER(DropoutParam) {
-    DMLC_DECLARE_FIELD(rate).set_default(0.5)
-        .set_range(0, 1)
-        .describe("Fraction of the input that gets dropped out during training time.");
-  }
-};
-
-
-// Shared by softmax and log_softmax
-struct SoftmaxParam : public dmlc::Parameter<SoftmaxParam> {
-  int axis;
-
-  DMLC_DECLARE_PARAMETER(SoftmaxParam) {
-    DMLC_DECLARE_FIELD(axis).set_default(-1)
-        .describe("The axis to sum over when computing softmax.");
-  }
-};
-
-struct LeakyReLUParam : public dmlc::Parameter<LeakyReLUParam> {
-  double alpha;
-
-  DMLC_DECLARE_PARAMETER(LeakyReLUParam) {
-    DMLC_DECLARE_FIELD(alpha).set_lower_bound(0.0).set_default(0.25)
-        .describe("slope coefficient for the negative half axis.");
-  }
-};
-
-struct PReLUParam : public dmlc::Parameter<PReLUParam> {
-  int axis;
-  DMLC_DECLARE_PARAMETER(PReLUParam) {
-    DMLC_DECLARE_FIELD(axis).set_default(1)
-      .describe("Specify which shape axis the channel is specified.");
-  }
-};
-
-struct PadParam : public dmlc::Parameter<PadParam> {
-  float pad_value;
-  Tuple<Tuple<int> > pad_width;
-
-  DMLC_DECLARE_PARAMETER(PadParam) {
-    DMLC_DECLARE_FIELD(pad_value).set_default(0.0)
-      .describe("The value to be padded.");
-    DMLC_DECLARE_FIELD(pad_width)
-      .describe("Number of values padded to the edges of each axis, "
-                "in the format of ((before_1, after_1), ... (before_N, after_N))");
-  }
-};
-*/
+//  // Shared by softmax and log_softmax
+//  struct SoftmaxParam : public dmlc::Parameter<SoftmaxParam> {
+//    int axis;
+//  
+//    DMLC_DECLARE_PARAMETER(SoftmaxParam) {
+//      DMLC_DECLARE_FIELD(axis).set_default(-1)
+//          .describe("The axis to sum over when computing softmax.");
+//    }
+//  };
+//  
+//  struct LeakyReLUParam : public dmlc::Parameter<LeakyReLUParam> {
+//    double alpha;
+//  
+//    DMLC_DECLARE_PARAMETER(LeakyReLUParam) {
+//      DMLC_DECLARE_FIELD(alpha).set_lower_bound(0.0).set_default(0.25)
+//          .describe("slope coefficient for the negative half axis.");
+//    }
+//  };
+//  
+//  struct PReLUParam : public dmlc::Parameter<PReLUParam> {
+//    int axis;
+//    DMLC_DECLARE_PARAMETER(PReLUParam) {
+//      DMLC_DECLARE_FIELD(axis).set_default(1)
+//        .describe("Specify which shape axis the channel is specified.");
+//    }
+//  };
+//  
+//  struct PadParam : public dmlc::Parameter<PadParam> {
+//    float pad_value;
+//    Tuple<Tuple<int> > pad_width;
+//  
+//    DMLC_DECLARE_PARAMETER(PadParam) {
+//      DMLC_DECLARE_FIELD(pad_value).set_default(0.0)
+//        .describe("The value to be padded.");
+//      DMLC_DECLARE_FIELD(pad_width)
+//        .describe("Number of values padded to the edges of each axis, "
+//                  "in the format of ((before_1, after_1), ... (before_N, after_N))");
+//    }
+//  };
 
 struct Conv2DParam : public dmlc::Parameter<Conv2DParam> {
   int channels;

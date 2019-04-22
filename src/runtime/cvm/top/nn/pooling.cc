@@ -145,13 +145,6 @@ NNVM_REGISTER_OP(max_pool2d)
 .set_attr<FInferShape>("FInferShape", Pool2DInferShape<MaxPool2DParam>)
 .set_attr<FInferType>("FInferType", ElemwiseType<1, 1>)
 .set_attr<FCorrectLayout>("FCorrectLayout", Pool2DCorrectLayout<MaxPool2DParam>)
-.set_attr<FGradient>(
-  "FGradient", [](const NodePtr& n,
-                  const std::vector<NodeEntry>& ograds) {
-    return MakeGradNode("_max_pool2d_grad", n,
-                        {ograds[0], n->inputs[0], NodeEntry{n, 0, 0}},
-                        n->attrs.dict);
-})
 .set_support_level(2);
 
 NNVM_REGISTER_OP(_max_pool2d_grad)

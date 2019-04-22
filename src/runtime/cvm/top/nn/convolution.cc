@@ -217,15 +217,7 @@ a bias vector is created and added to the outputs.
 .set_attr<FCorrectLayout>("FCorrectLayout", Conv2DCorrectLayout<Conv2DParam>)
 .set_num_outputs(1)
 .set_num_inputs(UseBiasNumInputs<Conv2DParam>)
-.set_support_level(2)
-.set_attr<FGradient>(
-  "FGradient", [](const NodePtr& n,
-                  const std::vector<NodeEntry>& ograds) {
-    return MakeGradNode("_conv2d_grad", n,
-                        {ograds[0], n->inputs[Conv2DParam::kData],
-                         n->inputs[Conv2DParam::kWeight]},
-                        n->attrs.dict);
-});
+.set_support_level(2);
 
 NNVM_REGISTER_OP(_contrib_conv2d_NCHWc)
 .describe(R"code(2D convolution layer (e.g. spatial convolution over images).

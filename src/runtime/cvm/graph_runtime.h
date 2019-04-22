@@ -402,7 +402,7 @@ class CvmRuntime : public ModuleNode {
   void SetupShape();
   void SetupType();
   void SetupPrecision();
-  void SetupAttr();
+  bool CheckAttr();
   /*! \brief Setup the temporal storage */
   void SetupStorage();
   /*! \brief Setup the executors. */

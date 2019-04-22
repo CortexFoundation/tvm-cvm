@@ -288,7 +288,6 @@ inline bool ElemwiseBinaryKeepLeftLayout(const NodeAttrs& attrs,
 
 #define NNVM_REGISTER_INIT_LIKE_OP(name)                            \
   NNVM_REGISTER_ELEMWISE_UNARY_OP(name)                             \
-  .set_attr<FGradient>("FGradient", MakeZeroGradNodes)              \
   .add_argument("data", "Symbol", "The input")
 
 
@@ -339,11 +338,6 @@ inline bool ElemwiseBinaryKeepLeftLayout(const NodeAttrs& attrs,
   })                                                                \
   .set_attr<FCorrectLayout>("FCorrectLayout",                       \
     ElemwiseFixedLayoutUnknownOut<1, 1>)                            \
-  .set_attr<FGradient>(                                             \
-    "FGradient", [](const NodePtr& n,                               \
-                    const std::vector<NodeEntry>& ograds) {         \
-      return MakeZeroGradNodes(n, ograds);                          \
-  })
 
 
 }  // namespace top

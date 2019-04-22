@@ -74,7 +74,7 @@ void CvmRuntime::Init(const std::string& graph_json,
   this->Load(&reader);
   module_ = module;
   ctxs_ = ctxs;
-  this->SetupAttr();
+  this->CheckAttr();
   this->SetupStorage();
   this->SetupOpExecs();
 }
