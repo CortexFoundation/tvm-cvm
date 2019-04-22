@@ -311,13 +311,15 @@ nnvm_identity_ext = {
     'broadcast_sub': OpExt('broadcast_sub', [INT32_TYPE], [INT32_TYPE]),
     'broadcast_max': OpExt('broadcast_max', [INT32_TYPE], [INT32_TYPE]),
 
-    '__div_scalar__': {},
-
     'max': {},
     'abs': {},
     'log2': {},
 
     'clip': OpExt('clip', [INT32_TYPE], [INT8_TYPE]),
+
+    'cvm_clip': {},
+    'cvm_left_shift': {},
+    'cvm_right_shift': {},
 }
 
 """Mxnet Symbol Operator Extension

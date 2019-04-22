@@ -198,38 +198,37 @@ def nnvm_realize(symbol, params, inputs_ext):
         # remove layer: floor in int8
         if op_name in ['floor', 'ceil']:
             node = childs[0]
-        elif op_name == '__rpow_scalar__':
-            print (name, op_name, attr, len(childs))
-            base = int(attr['scalar'])
-            if base == 2:
-                const_1, const_name = op_const(1, graph, var=nnvm.sym.Variable)
-                params[const_name] = nd.array([1])
-                node = nnvm.sym.broadcast_left_shift(const_1, childs[0])
-        elif op_name == "broadcast_div":
-           msg = '%s(op=%s, inputs=%s)'%(name, op_name, [c.attr('name') for c in childs])
-           input_sym = childs[0]
-           div_sym = childs[1]
-           assert div_sym.attr('op_name') == 'null' # params or constant
-           div_sym_name = div_sym.attr('name')
+        # elif op_name == '__rpow_scalar__':
+        #     print (name, op_name, attr, len(childs))
+        #     base = int(attr['scalar'])
+        #     if base == 2:
+        #         const_1, const_name = op_const(1, graph, var=nnvm.sym.Variable)
+        #         params[const_name] = nd.array([1])
+        #         node = nnvm.sym.broadcast_left_shift(const_1, childs[0])
+        # elif op_name == "broadcast_div":
+        #    msg = '%s(op=%s, inputs=%s)'%(name, op_name, [c.attr('name') for c in childs])
+        #    input_sym = childs[0]
+        #    div_sym = childs[1]
+        #    assert div_sym.attr('op_name') == 'null' # params or constant
+        #    div_sym_name = div_sym.attr('name')
 
-           div = params[div_sym_name]
-           shift_bits = mx.ndarray.log2(div).astype('float32')
-           assert all(div >= 0)
-           assert shift_bits.astype('int8').astype('float32') == shift_bits, msg
+        #    div = params[div_sym_name]
+        #    shift_bits = mx.ndarray.log2(div).astype('float32')
+        #    assert all(div >= 0)
+        #    assert shift_bits.astype('int8').astype('float32') == shift_bits, msg
 
-           sb_sym_name = div_sym_name.replace('_scale', '') + '_shift_bits'
-           if sb_sym_name in graph:
-               sb_sym = graph[sb_sym_name]
-           else:
-               sb_sym = nnvm.sym.Variable(sb_sym_name, shape=(1,))
-               graph[sb_sym_name] = sb_sym
-               params[sb_sym_name] = shift_bits
-           node = nnvm.sym.broadcast_right_shift(input_sym, sb_sym)
+        #    sb_sym_name = div_sym_name.replace('_scale', '') + '_shift_bits'
+        #    if sb_sym_name in graph:
+        #        sb_sym = graph[sb_sym_name]
+        #    else:
+        #        sb_sym = nnvm.sym.Variable(sb_sym_name, shape=(1,))
+        #        graph[sb_sym_name] = sb_sym
+        #        params[sb_sym_name] = shift_bits
+        #    node = nnvm.sym.broadcast_right_shift(input_sym, sb_sym)
         elif op_name not in nnvm_identity_ext:
-            # logger.critical(
-                # "Unsupported op:%s(name=%s, attr=%s) in INT8 Inference network",
-                # op_name, name, attr)
-            pass
+            logger.critical(
+                "Unsupported op:%s(name=%s, attr=%s) in INT8 Inference network",
+                op_name, name, attr)
 
         return node, params
 

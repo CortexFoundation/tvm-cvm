@@ -282,8 +282,9 @@ def test_sym_nnvm(batch_size=10, iter_num=10):
     sym, params = mx.sym.load(load_symbol_fname), nd.load(load_params_fname)
     graph = nn.SymbolBlock(sym, inputs)
     load_parameters(graph, params, ctx=mx_ctx)
+    sim.load_ins_ext(params, inputs_ext)
     def graph_func(data):
-        data = sim.load_quant_data(data, 'data', params)
+        data = sim.load_real_data(data, 'data', params)
         return graph.forward(data.as_in_context(mx_ctx))
 
     nnvm_sym, _ = nnvm.frontend.from_mxnet(sym)
@@ -308,6 +309,8 @@ def test_sym_nnvm(batch_size=10, iter_num=10):
         param_bytes = nnvm.compiler.save_param_dict(real_params)
         fout.write(param_bytes)
     lib.export_library(dump_lib)
+
+    exit()
 
     module = graph_runtime.create(deploy_graph, lib, tvm_ctx)
     module.load_params(param_bytes)
@@ -346,35 +349,23 @@ def test_sym_pass(quant_flag, batch_size=10, iter_num=10):
     def graph_func(data):
         return graph.forward(data.as_in_context(ctx))
 
-    th_dict = {}
-    sim_sym, sim_params, th_dict = calib.sym_calib_sim_quant(sym,
+    qsym, qparams= calib.sym_simulate(sym,
             params, inputs_ext, calib_data, ctx)
+    qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext)
+
     dump_sym, dump_params = get_dump_fname('sym.sim.quant')
-    nd.save(dump_params, sim_params)
-    with open(dump_sym, 'w') as fout:
-        fout.write(sim_sym.tojson())
-
-    graph_sim = nn.SymbolBlock(sim_sym, inputs)
-    load_parameters(graph_sim, sim_params, ctx=ctx)
-    def simulate(data):
-        data = sim.load_quant_data(data, 'data', sim_params)
-        return graph_sim.forward(data.as_in_context(ctx))
-
-    qsym, qparams = calib.sym_calib_simple_sim_quant(sym, params, inputs_ext,
-           calib_data=calib_data, th_dict=th_dict, ctx=ctx)
-    dump_sym, dump_params = get_dump_fname('sym.simple.sim.quant')
+    sim.save_ins_ext(qparams, inputs_ext)
     nd.save(dump_params, qparams)
     with open(dump_sym, 'w') as fout:
-       fout.write(qsym.tojson())
-    qsym, qparams = mx.sym.load(dump_sym), nd.load(dump_params)
-    qgraph = nn.SymbolBlock(qsym, inputs)
-    load_parameters(qgraph, qparams, ctx=ctx)
-    def sb_quant(data):
-        data = sim.load_quant_data(data, 'data', qparams)
-        return qgraph.forward(data.as_in_context(ctx))
+        fout.write(qsym.tojson())
+    graph_sim = nn.SymbolBlock(qsym, inputs)
+    load_parameters(graph_sim, qparams, ctx=ctx)
+    sim.load_ins_ext(qparams, inputs_ext)
+    def simulate(data):
+        data = sim.load_real_data(data, 'data', inputs_ext)
+        return graph_sim.forward(data.as_in_context(ctx))
 
-    print ('eval')
-    multi_eval_accuracy(graph_func, data_iter_func, simulate, sb_quant, # simulate,
+    multi_eval_accuracy(graph_func, data_iter_func, simulate,
             iter_num=iter_num, logger=logger)
 
 def save_data():

@@ -173,7 +173,7 @@ nnvm::Graph GraphCompile(const nnvm::Graph& g) {
     std::vector<std::string> attr_vec;
     for (auto& item: inode.source->attrs.dict) {
         std::stringstream tss;
-        tss << "'" << item.first << "': " << "'" << item.second << "'";
+        tss << "\"" << item.first << "\": " << "\"" << item.second << "\"";
         attr_vec.push_back(tss.str());
     }
 

@@ -17,6 +17,7 @@ import inspect
 
 import utils
 import sym_pass as spass
+import sym_utils as sutils
 
 shift_bits_dict = {
     # 'cv0_sb': relay.const(8, dtype='int32')
@@ -31,6 +32,10 @@ def mx_const(number):
         const_var_dict[name]['number'] = number
 
     return const_var_dict[name]['symbol']
+
+def divide(data, deno):
+    out = mx.sym.broadcast_div(data, deno)
+    return mx.sym.fix(out)
 
 def quantize(data, shift_bits):
     """Quantize output of layer, to be consistent with source code @yx
@@ -58,12 +63,12 @@ def quantize(data, shift_bits):
     shift_bits = mx.sym.broadcast_sub(total_bits, mx_const(7))
     shift_bits = mx.sym.maximum(shift_bits, mx_const(0))
     denominator = mx.sym.pow(2, shift_bits)
-    out = mx.sym.broadcast_div(data, denominator)
-    out = mx.sym.floor(out)
+    out = divide(data, denominator)
     out = mx.sym.clip(out, a_min=-128, a_max=127)
     return out, max_v, None, shift_bits
 
-def make_conv_relu(data, kernel_size, padding, strides, channels, prefix="conv", skip_relu=False):
+def make_conv_relu(data, kernel_size, padding, strides, channels,
+        prefix="conv", skip_relu=False, skip_quantize=False):
     prefix = "_conv_" + prefix
     weight = mx.sym.var(prefix+'_weight')
     bias = mx.sym.var(prefix+'_bias')
@@ -72,21 +77,24 @@ def make_conv_relu(data, kernel_size, padding, strides, channels, prefix="conv",
                           pad=padding, stride=strides,
                           num_filter=channels, no_bias=False)
 
-    out, max_v, min_v, shift_bits = quantize(out, None)
+    if not skip_quantize:
+        out, max_v, min_v, shift_bits = quantize(out, None)
     if not skip_relu:
         out = mx.sym.relu(out)
-    return out, max_v, min_v, shift_bits
+    return out, None, None, None
 
 def make_max_pool(data):
     out = mx.sym.Pooling(data, kernel=(2, 2), stride=(2, 2), pool_type='max')
     return out
 
-def make_dense(data, units, prefix="dense"):
+def make_dense(data, units, prefix="dense", skip_quantize=False):
     prefix = "_dense_" + prefix
     weight = mx.sym.var(prefix+'_weight')
     bias = mx.sym.var(prefix+"_bias")
     out = mx.sym.FullyConnected(data, weight, bias, num_hidden=units)
-    return quantize(out, None)
+    if not skip_quantize:
+        out, _,_,_ = quantize(out, None)
+    return out, None, None, None
 
 def make_mnist_graph():
     data = mx.sym.var('data')
@@ -97,15 +105,15 @@ def make_mnist_graph():
     out, _,_,_ = make_conv_relu(mp, (1, 1), (0, 0), (1, 1), 32, "cv2")
     out, _,_,_ = make_conv_relu(out, (3, 3), (1, 1), (1, 1), 32, "cv3")
 
-    out = mx.sym.floor(out / 2)
-    mp = mx.sym.floor(mp / 2)
+    out = divide(out, mx_const(2))
+    mp = divide(mp, mx_const(2))
     out = out + mp
     out = make_max_pool(out)
 
     out = mx.sym.flatten(out)
     out, _, _, _ = make_dense(out, 256, "dense0")
     out = mx.sym.relu(out)
-    out, max_v, min_v, sb = make_dense(out, 10, "dense1")
+    out, max_v, min_v, sb = make_dense(out, 10, "dense1", skip_quantize=True)
 
     return out
 
@@ -216,7 +224,7 @@ def test_yxnet_mnist():
     data = np.load('/home/wlt/warehouse/.tmp/ba9fedfc87ccb6064fcd437fd2287f5edef1bd84/data')
     data = nd.array([data.astype(np.int8)])
 
-    if False:
+    if True:
         graph =  nn.SymbolBlock(mnist_sym, inputs)
         utils.load_parameters(graph, bd)
         res = graph.forward(data).astype('int32')
@@ -226,6 +234,8 @@ def test_yxnet_mnist():
         nnvm_sym, params = nnvm.frontend.from_mxnet(mnist_sym, bd)
         nnvm_sym, params = spass.yxnet_realize(nnvm_sym, bd, {'data': {}})
         nnvm_graph = nnvm.graph.create(nnvm_sym)
+
+        print (sutils.sym_collect_attr(nnvm_sym))
 
         use_dtype = "int32"
         with nnvm.compiler.build_config(opt_level=0): #, add_pass=["PrecomputePrune"]):
