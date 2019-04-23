@@ -77,4 +77,10 @@ BIND_OP_PARAM(sum, ReduceParam);
 
 BIND_OP_PARAM(max, ReduceParam);
 
+BIND_OP_PARAM(cvm_clip, CVMClipParam);
+
+BIND_OP_PARAM(cvm_left_shift, CVMLeftShiftParam);
+
+BIND_OP_PARAM(cvm_right_shift, CVMRightShiftParam);
+
 };

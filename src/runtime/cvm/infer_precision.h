@@ -204,6 +204,32 @@ inline bool Dense_(const NodeAttrs& attrs, vector<TShape>* shapes, vector<int>* 
 
 REGISTER_OP_INFERPREC(dense, Dense_);
 
+inline bool CVMClip_(const NodeAttrs& attrs, vector<TShape>* shapes, vector<int>* iattr, vector<int> *oattr){
+  auto& param = cvm::get<cvm::top::CVMClipParam>(attrs.parsed);
+  (*oattr)[0] = param.precision;
+  return true;
+}
+
+REGISTER_OP_INFERPREC(cvm_clip, CVMClip_);
+
+inline bool CVMRightShift_(const NodeAttrs& attrs, vector<TShape>* shapes, vector<int>* iattr, vector<int>* oattr) {
+  auto& param = cvm::get<cvm::top::CVMRightShiftParam>(attrs.parsed);
+  (*oattr)[0] = param.precision;
+  return true;
+}
+
+REGISTER_OP_INFERPREC(cvm_right_shift, CVMRightShift_);
+
+inline bool CVMLeftShift_(const NodeAttrs& attrs, vector<TShape>* shapes, vector<int>* iattr, vector<int>* oattr) {
+  auto& param = cvm::get<cvm::top::CVMLeftShiftParam>(attrs.parsed);
+	(*oattr)[0] = param.precision;
+	if (iattr->at(0) + param.shift_bit > 32) {
+		(*oattr)[0] = iattr->at(0) + param.shift_bit;
+	}
+  return true;
+}
+
+REGISTER_OP_INFERPREC(cvm_left_shift, CVMLeftShift_);
 inline bool Clip_(const NodeAttrs& attrs, vector<TShape>* shapes, vector<int>* iattr, vector<int> *oattr){
   auto& param = cvm::get<cvm::top::ClipParam>(attrs.parsed);
   auto a_max = param.a_max;

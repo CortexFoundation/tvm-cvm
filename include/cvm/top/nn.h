@@ -32,6 +32,46 @@ struct DenseParam : public dmlc::Parameter<DenseParam> {
   static const constexpr int kBias = 2;
 };
 
+struct CVMClipParam : public dmlc::Parameter<CVMClipParam> {
+	int precision;
+	bool is_sign;
+  DMLC_DECLARE_PARAMETER(CVMClipParam) {
+    DMLC_DECLARE_FIELD(precision)
+      .describe("Precision such that value out of range this will be clipped.");
+    DMLC_DECLARE_FIELD(is_sign).set_default(true)
+      .describe("Clip range is sign int or unsigned int.");
+  }
+};
+
+struct CVMLeftShiftParam : public dmlc::Parameter<CVMLeftShiftParam> {
+	int precision;
+	bool is_sign;
+	int shift_bit;
+  DMLC_DECLARE_PARAMETER(CVMLeftShiftParam) {
+    DMLC_DECLARE_FIELD(precision)
+      .describe("Precision such that value out of range this will be clipped.");
+    DMLC_DECLARE_FIELD(is_sign).set_default(true)
+      .describe("Clip range is sign int or unsigned int.");
+		DMLC_DECLARE_FIELD(shift_bit)
+			.describe("Left shift bit.");
+  }
+};
+
+struct CVMRightShiftParam : public dmlc::Parameter<CVMRightShiftParam> {
+	int precision;
+	bool is_sign;
+	int shift_bit;
+  DMLC_DECLARE_PARAMETER(CVMRightShiftParam) {
+    DMLC_DECLARE_FIELD(precision)
+      .describe("Precision such that value out of range this will be clipped.");
+    DMLC_DECLARE_FIELD(is_sign).set_default(true)
+      .describe("Clip range is sign int or unsigned int.");
+		DMLC_DECLARE_FIELD(shift_bit)
+			.describe("Left shift bit.");
+  }
+};
+
+
 //  // Shared by softmax and log_softmax
 //  struct SoftmaxParam : public dmlc::Parameter<SoftmaxParam> {
 //    int axis;
