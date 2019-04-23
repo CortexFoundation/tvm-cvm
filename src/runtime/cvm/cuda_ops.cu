@@ -235,8 +235,10 @@ __global__ void kernel_depthwise_conv2d(
     int g_x = blockDim.x * blockIdx.x + threadIdx.x;
     int l_y = threadIdx.y; 
     int l_x = threadIdx.x;
-    int tmp_o_h = i_h + 2 * padding_h - f_h + 1; // for stride
-    int tmp_o_w = i_w + 2 * padding_w - f_w + 1;
+    int tmp_f_h = (f_h - 1) * dilation_h + 1; // for dilation, to be optimized
+    int tmp_f_w = (f_w - 1) * dilation_w + 1;
+    int tmp_o_h = i_h + 2 * padding_h - tmp_f_h + 1; // for stride
+    int tmp_o_w = i_w + 2 * padding_w - tmp_f_w + 1;
     int perBlockOneImageY = (tmp_o_h+BS-1) / BS;
     int perBlockOneImageX = (tmp_o_w+BS-1) / BS;
     int l_o_c = blockIdx.y / perBlockOneImageY;
@@ -249,8 +251,8 @@ __global__ void kernel_depthwise_conv2d(
     const int32_t F_H = f_h;
     const int32_t F_W = f_w;
     //    __shared__ int32_t shared_i[BS + F_H - 1][BS + F_W - 1];
-    int32_t sih = BS + F_H - 1;
-    int32_t siw = BS + F_W - 1;
+    int32_t sih = BS + tmp_f_h - 1;
+    int32_t siw = BS + tmp_f_w - 1;
     extern __shared__ int32_t  share[];
     int32_t *shared_i = (int32_t*)share; 
     int32_t *shared_f = &share[sih * siw];
@@ -269,25 +271,25 @@ __global__ void kernel_depthwise_conv2d(
     else
         shared_i[l_y*siw + l_x] = input[i_y * i_w + i_x];
 
-    if(l_y < F_H-1){
-        for(int i = l_y; i < F_H-1; i+=min_s_y){
+    if(l_y < tmp_f_h-1){
+        for(int i = l_y; i < tmp_f_h-1; i+=min_s_y){
             if(l_i_h+min_s_y+i-l_y < 0 || i_x < 0 || l_i_h+min_s_y+i-l_y >= i_h || i_x >= i_w)
                 shared_i[(i+min_s_y)*siw + l_x] = 0;
             else
-                shared_i[(i + min_s_y)*siw + l_x] = input[(i_y + min_s_y + i - l_y) * i_w + i_x];     
+                shared_i[(i + min_s_y)*siw + l_x] = input[(i_y + min_s_y + i - l_y) * i_w + i_x]; 
         }
     }
-    if(l_x < F_W-1){
-        for(int i = l_x; i < F_W-1; i+= min_s_x){
+    if(l_x < tmp_f_w-1){
+        for(int i = l_x; i < tmp_f_w-1; i+= min_s_x){
             if(l_i_h < 0 || i_x+min_s_x+i-l_x < 0 || l_i_h >= i_h || i_x+min_s_x+i-l_x >= i_w)
                 shared_i[l_y * siw + i+min_s_x] = 0;
             else
                 shared_i[l_y * siw + i + min_s_x] = input[i_y * i_w + i_x + min_s_x + i - l_x];
         }
     }
-    if(l_y < F_H-1 && l_x < F_W-1){
-        for(int i = l_y; i < F_H-1; i+=min_s_y){
-            for(int j = l_x; j < F_W-1; j+=min_s_x){
+    if(l_y < tmp_f_h-1 && l_x < tmp_f_w-1){
+        for(int i = l_y; i < tmp_f_h-1; i+=min_s_y){
+            for(int j = l_x; j < tmp_f_w-1; j+=min_s_x){
                 if(l_i_h+min_s_y+i-l_y < 0 || i_x+min_s_x+j-l_x < 0 || l_i_h+min_s_y+i-l_y >= i_h || i_x+min_s_x+j-l_x >= i_w)
                     shared_i[(i+min_s_y) * siw + j+min_s_x] = 0;
                 else
@@ -306,7 +308,7 @@ __global__ void kernel_depthwise_conv2d(
 
     for(int fy = 0; fy < F_H; fy++){
         for(int fx = 0; fx < F_W; fx++){
-            sum += shared_i[(l_y+fy)*siw + l_x+fx] * shared_f[fy*F_W + fx];
+            sum += shared_i[(l_y+fy*dilation_h)*siw + l_x+fx*dilation_w] * shared_f[fy*F_W + fx];
         }
     } 
     __syncthreads();
@@ -314,7 +316,7 @@ __global__ void kernel_depthwise_conv2d(
     if(l_o_h % stride_h == 0 && g_x % stride_w == 0){
         //int oi = l_o_c * o_h * o_w + l_o_h * o_w + g_x;
         int oi = l_o_c * o_h * o_w + l_o_h/stride_h * o_w + g_x/stride_w;
-        output[oi] = sum + bias[l_o_c];
+        output[oi] = sum + bias[l_o_c%o_c];
     }
 }
 const char* cuda_depthwise_conv2d(
@@ -343,13 +345,15 @@ const char* cuda_depthwise_conv2d(
 //    clock_t start = clock();
     int b_h = BS;
     int b_w = BS;
-    int tmp_o_h = i_h + 2 * padding_h - f_h + 1; //for stride > 1
-    int tmp_o_w = i_w + 2 * padding_w - f_w + 1;
+    int tmp_f_h = (f_h - 1) * dilation_h + 1; // for dilation, to be optimized
+    int tmp_f_w = (f_w - 1) * dilation_w + 1;
+    int tmp_o_h = i_h + 2 * padding_h - tmp_f_h + 1; //for stride > 1
+    int tmp_o_w = i_w + 2 * padding_w - tmp_f_w + 1;
     int32_t g_h = o_n * o_c * ((tmp_o_h + b_h - 1) / b_h);
     int32_t g_w = (tmp_o_w + b_w - 1) / b_w;
     dim3 bDim(b_w, b_h, 1);
     dim3 gDim(g_w, g_h, 1);
-    size_t share_size = (BS + f_h - 1) * (BS + f_w - 1) * sizeof(int32_t) + f_h * f_w * sizeof(int32_t);
+    size_t share_size = (BS + tmp_f_h - 1) * (BS + tmp_f_w - 1) * sizeof(int32_t) + f_h * f_w * sizeof(int32_t);
     kernel_depthwise_conv2d<<<gDim, bDim, share_size>>>(
             dev_i, i_n, i_c, i_h, i_w,
             dev_f, f_n, f_c, f_h, f_w,
@@ -401,7 +405,7 @@ __global__ void kernel_max_pool(
     extern __shared__ int32_t  share[];
     int32_t *shared_i = (int32_t*)share; 
 
-    int32_t max_elem = -(2<<31)-1; 
+    int32_t max_elem = int(1)<<31; 
     int min_s_y = (l_o_hi+1) * BS <= tmp_o_h ? BS : tmp_o_h%BS;
     int min_s_x = (l_o_wi+1) * BS <= tmp_o_w ? BS : tmp_o_w%BS;
 

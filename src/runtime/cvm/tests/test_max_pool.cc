@@ -51,20 +51,20 @@ void print(int* data, int c, int h, int w, char* label){
     }
 }
 int main(){
-    int i_n = 1;
-    int i_c = 1024;
+    int i_n = 2;
+    int i_c = 1;
     int i_h = 64;
     int i_w = 64;
     int f_h = 3;
     int f_w = 3;
     int o_c = i_c;
-    int padding = 1;
+    int padding = 2;
     int stride = 1;
     int o_h = (i_h + 2 * padding - f_h) / stride + 1;
     int o_w = (i_w + 2 * padding - f_w) / stride + 1;
     size_t s_i = i_n * i_c * i_h * i_w;
-    size_t s_f = o_c * i_c * f_h * f_w;
-    size_t s_o = o_c * o_h * o_w;
+    size_t s_f = i_n * i_c * f_h * f_w;
+    size_t s_o = i_n * o_c * o_h * o_w;
     int *input = new int[s_i];
     int *filter = new int[s_f];
     int *b_data = new int[o_c];
@@ -91,9 +91,9 @@ int main(){
     cuda_max_pool(
         input, i_n, i_c, i_h, i_w,
         f_h, f_w,
-        padding,
-        stride,
-        output2, i_n, o_c, o_h, o_w);
+        padding, padding,
+        stride, stride,
+        output2, i_n, o_c, o_h, o_w, true);
 
     clock_t gpu_end = clock();
     std::cout << "gpu all time: " << gpu_end - end << std::endl;
