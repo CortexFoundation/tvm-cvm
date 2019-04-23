@@ -873,6 +873,39 @@ const char* cuda_broadcast_left_shift(const int32_t *a, const int32_t *b, int32_
     }
     return check_cuda_error(cudaGetLastError());
 }
+__global__ void kernel_broadcast_max(const int32_t *a, const int32_t *b, int32_t *c, const int32_t n){
+    int i = threadIdx.x + blockIdx.x * blockDim.x;
+    if(i < n){
+        c[i] = a[i] > b[0] ? a[i] : b[0];
+    }
+}
+const char* cuda_broadcast_max(const int32_t *a, const int32_t *b, int32_t* c, const int32_t n, bool debug){
+    const int32_t *dev_a = a, *dev_b = b;
+    int32_t *tmp_a, *tmp_b;
+    int32_t *dev_c = c;
+    if(debug) {
+        cudaMalloc((void**)&tmp_a, n*sizeof(int32_t));
+        dev_a = tmp_a;
+        cudaMalloc((void**)&tmp_b, sizeof(int32_t));
+        dev_b = tmp_b;
+        cudaMalloc((void**)&dev_c, n*sizeof(int32_t));
+        cudaMemcpy(tmp_a, a, sizeof(int32_t)*n, cudaMemcpyHostToDevice);
+        cudaMemcpy(tmp_b, b, sizeof(int32_t), cudaMemcpyHostToDevice);
+    }
+
+    int threadSize = 256;
+    int blockSize = (n + threadSize - 1) / threadSize;
+    kernel_broadcast_max<<<blockSize, threadSize>>>(dev_a, dev_b, dev_c, n);
+    //cudaDeviceSynchronize();
+
+    if(debug){
+        cudaMemcpy(c, dev_c, sizeof(int32_t)*n, cudaMemcpyDeviceToHost);
+        cudaFree(tmp_a);
+        cudaFree(dev_c);
+        cudaFree(tmp_b);
+    }
+    return check_cuda_error(cudaGetLastError());
+}
 
 //TODO use reduce
 __global__ void kernel_sum(const int32_t *x,
@@ -931,3 +964,21 @@ const char* cuda_reshape(const int32_t *x, int32_t *y, int32_t n, bool debug){
         cudaMemcpy(y, x, n*sizeof(int32_t), cudaMemcpyDeviceToDevice);
     return check_cuda_error(cudaGetLastError());
 }
+
+__global__ void kernel_log(const int32_t *x, int32_t *y){
+    for(int i = 0; i < 64; i++){
+        int64_t tmp = (int64_t)1 << i;
+        if(x[0] <= tmp){
+            y[0] = i;
+            return;
+        }
+    }
+    y[0] = 64;
+}
+const char* cuda_log(const int32_t *x, int32_t *y bool debug){
+}
+const char* cuda_abs(const int32_t *x, int32_t *y, const int32_t n, bool debug){}
+const char* cuda_max(const int32_t *x, int32_t *y, const int32_t n, bool debugt){}
+const char* cuda_cvm_clip(const int32_t* x, const int32_t precision, int32_t *y, const int32_t n, bool debug){}
+const char* cuda_cvm_right_shift(const int32_t *a, const int32_t *b, const int32_t precision, int32_t *c, const int32_t n, bool debug){}
+const char* cuda_cvm_left_shift(const int32_t *a, const int32_t *b, const int32_t precision, int32_t *c, const int32_t n, bool debug){}
