@@ -629,26 +629,34 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.cvm_clip")
          std::string str_precision = args[2];
          int32_t precision = std::atoi(str_precision.c_str());
          CHECK(precision > 0) << "precision must greater zero";
-         int32_t min = -(1 << (precision-1));
+         int32_t min = -((1 << (precision-1))-1);
          int32_t max = -min;
          for(uint32_t i = 0; i < getSize(x); i++){
             y_data[i] = std::max(std::min(x_data[i], max), min);
          }
+//         const char* errorStr = cuda_cvm_clip(
+//                 x_data,
+//                 precision,
+//                 y_data,
+//                 getSize(x),
+//                 DEBUG_OP);
+//         CHECK(errorStr == NULL) << errorStr;
     });
 
 /*
  * a, input data
- * b, shift b
  * c, output data
  * precision, clip precision
+ * b, shift b
  * */
 TVM_REGISTER_GLOBAL("tvm.runtime.cvm.cvm_right_shift")
     .set_body([](TVMArgs args, TVMRetValue *ret){
         DLTensor *a = args[0];
-        int32_t b = static_cast<int32_t>(args[1]);
-        DLTensor *c = args[2];
-        std::string str_precision = args[3];
+        DLTensor *c = args[1];
+        std::string str_precision = args[2];
+        std::string str_b = args[3];
         int32_t precision = std::atoi(str_precision.c_str());
+        int32_t b = std::atoi(str_b.c_str());
         int32_t* a_data = static_cast<int32_t*>(a->data);
         int32_t* c_data = static_cast<int32_t*>(c->data);
         CHECK_GT(precision, 0) << "precision must greater zero";
@@ -657,18 +665,22 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.cvm_right_shift")
 
         for(uint32_t i = 0; i < getSize(a); i++){
             int32_t shift_a = a_data[i];
-            if(b == 0) c_data[i] = shift_a;
-            else shift_a = ((a_data[i] >> (b-1)) +1) >> 1;
-            c_data[i] = std::max(std::min(shift_a, max), min);
+            if(b == 0)
+                c_data[i] = shift_a;
+            else{
+                shift_a = ((a_data[i] >> (b-1)) +1) >> 1;
+                c_data[i] = std::max(std::min(shift_a, max), min);
+            }
         }
     });
 TVM_REGISTER_GLOBAL("tvm.runtime.cvm.cvm_left_shift")
     .set_body([](TVMArgs args, TVMRetValue *ret){
         DLTensor *a = args[0];
-        int32_t b = static_cast<int32_t>(args[1]);
         DLTensor *c = args[2];
         std::string str_precision = args[3];
+        std::string str_b = args[3];
         int32_t precision = std::atoi(str_precision.c_str());
+        int32_t b = std::atoi(str_b.c_str());
         int32_t* a_data = static_cast<int32_t*>(a->data);
         int32_t* c_data = static_cast<int32_t*>(c->data);
         CHECK_GT(precision, 0) << "precision must greater zero";
@@ -678,8 +690,10 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.cvm_left_shift")
         for(uint32_t i = 0; i < getSize(a); i++){
             int32_t shift_a = a_data[i];
             if(b == 0) c_data[i] = shift_a;
-            else shift_a = a_data[i] << b;
-            c_data[i] = std::max(std::min(shift_a, max), min);
+            else {
+                shift_a = a_data[i] << b;
+                c_data[i] = std::max(std::min(shift_a, max), min);
+            }
         }
     });
 TVM_REGISTER_GLOBAL("tvm.runtime.cvm.log")
@@ -911,7 +925,7 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.clip").set_body([](TVMArgs args, TVMRe
    const char *errorStr = cuda_clip(
            static_cast<int32_t*>(x->data),
            static_cast<int32_t*>(y->data),
-           static_cast<int32_t>(x->shape[0]),
+           getSize(x),
            max, min, DEBUG_OP);
    CHECK_EQ(errorStr == NULL, true) << errorStr;
  });
@@ -922,7 +936,7 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.clip").set_body([](TVMArgs args, TVMRe
    const char* errorStr = cuda_relu(
            static_cast<int32_t*>(x->data),
            static_cast<int32_t*>(y->data),
-           static_cast<int32_t>(x->shape[0]),
+           getSize(x),
            DEBUG_OP);
     CHECK_EQ(errorStr == NULL, true) << errorStr;
  });
@@ -934,7 +948,7 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.flatten").set_body([]
      const char* errorStr = cuda_flatten(
             static_cast<int32_t*>(x->data),
             static_cast<int32_t*>(y->data),
-            static_cast<int32_t>(x->shape[0]),
+            getSize(x),
             DEBUG_OP);
      CHECK_EQ(errorStr == NULL, true) << errorStr;
 });
@@ -1089,6 +1103,121 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.reshape")
                  DEBUG_OP);
          CHECK_EQ(errorStr == NULL, true) << errorStr;
     });
+/*\brief:
+ * x, input data
+ * y, output data
+ * precision, clip precision
+ */
+TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.cvm_clip")
+    .set_body([](TVMArgs args, TVMRetValue *ret){
+         DLTensor *x = args[0];
+		 DLTensor *y = args[1];
+         int32_t *x_data = static_cast<int32_t*>(x->data);
+         int32_t *y_data = static_cast<int32_t*>(y->data);
+         std::string str_precision = args[2];
+         int32_t precision = std::atoi(str_precision.c_str());
+         CHECK(precision > 0) << "precision must greater zero";
+         const char* errorStr = cuda_cvm_clip(
+                 x_data,
+                 precision,
+                 y_data,
+                 getSize(x),
+                 DEBUG_OP);
+         CHECK(errorStr == NULL) << errorStr;
+    });
+
+/*
+ * a, input data
+ * c, output data
+ * precision, clip precision
+ * b, shift b
+ * */
+TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.cvm_right_shift")
+    .set_body([](TVMArgs args, TVMRetValue *ret){
+        DLTensor *a = args[0];
+        DLTensor *c = args[1];
+        std::string str_precision = args[2];
+        std::string str_b = args[3];
+        int32_t precision = std::atoi(str_precision.c_str());
+        int32_t b = std::atoi(str_b.c_str());
+        int32_t* a_data = static_cast<int32_t*>(a->data);
+        int32_t* c_data = static_cast<int32_t*>(c->data);
+        CHECK_GT(precision, 0) << "precision must greater zero";
+        const char* errorStr = cuda_cvm_right_shift(
+                a_data,
+                b,
+                precision,
+                c_data,
+                getSize(a),
+                DEBUG_OP);
+        CHECK(errorStr == NULL) << errorStr;
+
+    });
+TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.cvm_left_shift")
+    .set_body([](TVMArgs args, TVMRetValue *ret){
+        DLTensor *a = args[0];
+        DLTensor *c = args[2];
+        std::string str_precision = args[3];
+        std::string str_b = args[3];
+        int32_t precision = std::atoi(str_precision.c_str());
+        int32_t b = std::atoi(str_b.c_str());
+        int32_t* a_data = static_cast<int32_t*>(a->data);
+        int32_t* c_data = static_cast<int32_t*>(c->data);
+        CHECK_GT(precision, 0) << "precision must greater zero";
+        const char* errorStr = cuda_cvm_left_shift(
+                a_data,
+                b,
+                precision,
+                c_data,
+                getSize(a),
+                DEBUG_OP);
+        CHECK(errorStr == NULL) << errorStr;
+    });
+TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.log")
+    .set_body([](TVMArgs args, TVMRetValue *ret){
+//        std::string x_str = args[0];
+        DLTensor *dlx = args[0];
+        DLTensor *y = args[1];
+        int32_t *y_data = static_cast<int32_t*>(y->data);
+        int32_t *x = static_cast<int32_t*>(dlx->data);
+        const char* errorStr = cuda_log(x, y_data, DEBUG_OP);
+        CHECK(errorStr == NULL) << errorStr;
+    });
+TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.abs")
+    .set_body([](TVMArgs args, TVMRetValue *ret){
+        DLTensor *dlx = args[0];
+        DLTensor *y = args[1];
+        int32_t *y_data = static_cast<int32_t*>(y->data);
+        int32_t* x = static_cast<int32_t*>(dlx->data);
+        const char* errorStr = cuda_abs(x, y_data, getSize(dlx), DEBUG_OP);
+        CHECK(errorStr == NULL) << errorStr;
+    });
+TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.max")
+    .set_body([](TVMArgs args, TVMRetValue *ret){
+        DLTensor *dlx = args[0];
+        DLTensor *y = args[1];
+        int32_t *y_data = static_cast<int32_t*>(y->data);
+        int32_t* x = static_cast<int32_t*>(dlx->data);
+        const char* errorStr = cuda_max(x, y_data, getSize(dlx), DEBUG_OP);
+        CHECK(errorStr == NULL) << errorStr;
+    });
+TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.broadcast_max")
+    .set_body([](TVMArgs args, TVMRetValue *ret){
+        DLTensor *a = args[0];
+        DLTensor *b = args[1];
+        DLTensor *c = args[2];
+        int32_t *a_data = static_cast<int32_t*>(a->data);
+        int32_t* b_data = static_cast<int32_t*>(b->data);
+        int32_t* c_data = static_cast<int32_t*>(c->data);
+        const char* errorStr = cuda_broadcast_max(
+                a_data,
+                b_data,
+                c_data,
+                getSize(a),
+                DEBUG_OP);
+        CHECK(errorStr == NULL) << errorStr;
+    });
+
 
 }
 }
