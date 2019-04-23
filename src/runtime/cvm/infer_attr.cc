@@ -78,8 +78,8 @@ void CvmRuntime::SetupPrecision() {
 				throw dmlc::Error(std::string("error with ") + inode.attrs.op->name);
 			}
       // Save to the result map.
-      for (uint32_t i = 0; i < num_inputs; ++i) { 
-          CHECK(iprec[i] <= 32 && iprec[i] >= precision[entry_id(inode.inputs[i])])
+      for (uint32_t i = 0; i < num_inputs; ++i) {
+          CHECK(iprec[i] <= 32)
              << "Check precision failed, "
              << "expected to be at most " << iprec[i]
              << " but " << precision[entry_id(inode.inputs[i])];
@@ -151,7 +151,7 @@ int64_t CvmRuntime::GetOps() {
 				ret += t;
 				opcount[op] += t;
 			}
-		}	
+		}
 	}
 #ifdef CHECK_ATTR_DEBUG
 	for (auto op: ops) {
@@ -199,7 +199,7 @@ void CvmRuntime::SetupShape() {
 					throw dmlc::Error(e.what() + std::string(" with ") + inode.attrs.op->name);
 				}
 			} else {
-				throw dmlc::Error(std::string("check shape method is undefined with") + inode.attrs.op->name);			
+				throw dmlc::Error(std::string("check shape method is undefined with") + inode.attrs.op->name);
 			}
       // Save to the result map.
       for (uint32_t i = 0; i < num_inputs; ++i) {

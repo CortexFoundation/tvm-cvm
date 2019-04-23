@@ -299,7 +299,7 @@ def test_sym_nnvm(batch_size=10, iter_num=10):
     for key, value in list(real_params.items()):
         real_params[key] = tvm.nd.array(value.asnumpy().astype(use_dtype), tvm_ctx)
 
-    with nnvm.compiler.build_config(opt_level=0): #, add_pass=["PrecomputePrune"]):
+    with nnvm.compiler.build_config(opt_level=0):
         deploy_graph, lib, real_params = nnvm.compiler.build(
             nnvm_sym, target=target, shape=inputs_shape,
             params=real_params, dtype=use_dtype, runtime="tvm")

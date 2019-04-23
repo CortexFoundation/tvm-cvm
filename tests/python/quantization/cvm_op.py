@@ -3,6 +3,19 @@ from mxnet import ndarray as nd
 
 import numpy as np
 
+class BroadcastShift(mx.operator.CustomOp):
+    def __init__(self, precision, **kwargs):
+        super(BroadcastShift, self).__init__(**kwargs)
+        clip = 2 ** (int(precision) - 1) -1
+        self.min = int(-clip)
+        self.max = int(clip)
+
+    def forward(self, is_train, req, in_data, out_data, aux):
+        assert is_train == False
+        X = in_data[0]
+        SB = in_data[1]
+        a_min, a_max = self.min, self.max
+
 class Clip(mx.operator.CustomOp):
     def __init__(self, precision, **kwargs):
         super(Clip, self).__init__(**kwargs)
