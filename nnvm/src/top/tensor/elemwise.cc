@@ -192,7 +192,7 @@ NNVM_REGISTER_ELEMWISE_UNARY_OP(log2)
   "FTVMCompute", [](const NodeAttrs& attrs,
                     const Array<Tensor>& inputs,
                     const Array<Tensor>& out_info) {
-      return Array<Tensor>{ topi::log(inputs[0]) };
+			return Array<Tensor>{ topi::log2(inputs[0]) };
 })
 .set_attr<FGradient>(
   "FGradient", [](const NodePtr& n,

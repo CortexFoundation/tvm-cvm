@@ -2,7 +2,12 @@ import tvm
 from tvm import relay
 from tvm.relay.build_module import BuildConfig
 from tvm.relay.backend import graph_runtime_codegen as _graph_gen
+import mxnet as mx
+from mxnet.gluon import nn
+from mxnet import ndarray as nd
+
 import nnvm
+from tvm.contrib import graph_runtime
 
 from functools import reduce
 import numpy as np
@@ -10,11 +15,29 @@ import math
 import struct
 import inspect
 
+import utils
+import sym_pass as spass
+import sym_utils as sutils
+
 shift_bits_dict = {
     # 'cv0_sb': relay.const(8, dtype='int32')
 }
 
-def quantize(data, shift_bits, target_bits=relay.const(7, dtype='int32')):
+const_var_dict = {}
+def mx_const(number):
+    name = 'const_var' + str(number)
+    if name not in const_var_dict:
+        const_var_dict[name] = {}
+        const_var_dict[name]['symbol'] = mx.sym.var(name, shape=(1,))
+        const_var_dict[name]['number'] = number
+
+    return const_var_dict[name]['symbol']
+
+def divide(data, deno):
+    out = mx.sym.broadcast_div(data, deno)
+    return mx.sym.fix(out)
+
+def quantize(data, shift_bits):
     """Quantize output of layer, to be consistent with source code @yx
 
     Question: should the shift_bits participating to network control flow?
@@ -31,68 +54,50 @@ def quantize(data, shift_bits, target_bits=relay.const(7, dtype='int32')):
         The shift_bits parameter is never used according to @yx's source code,
         which always be constant Expr(-1).
     """
-    max_v = relay.max(relay.abs(data))
-    min_v = relay.min(data)
+    abs_data = mx.sym.abs(data)
+    max_v = mx.sym.max(abs_data)
 
-    ln_max_v = relay.log(relay.cast(max_v, 'float32'))
-    ln_2 = relay.log(relay.const(2.))
-    total_bits = relay.ceil(relay.divide(ln_max_v, ln_2)) # ceil( ln(max_v) / ln(2) )
-    shift_bits = relay.subtract(total_bits.astype('int32'), target_bits)
-    shift_bits = relay.maximum(shift_bits, relay.const(0))
+    total_bits = mx.sym.log2(max_v)
+    total_bits = mx.sym.ceil(total_bits)
 
-    denominator = relay.left_shift(relay.const(1),
-            relay.cast(shift_bits, 'int32'))
-    out = relay.divide(data, denominator)
-    # According to @yx's code, use divide operation instead of shift op for
-    # possible negative number round.
-    # out = relay.right_shift(data, shift_bits)
+    shift_bits = mx.sym.broadcast_sub(total_bits, mx_const(7))
+    shift_bits = mx.sym.maximum(shift_bits, mx_const(0))
+    denominator = mx.sym.pow(2, shift_bits)
+    out = divide(data, denominator)
+    out = mx.sym.clip(out, a_min=-128, a_max=127)
+    return out, max_v, None, shift_bits
 
-    out = relay.cast(relay.clip(out, a_min=-128, a_max=127), 'int8')
-    return out, max_v, min_v, shift_bits
-
-
-def make_conv_relu(data, kernel_size, padding, strides, channels, prefix="conv", skip_relu=False):
+def make_conv_relu(data, kernel_size, padding, strides, channels,
+        prefix="conv", skip_relu=False, skip_quantize=False):
     prefix = "_conv_" + prefix
-    weight = relay.var(prefix+"_weight", dtype="int8")
-    out = relay.nn.conv2d(data, weight, kernel_size=kernel_size,
-                          padding=padding, strides=strides,
-                          channels=channels, out_dtype="int32")
+    weight = mx.sym.var(prefix+'_weight')
+    bias = mx.sym.var(prefix+'_bias')
 
-    bias = relay.var(prefix+"_bias", dtype="int32")
-    out = relay.nn.bias_add(out, bias)
+    out = mx.sym.Convolution(data, weight, bias, kernel=kernel_size,
+                          pad=padding, stride=strides,
+                          num_filter=channels, no_bias=False)
 
-    global shift_bits_dict
-    sb_name = prefix + "_sb"
-    shift_bits = shift_bits_dict[sb_name] if sb_name in shift_bits_dict else relay.const(-1)
-
-    out, max_v, min_v, shift_bits_dict[sb_name] = quantize(out, shift_bits)
+    if not skip_quantize:
+        out, max_v, min_v, shift_bits = quantize(out, None)
     if not skip_relu:
-        out = relay.nn.relu(out)
-
-    return out, max_v, min_v, shift_bits_dict[sb_name]
+        out = mx.sym.relu(out)
+    return out, None, None, None
 
 def make_max_pool(data):
-    out = relay.nn.max_pool2d(data, pool_size=(2, 2), strides=(2, 2))
+    out = mx.sym.Pooling(data, kernel=(2, 2), stride=(2, 2), pool_type='max')
     return out
 
-def make_dense(data, units, prefix="dense"):
+def make_dense(data, units, prefix="dense", skip_quantize=False):
     prefix = "_dense_" + prefix
-    weight = relay.var(prefix+"_weight", dtype="int32")
-    # need to specify out type as int32
-    out = relay.nn.dense(data.astype('int32'), weight, units)
-
-    bias = relay.var(prefix+"_bias", dtype="int32")
-    out = relay.nn.bias_add(out, bias)
-
-    global shift_bits_dict
-    sb_name = prefix + "_sb"
-    shift_bits = shift_bits_dict[sb_name] if sb_name in shift_bits_dict else relay.const(-1)
-    out, max_v, min_v, shift_bits_dict[sb_name] = quantize(out, shift_bits)
-
-    return out, max_v, min_v, shift_bits_dict[sb_name]
+    weight = mx.sym.var(prefix+'_weight')
+    bias = mx.sym.var(prefix+"_bias")
+    out = mx.sym.FullyConnected(data, weight, bias, num_hidden=units)
+    if not skip_quantize:
+        out, _,_,_ = quantize(out, None)
+    return out, None, None, None
 
 def make_mnist_graph():
-    data = relay.var("data", relay.TensorType((1, 1, 28, 28), "int8"))
+    data = mx.sym.var('data')
     out, _, _, sb0 = make_conv_relu(data, (3, 3), (1, 1), (1, 1), 32, "cv0")
     out, max_v, min_v, sb1 = make_conv_relu(out, (3, 3), (1, 1), (1, 1), 32, "cv1")
 
@@ -100,18 +105,16 @@ def make_mnist_graph():
     out, _,_,_ = make_conv_relu(mp, (1, 1), (0, 0), (1, 1), 32, "cv2")
     out, _,_,_ = make_conv_relu(out, (3, 3), (1, 1), (1, 1), 32, "cv3")
 
-    out = relay.add(relay.divide(out, relay.const(2, dtype='int8')),
-       relay.divide(mp, relay.const(2, dtype='int8'))) # shortcut layer
-
+    out = divide(out, mx_const(2))
+    mp = divide(mp, mx_const(2))
+    out = out + mp
     out = make_max_pool(out)
 
-    out = relay.nn.batch_flatten(out).astype('int8')
+    out = mx.sym.flatten(out)
     out, _, _, _ = make_dense(out, 256, "dense0")
-    out = relay.nn.relu(out)
-    out, max_v, min_v, sb = make_dense(out, 10, "dense1")
+    out = mx.sym.relu(out)
+    out, max_v, min_v, sb = make_dense(out, 10, "dense1", skip_quantize=True)
 
-    print ("Free vars: ", relay.ir_pass.free_vars(out))
-    out = relay.Function(relay.ir_pass.free_vars(out), out)
     return out
 
 def make_dog_cat_graph():
@@ -145,30 +148,31 @@ def make_dog_cat_graph():
     out = relay.Function(relay.ir_pass.free_vars(out), out)
     return out
 
-def load_parameters(graph, params_name):
-    args = relay.ir_pass.infer_type(graph).params
+def load_parameters(graph, infer_shapes, params_name):
+    args = graph.list_inputs()
     print ('args = ', args)
 
     # Load int8 parameters from params file
     data = np.fromfile(params_name, dtype=np.int8)
     count = 0
-    bind_dict = {}
     params_list = {}
     for idx, arg in enumerate(args):
-        if arg.name_hint == 'data':
+        if arg == 'data':
             pass
+        elif arg in const_var_dict:
+            params_list[arg] = nd.array([const_var_dict[arg]['number']])
         else:
             # Weight size is batch*channel*size*size
             # Bias size is batch
-            shape = arg.checked_type.shape
+            shape = infer_shapes[arg]
             # print ('shape = ', shape, arg, idx)
             assert len(shape) > 0, "parameter size should be 1 at least: " + str(arg)
             size = int(reduce((lambda x, y: x * y), shape))
-            print (arg.name_hint, ": ", size, data[count:count+2], shape)
+            print (arg, ": ", size, data[count:count+2], shape)
 
             # Please refer to source code @yx for params shape details.
             # Current data format is (batch, channel, size, size)'s tensor.
-            params = np.array(data[count:count+size], dtype='int8') \
+            params = np.array(data[count:count+size], dtype='int32') \
                     .reshape([int(x) for x in shape])
 
             # Within @yx's code, weight params at dense layer is convert(weight),
@@ -180,66 +184,81 @@ def load_parameters(graph, params_name):
             #   Y = X * W + B, instead of correctly format Y = W * X + B
             # which Y is output, X is input, W is weight and B is bias.
             # For more details of matrix computation in c source code, please refer to
-            # file `infernet/src/trivial_mul_kernels.cu`, which leads to weight params
+            # file `infernet/src/trivial_mul_kernels.cu`, which leads to weight params 
             # in python code should be transformed with convert() function.
-            if arg.name_hint.startswith("_dense_"):
+            if arg.startswith("_dense_"):
                 params = params.reshape(list(reversed(list(params.shape)))).transpose()
                 # print ('dense transpose = ', params.flatten()[0:2])
 
-            if arg.name_hint.endswith("_bias"):
+            if arg.endswith("_bias"):
                 params = params.astype("int32")
 
-            if arg.name_hint.startswith("_dense_") and arg.name_hint.endswith("_weight"):
+            if arg.startswith("_dense_") and arg.endswith("_weight"):
                 params = params.astype("int32")
 
-            params_list[arg.name_hint] = params
-            bind_dict[arg] = relay.const(params)
+            params_list[arg] = nd.array(params, dtype='float32')
             count += size
 
-    # print (bind_dict.keys())
-    graph = relay.expr.bind(graph, bind_dict)
-
     print ("Parameters length: ", len(data), count)
+
     return graph, params_list
 
 def test_yxnet_mnist():
-    graph = make_mnist_graph()
-    _, bd = load_parameters(graph,
+    mnist_sym = make_mnist_graph()
+
+    in_shape = (1, 1, 28, 28)
+    arg_shapes, _, aux_shapes = mnist_sym.infer_shape(data=in_shape)
+    args, auxs = mnist_sym.list_arguments(), mnist_sym.list_auxiliary_states()
+    infer_shapes = {args[i]:arg_shapes[i] for i in range(len(args))}
+    infer_shapes.update({auxs[i]:aux_shapes[i] for i in range(len(auxs))})
+
+    _, bd = load_parameters(mnist_sym, infer_shapes,
             "/home/wlt/warehouse/.tmp/ca3d0286d5758697cdef653c1375960a868ac08a/data/params")
 
-    with relay.build_config(opt_level=0):
-        func = graph
-        func = relay.ir_pass.infer_type(func)
-        func = relay.ir_pass.fuse_ops(func, 0)
-    #  print (relay.Function(relay.ir_pass.free_vars(func), func))
-        func = relay.ir_pass.infer_type(func)
-        graph_gen = _graph_gen.GraphRuntimeCodegen(mod=None, target='llvm')
-        graph_json, lowered_funcs, params = graph_gen.codegen(func)
+    dump_sym, dump_par = '/tmp/mnist_yxnet.symbol', '/tmp/mnist_yxnet.params'
+    with open(dump_sym, 'w') as fout:
+        fout.write(mnist_sym.tojson())
+    nd.save(dump_par, bd)
 
-        dump_sym = './data/yxnet_mnist.symbol'
-        dump_params = './data/yxnet_mnist.params'
+    inputs = [mx.sym.var('data')]
+    data = np.load('/home/wlt/warehouse/.tmp/ba9fedfc87ccb6064fcd437fd2287f5edef1bd84/data')
+    data = nd.array([data.astype(np.int8)])
+
+    if True:
+        graph =  nn.SymbolBlock(mnist_sym, inputs)
+        utils.load_parameters(graph, bd)
+        res = graph.forward(data).astype('int32')
+    else:
+        target = "cuda"
+        ctx = tvm.context(target, 1)
+        nnvm_sym, params = nnvm.frontend.from_mxnet(mnist_sym, bd)
+        nnvm_sym, params = spass.yxnet_realize(nnvm_sym, bd, {'data': {}})
+        nnvm_graph = nnvm.graph.create(nnvm_sym)
+
+        print (sutils.sym_collect_attr(nnvm_sym))
+
+        use_dtype = "int32"
+        with nnvm.compiler.build_config(opt_level=0): #, add_pass=["PrecomputePrune"]):
+         deploy_graph, lib, params = nnvm.compiler.build(
+             nnvm_sym, target=target, shape={"data": in_shape},
+             params=params, dtype=use_dtype)
+
+        dump_sym = '/tmp/mnist_yxnet_deploy.symbol'
         with open(dump_sym, 'w') as fout:
-            fout.write(graph_json)
-        with open(dump_params, "wb") as fo:
-            fo.write(relay.save_param_dict(params))
+            fout.write(deploy_graph.json())
+        dump_params = '/tmp/mnist_yxnet_deploy.params'
+        with open(dump_params, 'wb') as fout:
+            param_bytes = nnvm.compiler.save_param_dict(params)
+            fout.write(param_bytes)
 
-    data = np.load('data.npy')
-    executor = relay.create_executor()
+        exit()
 
-    res = executor.evaluate(graph)([data.astype(np.int8)], **bd).asnumpy()
-    np.save('/tmp/relay.res', res)
-    print (res.flatten()[:100])
-
-def test_yxnet_dog_cat():
-    graph = make_dog_cat_graph()
-    _, bd = load_parameters(graph,
-            "/home/wlt/warehouse/.tmp/4d8bc8272b882f315c6a96449ad4568fac0e6038/data/params")
-
-    data = np.load('/home/wlt/warehouse/.tmp/9f8a5cce5dc2e1e18944512c2dcd796b940dd23b/data')
-    executor = relay.create_executor('graph')
-
-    res = executor.evaluate(graph)([data.astype(np.int8)], **bd)
-    print (res.asnumpy())
+        module = graph_runtime.create(deploy_graph, lib, ctx=tvm.context("cuda", 1))
+        module.load_params(param_bytes)
+        data = tvm.nd.array(data.asnumpy(), ctx)
+        module.run(data=data.asnumpy())
+        res = module.get_output(0)
+    print (res.asnumpy().flatten()[:100])
 
 def test_naive():
     data = relay.var("data", relay.TensorType((1, 3, 224, 224), "int8"))
@@ -262,6 +281,8 @@ def test_naive():
         print (graph_json)
 
 if __name__ == "__main__":
+    utils.log_init()
+    #  test_naive()
     test_yxnet_mnist()
 
     #  test_yxnet_dog_cat()

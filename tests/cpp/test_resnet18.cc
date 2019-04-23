@@ -117,24 +117,24 @@ int main()
         int64_t out_shape[2] = {1, 1000, };
         TVMArrayAlloc(out_shape, out_ndim, dtype_code, dtype_bits, dtype_lanes, device_type, device_id, &y1);
 
-        DLTensor* t_gpu_x, *t_gpu_y;
-        TVMArrayAlloc(in_shape, in_ndim, dtype_code, dtype_bits, dtype_lanes, kDLGPU, device_id, &t_gpu_x);
-        TVMArrayAlloc(out_shape, out_ndim, dtype_code, dtype_bits, dtype_lanes, kDLGPU, device_id, &t_gpu_y);
-        TVMStreamHandle stream;
-        TVMStreamCreate(kDLGPU, device_id, &stream);
-        TVMArrayCopyFromTo(x, t_gpu_x, stream);
-        clock_t start = clock();
-        for(int i = 0; i < 1; i++){
-            RunCVM(t_gpu_x, params_arr, json_data_org, mod_org, "graph_runtime", t_gpu_y,(int)kDLGPU);
-        }
-        clock_t end = clock();
-
-        TVMArrayCopyFromTo(t_gpu_y, y1, stream);
-        std::cout << "graph runtime : " << (end-start)*1.0/CLOCKS_PER_SEC << " s" << std::endl;
-        for(int i = 0; i < 10; i++){
-            std::cout << static_cast<int32_t*>(y1->data)[i] << " ";
-        }
-        std::cout << std::endl;
+//        DLTensor* t_gpu_x, *t_gpu_y;
+//        TVMArrayAlloc(in_shape, in_ndim, dtype_code, dtype_bits, dtype_lanes, kDLGPU, device_id, &t_gpu_x);
+//        TVMArrayAlloc(out_shape, out_ndim, dtype_code, dtype_bits, dtype_lanes, kDLGPU, device_id, &t_gpu_y);
+//        TVMStreamHandle stream;
+//        TVMStreamCreate(kDLGPU, device_id, &stream);
+//        TVMArrayCopyFromTo(x, t_gpu_x, stream);
+//        clock_t start = clock();
+//        for(int i = 0; i < 1; i++){
+//            RunCVM(t_gpu_x, params_arr, json_data_org, mod_org, "graph_runtime", t_gpu_y,(int)kDLGPU);
+//        }
+//        clock_t end = clock();
+//
+//        TVMArrayCopyFromTo(t_gpu_y, y1, stream);
+//        std::cout << "graph runtime : " << (end-start)*1.0/CLOCKS_PER_SEC << " s" << std::endl;
+//        for(int i = 0; i < 10; i++){
+//            std::cout << static_cast<int32_t*>(y1->data)[i] << " ";
+//        }
+//        std::cout << std::endl;
 
         std::ifstream json_in("/tmp/resnet18/symbol.json", std::ios::in);
         std::string json_data((std::istreambuf_iterator<char>(json_in)), std::istreambuf_iterator<char>());
@@ -164,7 +164,7 @@ int main()
             std::cout << static_cast<int32_t*>(y2->data)[i] << " ";
         }
         std::cout << std::endl;
-        std::cout << (memcmp(y1->data, y2->data, 1000*sizeof(int32_t)) == 0 ? "pass" : "failed") << std::endl;
+//        std::cout << (memcmp(y1->data, y2->data, 1000*sizeof(int32_t)) == 0 ? "pass" : "failed") << std::endl;
         TVMArrayFree(x);
         TVMArrayFree(gpu_x);
         TVMArrayFree(gpu_y);

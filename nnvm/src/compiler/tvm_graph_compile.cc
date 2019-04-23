@@ -32,7 +32,7 @@ using namespace tvm;
 // - Give separate memory to each variable.
 // - Tie the memory of output/lhs in assign node properly
 //   so the execution of assign can have side effect.
-nnvm::Graph DecorateMemoryPlan(
+nnvm::Graph TVMDecorateMemoryPlan(
     nnvm::Graph g,
     const std::vector<int>& assign_flag) {
   const IndexedGraph& idx = g.indexed_graph();
@@ -67,7 +67,7 @@ nnvm::Graph DecorateMemoryPlan(
   return g;
 }
 
-nnvm::Graph GraphCompile(const nnvm::Graph& g) {
+nnvm::Graph TVMGraphCompile(const nnvm::Graph& g) {
   // Get attributes from the graph.
   const ShapeVector& shape_vec = g.GetAttr<ShapeVector>("shape");
   const DTypeVector& dtype_vec = g.GetAttr<DTypeVector>("dtype");
@@ -128,22 +128,7 @@ nnvm::Graph GraphCompile(const nnvm::Graph& g) {
     }
   }
 
-  // collect op attributes
-  std::vector<int> prec_vec;
-  for (uint32_t nid = 0; nid < idx.num_nodes(); ++nid) {
-    const auto& inode = idx[nid];
-    const auto& attrs_dict = inode.source->attrs.dict;
-    auto search = attrs_dict.find("precision");
-    if (search != attrs_dict.end()) {
-      int precision = std::stoi(search->second);
-      prec_vec.emplace_back(precision);
-    } else {
-      prec_vec.emplace_back(-1);
-    }
-  }
-
   const nnvm::Op* tvm_op = nnvm::Op::Get("tvm_op");
-  const nnvm::Op* cvm_op = nnvm::Op::Get("cvm_op");
 
   std::unordered_map<uint32_t, nnvm::NodePtr> old_new;
   for (uint32_t nid = 0; nid < idx.num_nodes(); ++nid) {
@@ -162,30 +147,14 @@ nnvm::Graph GraphCompile(const nnvm::Graph& g) {
     FuseEntry& fe = fuse_entries[root_id];
     const IndexedGraph& subidx = fe.subgraph.indexed_graph();
     nnvm::NodePtr np = nnvm::Node::Create();
-    np->attrs.op = cvm_op;
+    np->attrs.op = tvm_op;
     np->attrs.name = inode.source->attrs.name;
-    CVMOpParam param;
+    TVMOpParam param;
     param.func_name = fe.compiled_func->func_name;
     param.num_inputs = static_cast<uint32_t>(fe.imap.size());
     param.num_outputs = static_cast<uint32_t>(fe.subgraph.outputs.size());
     param.flatten_data = fe.flatten_data;
     param.UpdateDict(&(np->attrs.dict));
-    std::vector<std::string> attr_vec;
-    for (auto& item: inode.source->attrs.dict) {
-        std::stringstream tss;
-        tss << "\"" << item.first << "\": " << "\"" << item.second << "\"";
-        attr_vec.push_back(tss.str());
-    }
-
-    std::stringstream ss;
-    ss << "{";
-    for (int i = 0; i < attr_vec.size(); i++) {
-        if (i != 0)
-            ss << ", ";
-        ss << attr_vec[i];
-    }
-    ss << "}";
-    param.op_attrs = ss.str();
     np->attrs.parsed = std::move(param);
 
     for (uint32_t sub_input_id : subidx.input_nodes()) {
@@ -236,18 +205,12 @@ nnvm::Graph GraphCompile(const nnvm::Graph& g) {
   std::vector<int> assign_flag(new_idx.num_nodes(), 0);
   ShapeVector new_shape_vec = ShapeVector(new_idx.num_node_entries(), TShape());
   DTypeVector new_dtype_vec = DTypeVector(new_idx.num_node_entries());
-  std::vector<int> new_prec_vec(new_idx.num_node_entries(), -1);
   std::vector<std::string> new_dltype_vec(new_idx.num_node_entries());
-  std::vector<std::string>  new_op_attrs(new_idx.num_node_entries());
   std::vector<std::string> attr_parsed(new_idx.num_node_entries());
   for (const auto& kv : old_new) {
     uint32_t nid = kv.first;
     const auto& inode = idx[nid];
     uint32_t new_nid = new_idx.node_id(kv.second.get());
-    if (!inode.source->is_variable()) {
-        CVMOpParam& param = dmlc::get<CVMOpParam>(kv.second->attrs.parsed);
-        new_op_attrs[new_nid] = param.op_attrs;
-    }
     if (inode.source->op() == assign_op) {
       // Check if rhs of assign can be computed inplace.
       // If yes, we can simply set that memory to be assign target
@@ -257,7 +220,7 @@ nnvm::Graph GraphCompile(const nnvm::Graph& g) {
           !(idx[rhs.node_id].source->is_variable()) &&
           pattern_vec[group_vec[rhs.node_id]] <= kBroadcast) {
         assign_flag[new_nid] = 2;
-        CVMOpParam& param = dmlc::get<CVMOpParam>(kv.second->attrs.parsed);
+        TVMOpParam& param = dmlc::get<TVMOpParam>(kv.second->attrs.parsed);
         param.func_name = "__nop";
         param.UpdateDict(&(kv.second->attrs.dict));
       } else {
@@ -269,28 +232,25 @@ nnvm::Graph GraphCompile(const nnvm::Graph& g) {
       uint32_t old_eid = idx.entry_id(nid, i);
       new_shape_vec[new_eid] = shape_vec[old_eid];
       new_dtype_vec[new_eid] = dtype_vec[old_eid];
-      new_prec_vec[new_eid] = prec_vec[nid];
       new_dltype_vec[new_eid] = tvm::runtime::TVMType2String(
           GetDLType(dtype_vec[old_eid]));
     }
   }
   ret.attrs["shape"] = std::make_shared<any>(std::move(new_shape_vec));
   ret.attrs["dtype"] = std::make_shared<any>(std::move(new_dtype_vec));
-  ret.attrs["precision"] = std::make_shared<any>(std::move(new_prec_vec));
   ret.attrs["dltype"] = std::make_shared<any>(std::move(new_dltype_vec));
-  ret.attrs["op_attrs"] = std::make_shared<any>(std::move(new_op_attrs));
 
   // Setup module
   static const PackedFunc& fbuild = GetPackedFunc("nnvm.compiler.build_target");
   tvm::runtime::Module module = fbuild(func_list, target, target_host);
   ret.attrs["module"] = std::make_shared<any>(std::move(module));
   ret = nnvm::ApplyPass(ret, "PlanMemory");
-  ret = DecorateMemoryPlan(ret, assign_flag);
+  ret = TVMDecorateMemoryPlan(ret, assign_flag);
   return ret;
 }
 
-NNVM_REGISTER_PASS(GraphCompile)
-    .set_body(GraphCompile)
+NNVM_REGISTER_PASS(TVMGraphCompile)
+    .set_body(TVMGraphCompile)
     .depend_graph_attr("shape")
     .depend_graph_attr("dtype")
     .depend_graph_attr("fused_entry")

@@ -3,6 +3,8 @@ from enum import Enum
 from mxnet import symbol, sym
 from mxnet import ndarray as nd
 
+sym.contrib.cond
+
 class CalibMode(Enum):
     NONE = 0
     NAIVE = 1
@@ -12,7 +14,7 @@ class CalibMode(Enum):
 class QuantFlag():
     def __init__(self, is_fuse_bn=True, calib_mode=CalibMode.NONE,
             allowed_layers=[], disabled_layers=[],
-            log_level=logging.INFO,
+            log_level=logging.INFO, matrix_decomposition=False,
             use_scalar=False):
         self.is_fuse_bn = is_fuse_bn
         assert isinstance(calib_mode, CalibMode)
@@ -21,6 +23,7 @@ class QuantFlag():
         self.allowed_layers = allowed_layers
         self.disabled_layers = disabled_layers
 
+        self.matrix_decomposition = matrix_decomposition
         self.use_scalar = use_scalar
 
 DEFAULT_TARGET_BITS = 7

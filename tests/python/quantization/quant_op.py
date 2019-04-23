@@ -181,3 +181,104 @@ class GlobalAvgPool2D(nn.GlobalAvgPool2D):
     # print ("[ added_params_name       ]: ", added_params_name)
     # print ("[ deleted_params_name     ]: ", deleted_params_name)
 
+
+class Dense(HybridBlock):
+    def __init__(self, quant_flag, **kwargs):
+        super(Dense, self).__init__(prefix='fc0_', **kwargs)
+
+        self.quant_flag = quant_flag
+
+        if not quant_flag.matrix_decomposition:
+            setattr(self, 'weight',
+                self.params.get('weight',
+                        init='zeros',
+                        allow_deferred_init=True))
+            setattr(self, 'bias',
+                self.params.get('bias',
+                        init='zeros',
+                        allow_deferred_init=True))
+            return
+
+        self.matrix_len = 100352
+        self.max_len = 60000
+
+        start, step, idx = 0, self.max_len, 0
+        while start < self.matrix_len:
+            stop = min(start+step, self.matrix_len)
+
+            weight_name = str(idx) + '_weight'
+            bias_name = str(idx) + '_bias'
+            setattr(self, weight_name,
+                self.params.get(weight_name,
+                            init='zeros',
+                            allow_deferred_init=True))
+
+            setattr(self, bias_name,
+                self.params.get(bias_name,
+                        init='zeros',
+                        allow_deferred_init=True))
+
+
+            start, idx = stop, idx+1
+
+        for i in range(idx-1):
+            plus_name_f = '_plus' + str(i) + '_first_shift_bits'
+            plus_name_s = '_plus' + str(i) + '_second_shift_bits'
+            setattr(self, plus_name_f,
+                self.params.get(plus_name_f,
+                            init='zeros',
+                            allow_deferred_init=True))
+            setattr(self, plus_name_s,
+                self.params.get(plus_name_s,
+                            init='zeros',
+                            allow_deferred_init=True))
+
+            requant_name = '_plus' + str(i) + '_requant_shift_bits'
+            setattr(self, requant_name,
+                self.params.get(requant_name,
+                            init='zeros',
+                            allow_deferred_init=True))
+
+    def hybrid_forward(self, F, x, **kwargs):
+        if not self.quant_flag.matrix_decomposition:
+            x = F.FullyConnected(x, kwargs['weight'],
+                    kwargs['bias'], num_hidden=10)
+        else:
+            nodes = []
+            start, step, idx = 0, self.max_len, 0
+            while start < self.matrix_len:
+                stop = min(start+step, self.matrix_len)
+
+                weight_name = str(idx) + '_weight'
+                bias_name = str(idx) + '_bias'
+                tmp = F.slice(x, begin=(0, start), end=(10, stop))
+                tmp = F.FullyConnected(tmp, kwargs[weight_name],
+                        kwargs[bias_name], name=str(idx), num_hidden=10)
+                nodes.append(tmp)
+
+                start, idx = stop, idx+1
+
+            i = 0
+            while len(nodes) > 1:
+                a, b = nodes.pop(0), nodes.pop(0)
+
+                if self.quant_flag.calib_mode != CalibMode.NONE:
+                    a_sb_name = '_plus' + str(i) + '_first_shift_bits'
+                    a , _ = quant_helper(a, shift_bits=kwargs[a_sb_name], F=F)
+
+                    b_sb_name = '_plus' + str(i) + '_second_shift_bits'
+                    b , _ = quant_helper(b, shift_bits=kwargs[b_sb_name], F=F)
+
+                out = a + b
+
+                if self.quant_flag.calib_mode != CalibMode.NONE:
+                    requant_name = '_plus' + str(i) + '_requant_shift_bits'
+                    out, _ = quant_helper(out, shift_bits=kwargs[requant_name], F=F)
+
+                nodes.append(out)
+
+                i += 1
+
+            x = nodes[0]
+
+        return x

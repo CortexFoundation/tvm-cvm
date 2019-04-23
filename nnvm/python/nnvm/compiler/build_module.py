@@ -184,7 +184,7 @@ def optimize(graph, shape, dtype="float32", layout=None):
 
 
 def build(graph, target=None, shape=None, dtype="float32",
-          params=None, target_host=None, layout=None):
+          params=None, target_host=None, layout=None, runtime="cvm"):
     """Build graph into runtime library.
 
     The build function will optimize the graph and do the compilation.
@@ -306,12 +306,16 @@ def build(graph, target=None, shape=None, dtype="float32",
         else:
             graph._set_json_attr("opt_level", 0, "int")
         graph = graph.apply("InferShape").apply("InferType")
-        print(str(graph.index.input_names))
         graph = graph.apply("InferPrecision")
         graph = graph.apply("GraphFindFusibleGroups")
         graph = graph.apply("GraphFuse")
         with target:
-            graph = graph.apply("GraphCompile")
+            if runtime == "cvm":
+                graph = graph.apply("GraphCompile")
+            elif runtime == "tvm":
+                graph = graph.apply("TVMGraphCompile")
+            else:
+                raise TypeError("runtime %s is not supported."%runtime)
         libmod = graph_attr._move_out_module(graph, "module")
         #Write variable initial values into params
         if init_var:

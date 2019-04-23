@@ -456,7 +456,7 @@ class CvmRuntime : public ModuleNode {
   std::vector<std::function<void()> > op_execs_;
 };
 
-std::vector<TVMContext> GetAllContext(const TVMArgs& args);
+std::vector<TVMContext> CVMGetAllContext(const TVMArgs& args);
 
 
 // void CVMClip(TVMArgs args, TVMRetValue* rv);

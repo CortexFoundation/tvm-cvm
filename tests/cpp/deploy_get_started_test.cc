@@ -7,11 +7,13 @@
 #include <iterator>
 #include <algorithm>
 
+using namespace tvm::runtime;
+
 int main()
 {
     // tvm module for compiled functions
     //tvm::runtime::Module mod_syslib = tvm::runtime::Module::LoadFromFile("/tmp/imagenet.so");
-    tvm::runtime::Module mod_syslib = (*tvm::runtime::Registry::Get("module._GetSystemLib"))();
+	tvm::runtime::Module mod_syslib = (*tvm::runtime::Registry::Get("module._GetSystemLib"))();
 
     // json graph
     std::ifstream json_in("/tmp/imagenet_cuda.json", std::ios::in);

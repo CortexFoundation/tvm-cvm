@@ -171,6 +171,19 @@ def _leaky_relu(inputs, attrs):
         _raise_not_supported('act_type: ' + act_type)
     return sym
 
+def _custom(inputs, attrs):
+    op_type = _required_attr(attrs, 'op_type')
+    assert op_type in ['cvm_clip', 'cvm_left_shift', 'cvm_right_shift']
+    new_attrs = {}
+    new_attrs['precision'] = _required_attr(attrs, 'precision')
+    if op_type == 'cvm_clip':
+        sym = _get_nnvm_op(op_type)(*inputs, **new_attrs)
+    else:
+        new_attrs['shift_bit'] = _required_attr(attrs, 'shift_bit')
+        sym = _get_nnvm_op(op_type)(*inputs, **new_attrs)
+
+    return sym
+
 def _activations(inputs, attrs):
     act_type = _required_attr(attrs, 'act_type')
     if act_type in ['relu', 'sigmoid', 'tanh']:
@@ -319,14 +332,15 @@ _identity_list = ['__add_scalar__', '__add_symbol__', '__div_scalar__',
                   '__pow_scalar__', '__rdiv_scalar__', '__rpow_scalar__',
                   '__rsub_scalar__', '__sub_scalar__', '__sub_symbol__',
                   'broadcast_add', 'broadcast_div', 'broadcast_mul',
-                  'broadcast_sub', 'broadcast_to', 'cast', 'elemwise_add',
+                  'broadcast_sub', 'broadcast_to', 'cast', 'abs', 'elemwise_add',
                   'elemwise_div', 'elemwise_mul', 'elemwise_sub', 'exp',
-                  'flatten', 'log', 'log_softmax', 'max', 'min', 'negative',
+                  'flatten', 'log', 'log2', 'log_softmax', 'max', 'min', 'negative',
                   'ones_like', 'relu', 'sigmoid', 'slice_like', 'softmax',
                   'sum', 'tanh', 'transpose', 'zeros_like', 'gather_nd',
                   'reshape_like', 'where', 'floor', 'ceil']
 
 _convert_map = {
+    'Custom'        : _custom,
     '_copy'         : _rename('copy'),
     '_div_scalar'   : _rename('__div_scalar__'),
     '_minus_scalar' : _rename('__sub_scalar__'),
@@ -334,6 +348,7 @@ _convert_map = {
     '_plus_scalar'  : _rename('__add_scalar__'),
     '_rdiv_scalar'  : _rename('__rdiv_scalar__'),
     '_rminus_scalar': _rename('__rsub_scalar__'),
+    '_rpower_scalar': _rename('__rpow_scalar__'),
     '_contrib_MultiBoxPrior' : _rename('multibox_prior'),
     '_contrib_MultiBoxDetection' : _contrib_multibox_detection,
     '_minimum'      : _minimum,
@@ -405,7 +420,6 @@ def _convert_symbol(op_name, inputs, attrs,
     """
     identity_list = identity_list if identity_list else _identity_list
     convert_map = convert_map if convert_map else _convert_map
-    #print (_convert_map)
     if op_name in identity_list:
         op = _get_nnvm_op(op_name)
         sym = op(*inputs, **attrs)

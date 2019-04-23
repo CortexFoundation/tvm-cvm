@@ -88,6 +88,10 @@ reg.register_schedule("sqrt", _fschedule_broadcast)
 reg.register_pattern("log", OpPattern.ELEMWISE)
 reg.register_schedule("log", _fschedule_broadcast)
 
+# log2
+reg.register_pattern("log2", OpPattern.ELEMWISE)
+reg.register_schedule("log2", _fschedule_broadcast)
+
 # tanh
 reg.register_pattern("tanh", OpPattern.ELEMWISE)
 reg.register_schedule("tanh", _fschedule_broadcast)
@@ -247,6 +251,16 @@ reg.register_schedule("broadcast_to", _fschedule_broadcast)
 # clip
 reg.register_pattern("clip", OpPattern.ELEMWISE)
 reg.register_schedule("clip", _fschedule_elemwise)
+
+# cvm op
+reg.register_pattern("cvm_clip", OpPattern.ELEMWISE)
+reg.register_schedule("cvm_clip", _fschedule_elemwise)
+
+reg.register_pattern("cvm_left_shift", OpPattern.ELEMWISE)
+reg.register_schedule("cvm_left_shift", _fschedule_elemwise)
+
+reg.register_pattern("cvm_right_shift", OpPattern.ELEMWISE)
+reg.register_schedule("cvm_right_shift", _fschedule_elemwise)
 
 # elemwise sum
 reg.register_pattern("elemwise_sum", OpPattern.ELEMWISE)

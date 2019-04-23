@@ -626,8 +626,9 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.cvm_clip")
 		 DLTensor *y = args[1];
          int32_t *x_data = static_cast<int32_t*>(x->data);
          int32_t *y_data = static_cast<int32_t*>(y->data);
-         int32_t precision = static_cast<int32_t>(args[2]);
-         CHECK_GT(precision, 0) << "precision must greater zero";
+         std::string str_precision = args[2];
+         int32_t precision = std::atoi(str_precision.c_str());
+         CHECK(precision > 0) << "precision must greater zero";
          int32_t min = -(1 << (precision-1));
          int32_t max = -min;
          for(uint32_t i = 0; i < getSize(x); i++){
@@ -646,7 +647,8 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.cvm_right_shift")
         DLTensor *a = args[0];
         int32_t b = static_cast<int32_t>(args[1]);
         DLTensor *c = args[2];
-        int32_t precision = static_cast<int32_t>(args[3]);
+        std::string str_precision = args[3];
+        int32_t precision = std::atoi(str_precision.c_str());
         int32_t* a_data = static_cast<int32_t*>(a->data);
         int32_t* c_data = static_cast<int32_t*>(c->data);
         CHECK_GT(precision, 0) << "precision must greater zero";
@@ -665,7 +667,8 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.cvm_left_shift")
         DLTensor *a = args[0];
         int32_t b = static_cast<int32_t>(args[1]);
         DLTensor *c = args[2];
-        int32_t precision = static_cast<int32_t>(args[3]);
+        std::string str_precision = args[3];
+        int32_t precision = std::atoi(str_precision.c_str());
         int32_t* a_data = static_cast<int32_t*>(a->data);
         int32_t* c_data = static_cast<int32_t*>(c->data);
         CHECK_GT(precision, 0) << "precision must greater zero";

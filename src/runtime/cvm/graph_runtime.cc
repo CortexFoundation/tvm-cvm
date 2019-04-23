@@ -465,7 +465,7 @@ Module CvmRuntimeCreate(const std::string& sym_json,
 }
 
 // Get all context for the host and other runtime devices.
-std::vector<TVMContext> CvmGetAllContext(const TVMArgs& args) {
+std::vector<TVMContext> CVMGetAllContext(const TVMArgs& args) {
   // Reserve the first item as the fallback device.
   std::vector<TVMContext> ret;
   TVMContext ctx;
@@ -489,7 +489,9 @@ TVM_REGISTER_GLOBAL("tvm.cvm_runtime.create")
         << "The expected number of arguments for graph_runtime.create is "
            "at least 4, but it has "
         << args.num_args;
-    const auto& contexts = GetAllContext(args);
+    const auto& contexts = CVMGetAllContext(args);
+	std::cout << "args: " << args.num_args << std::endl;
+
     *rv = CvmRuntimeCreate(args[0], args[1], contexts);
   });
 
@@ -500,7 +502,7 @@ TVM_REGISTER_GLOBAL("tvm.cvm_runtime.remote_create")
                                   "at least 4, but it has "
                                << args.num_args;
     void* mhandle = args[1];
-    const auto& contexts = GetAllContext(args);
+    const auto& contexts = CVMGetAllContext(args);
     *rv = CvmRuntimeCreate(
         args[0], *static_cast<tvm::runtime::Module*>(mhandle), contexts);
   });
