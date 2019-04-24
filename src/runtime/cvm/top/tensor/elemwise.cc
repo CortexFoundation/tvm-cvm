@@ -16,7 +16,6 @@
 namespace cvm {
 namespace top {
 
-
 // undefined op
 NNVM_REGISTER_ELEMWISE_UNARY_OP(__undef__)
 .describe(R"code(undefined op.
@@ -27,34 +26,11 @@ Used to produce invalide node during optimization.
 .set_num_outputs(1)
 .set_num_inputs(0);
 
-// floor
-NNVM_REGISTER_ELEMWISE_UNARY_OP(floor)
-.describe(R"code(Take floor input array, computed element-wise.
-)code" NNVM_ADD_FILELINE)
-.set_support_level(3);
-
-// ceil
-NNVM_REGISTER_ELEMWISE_UNARY_OP(ceil)
-.describe(R"code(Take ceil input array, computed element-wise.
-)code" NNVM_ADD_FILELINE)
-.set_support_level(3);
-
-// trunc
-NNVM_REGISTER_ELEMWISE_UNARY_OP(trunc)
-.describe(R"code(Take truncated value of the input, element-wise.
-)code" NNVM_ADD_FILELINE)
-.set_support_level(3);
-
-// round
-NNVM_REGISTER_ELEMWISE_UNARY_OP(round)
-.describe(R"code(Round elements of the input to nearest integer.
-)code" NNVM_ADD_FILELINE)
-.set_support_level(3);
-
 // abs
 NNVM_REGISTER_ELEMWISE_UNARY_OP(abs)
 .describe(R"code(Take absolute value of elements of the input.
 )code" NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwiseSamePrecision)
 .set_support_level(3);
 
 // sigmoid
@@ -65,6 +41,7 @@ NNVM_REGISTER_ELEMWISE_UNARY_OP(sigmoid)
   Y = 1 / (1 + exp(-X))
 
 )code" NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwiseSamePrecision)
 .set_support_level(1);
 
 // tanh
@@ -75,16 +52,7 @@ NNVM_REGISTER_ELEMWISE_UNARY_OP(tanh)
    Y = sinh(X) / cosh(X)
 
 )code" NNVM_ADD_FILELINE)
-.set_support_level(1);
-
-// exp
-NNVM_REGISTER_ELEMWISE_UNARY_OP(exp)
-.describe(R"code(Returns the exp input array, computed element-wise.
-
-.. math::
-   exp(x)
-
-)code" NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwiseSamePrecision)
 .set_support_level(1);
 
 // log2
@@ -95,6 +63,7 @@ NNVM_REGISTER_ELEMWISE_UNARY_OP(log2)
    log2(x)
 
 )code" NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwisePrecision<5>)
 .set_support_level(1);
 
 // log
@@ -105,6 +74,7 @@ NNVM_REGISTER_ELEMWISE_UNARY_OP(log)
    log(x)
 
 )code" NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwisePrecision<5>)
 .set_support_level(1);
 
 // sqrt
@@ -115,6 +85,19 @@ NNVM_REGISTER_ELEMWISE_UNARY_OP(sqrt)
    \sqrt(x)
 
 )code" NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision", 
+		[](const NodeAttrs& attrs,
+			std::vector<TShape>* shapes,
+			std::vector<int>* iattr,
+			std::vector<int>* oattr) -> bool {
+			if (iattr->size() != oattr->size()) {
+				return false;
+			}
+			for (int i = 0; i < oattr->size(); ++i) {
+				(*oattr)[i] = (iattr->at(i) + 1) >> 1;
+			}
+			return true;
+		})
 .set_support_level(1);
 
 // binary ops
@@ -123,15 +106,18 @@ NNVM_REGISTER_ELEMWISE_BINARY_OP(elemwise_add)
 .describe(R"code(Element-wise add
 
 )code")
+.set_attr<FInferPrecision>("FInferPrecision", ElemwisePlusonePrecision)
 .set_support_level(1);
 
 NNVM_REGISTER_ELEMWISE_BINARY_OP(elemwise_sub)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwisePlusonePrecision)
 .describe(R"code(Element-wise substraction
 
 )code"  NNVM_ADD_FILELINE)
 .set_support_level(1);
 
 NNVM_REGISTER_ELEMWISE_BINARY_OP(elemwise_mul)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwiseSumPrecision)
 .describe(R"code(Element-wise multiplication
 
 )code"  NNVM_ADD_FILELINE)
@@ -141,18 +127,14 @@ NNVM_REGISTER_ELEMWISE_BINARY_OP(elemwise_div)
 .describe(R"code(Element-wise division
 
 )code"  NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwiseFirstPrecision)
 .set_support_level(1);
 
 NNVM_REGISTER_ELEMWISE_BINARY_OP(elemwise_mod)
   .describe(R"code(Element-wise modulo
 
 )code" NNVM_ADD_FILELINE)
-.set_support_level(1);
-
-NNVM_REGISTER_ELEMWISE_BINARY_OP(elemwise_pow)
-  .describe(R"code(Element-wise power
-
-)code" NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwiseFirstPrecision)
 .set_support_level(1);
 
 // logical
@@ -160,12 +142,14 @@ NNVM_REGISTER_ELEMWISE_BINARY_OP(logical_and)
 .describe(R"code(Elementwise compute the logical AND
 
 )code")
+.set_attr<FInferPrecision>("FInferPrecision", ElemwisePrecision<1>)
 .set_support_level(4);
 
 NNVM_REGISTER_ELEMWISE_BINARY_OP(logical_or)
 .describe(R"code(Elementwise compute the logical OR
 
 )code")
+.set_attr<FInferPrecision>("FInferPrecision", ElemwisePrecision<1>)
 .set_support_level(4);
 
 // negative
@@ -173,6 +157,7 @@ NNVM_REGISTER_ELEMWISE_UNARY_OP(negative)
 .describe(R"code(Elemenwise numeric negative
 
 )code"  NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwiseSamePrecision)
 .set_support_level(3);
 
 // logical NOT
@@ -180,6 +165,7 @@ NNVM_REGISTER_ELEMWISE_UNARY_OP(logical_not)
 .describe(R"code(Elementwise compute the logical NOT
 
 )code"  NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwisePrecision<1>)
 .set_support_level(4);
 
 // copy
@@ -187,6 +173,7 @@ NNVM_REGISTER_ELEMWISE_UNARY_OP(copy)
 .describe(R"code(Copy tensor to another one.
 
 )code"  NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwiseSamePrecision)
 .set_support_level(3);
 
 DMLC_REGISTER_PARAMETER(InitOpParam);
@@ -205,6 +192,18 @@ NNVM_REGISTER_INIT_OP(full)
 .set_attr<FInferShape>("FInferShape", ZeroShape<InitOpWithScalarParam>)
 .set_attr<FInferType>("FInferType", ZeroType<InitOpWithScalarParam>)
 .set_attr<FCorrectLayout>("FCorrectLayout", ZeroLayout)
+.set_attr<FInferPrecision>("FInferPrecision",
+		[](const NodeAttrs& attrs,
+			std::vector<TShape>* shapes,
+			std::vector<int>* iattr,
+			std::vector<int>* oattr) -> bool {
+	  auto& param = cvm::get<InitOpWithScalarParam>(attrs.parsed);
+		auto fill_value = param.fill_value;
+		int prec = CORTEX_LOG2(fill_value);
+		if (oattr->size() == 0) return false;
+		(*oattr)[0] = prec;
+ 		return true;
+	})
 .set_support_level(4);
 
 NNVM_REGISTER_INIT_OP(zeros)
@@ -218,6 +217,7 @@ NNVM_REGISTER_INIT_OP(zeros)
 .set_attr<FInferShape>("FInferShape", ZeroShape<InitOpParam>)
 .set_attr<FInferType>("FInferType", ZeroType<InitOpParam>)
 .set_attr<FCorrectLayout>("FCorrectLayout", ZeroLayout)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwisePrecision<1>)
 .set_support_level(4);
 
 NNVM_REGISTER_INIT_OP(ones)
@@ -231,6 +231,7 @@ NNVM_REGISTER_INIT_OP(ones)
 .set_attr<FInferShape>("FInferShape", ZeroShape<InitOpParam>)
 .set_attr<FInferType>("FInferType", ZeroType<InitOpParam>)
 .set_attr<FCorrectLayout>("FCorrectLayout", ZeroLayout)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwisePrecision<1>)
 .set_support_level(4);
 
 // full_like
@@ -242,6 +243,18 @@ as the input array
 .add_arguments(FillValueParam::__FIELDS__())
 .set_attr_parser(ParamParser<FillValueParam>)
 .set_attr<FGetAttrDict>("FGetAttrDict", ParamGetAttrDict<FillValueParam>)
+.set_attr<FInferPrecision>("FInferPrecision",
+		[](const NodeAttrs& attrs,
+			std::vector<TShape>* shapes,
+			std::vector<int>* iattr,
+			std::vector<int>* oattr) -> bool {
+	  auto& param = cvm::get<FillValueParam>(attrs.parsed);
+		auto fill_value = param.fill_value;
+		int prec = CORTEX_LOG2(fill_value);
+		if (oattr->size() == 0) return false;
+		(*oattr)[0] = prec;
+ 		return true;
+	})
 .set_support_level(4);
 
 NNVM_REGISTER_INIT_LIKE_OP(zeros_like)
@@ -249,6 +262,7 @@ NNVM_REGISTER_INIT_LIKE_OP(zeros_like)
 as the input array.
 
 )code")
+.set_attr<FInferPrecision>("FInferPrecision", ElemwisePrecision<1>)
 .set_support_level(4);
 
 NNVM_REGISTER_INIT_LIKE_OP(ones_like)
@@ -256,6 +270,7 @@ NNVM_REGISTER_INIT_LIKE_OP(ones_like)
 as the input array.
 
 )code")
+.set_attr<FInferPrecision>("FInferPrecision", ElemwisePrecision<1>)
 .set_support_level(4);
 
 // unary scalar op
@@ -267,22 +282,35 @@ DMLC_REGISTER_PARAMETER(ScalarParam);
   .set_attr_parser(ParamParser<ScalarParam>)                            \
   .set_attr<FGetAttrDict>("FGetAttrDict", ParamGetAttrDict<ScalarParam>)
 
+inline bool AddScalarInferPrecision(const NodeAttrs& attrs,
+			std::vector<TShape>* shapes,
+			std::vector<int>* iattr,
+			std::vector<int>* oattr) {
+	auto& param = cvm::get<ScalarParam>(attrs.parsed);
+	int prec = CORTEX_LOG2(param.scalar);
+	(*oattr)[0] = std::max(prec, iattr->at(0)) + 1;
+	return true;
+}
+
 NNVM_REGISTER_ELEMWISE_BINARY_SCALAR(__add_scalar__)
 .describe(R"code(Tensor add scalar
 
 )code"  NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision", AddScalarInferPrecision)
 .set_support_level(3);
 
 NNVM_REGISTER_ELEMWISE_BINARY_SCALAR(__sub_scalar__)
 .describe(R"code(Tensor substract scalar
 
 )code"  NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision", AddScalarInferPrecision)
 .set_support_level(3);
 
 NNVM_REGISTER_ELEMWISE_BINARY_SCALAR(__rsub_scalar__)
 .describe(R"code(scalar substract Tensor
 
 )code"  NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision", AddScalarInferPrecision)
 .set_support_level(3);
 
 NNVM_REGISTER_ELEMWISE_BINARY_SCALAR(__lshift_scalar__)

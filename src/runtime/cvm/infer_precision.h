@@ -164,14 +164,14 @@ REGISTER_OP_INFERPREC(broadcast_div, First_);
 REGISTER_OP_INFERPREC(elemwise_div, First_);
 
 inline bool Conv2d_(const NodeAttrs& attrs, vector<TShape>* shapes, vector<int>* iattr, vector<int>* oattr) {
-	auto& param = cvm::get<cvm::top::Conv2DParam>(attrs.parsed);
-	int64_t max_size = param.kernel_size.Size() * shapes->at(0)[1];
-	int prec = iattr->at(0) * 2;
-	while (max_size) {
-		prec++;
-		max_size >>= 1;
-	}
-	(*oattr)[0] = prec;
+  auto& param = cvm::get<cvm::top::Conv2DParam>(attrs.parsed);
+  int64_t max_size = param.kernel_size.Size() * shapes->at(0)[1];
+  int prec = iattr->at(0) * 2;
+  while (max_size) {
+    prec++;
+    max_size >>= 1;
+  }
+  (*oattr)[0] = prec;
   return true;
 }
 
@@ -192,12 +192,12 @@ inline bool Dense_(const NodeAttrs& attrs, vector<TShape>* shapes, vector<int>* 
       (*iattr)[2] = 31;
     }
   }
-	int64_t max_size = shapes->at(0)[1];
-	int prec = iattr->at(0) * 2;
-	while (max_size) {
-		prec++;
-		max_size >>= 1;
-	}
+  int64_t max_size = shapes->at(0)[1];
+  int prec = iattr->at(0) * 2;
+  while (max_size) {
+    prec++;
+    max_size >>= 1;
+  }
   (*oattr)[0] = std::max(prec, 31) + 1;
   return true;
 }
@@ -222,10 +222,10 @@ REGISTER_OP_INFERPREC(cvm_right_shift, CVMRightShift_);
 
 inline bool CVMLeftShift_(const NodeAttrs& attrs, vector<TShape>* shapes, vector<int>* iattr, vector<int>* oattr) {
   auto& param = cvm::get<cvm::top::CVMLeftShiftParam>(attrs.parsed);
-	(*oattr)[0] = param.precision;
-	if (iattr->at(0) + param.shift_bit > 32) {
-		(*oattr)[0] = iattr->at(0) + param.shift_bit;
-	}
+  (*oattr)[0] = param.precision;
+  if (iattr->at(0) + param.shift_bit > 32) {
+    (*oattr)[0] = iattr->at(0) + param.shift_bit;
+  }
   return true;
 }
 

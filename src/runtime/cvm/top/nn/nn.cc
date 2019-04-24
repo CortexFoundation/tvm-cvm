@@ -27,6 +27,27 @@ using tvm::Array;
 // dense
 DMLC_REGISTER_PARAMETER(DenseParam);
 
+inline bool DenseInferPrecision(const NodeAttrs& attrs,
+                                std::vector<TShape>* shapes,
+                                std::vector<int>* iattr,
+                                std::vector<int> *oattr){
+  auto& param = cvm::get<cvm::top::DenseParam>(attrs.parsed);
+  auto use_bias = param.use_bias;
+  if (use_bias) {
+    if (iattr->at(2) == 8) {
+      (*iattr)[2] = 31;
+    }
+  }
+  int64_t max_size = shapes->at(0)[1];
+  int prec = iattr->at(0) * 2;
+  while (max_size) {
+    prec++;
+    max_size >>= 1;
+  }
+  (*oattr)[0] = std::max(prec, 31) + 1;
+  return true;
+}
+
 inline bool DenseInferShape(const cvm::NodeAttrs& attrs,
                             std::vector<TShape>* in_shape,
                             std::vector<TShape>* out_shape) {
@@ -84,6 +105,7 @@ If ``use_bias`` is set to be false, then the ``bias`` term is ignored.
 .set_attr<FInferType>("FInferType", ElemwiseType<-1, 1>)
 // leave weight & bias layout undefined
 .set_attr<FCorrectLayout>("FCorrectLayout", ElemwiseFixedLayoutCopyToOut<1, 1>)
+.set_attr<FInferPrecision>("FInferPrecision", DenseInferPrecision)
 .set_support_level(1);
 
 // relu
@@ -95,36 +117,6 @@ NNVM_REGISTER_ELEMWISE_UNARY_OP(relu)
 
 )code" NNVM_ADD_FILELINE)
 .set_support_level(1);
-
-/*
-// dropout
-DMLC_REGISTER_PARAMETER(DropoutParam);
-
-NNVM_REGISTER_OP(dropout)
-.describe(R"(Applies dropout operation to input array.
-
-- During training, each element of the input is set to zero with probability p.
-  The whole array is rescaled by :math:`1/(1-p)` to keep the expected
-  sum of the input unchanged.
-
-)" NNVM_ADD_FILELINE)
-.add_argument("data", "Tensor", "Input to which dropout will be applied")
-.add_arguments(DropoutParam::__FIELDS__())
-.set_attr_parser(ParamParser<DropoutParam>)
-.set_attr<FGetAttrDict>("FGetAttrDict", ParamGetAttrDict<DropoutParam>)
-.set_num_inputs(1)
-.set_num_outputs(2)
-.set_attr<FInferShape>("FInferShape", ElemwiseShape<1, 2>)
-.set_attr<FInferType>("FInferType", ElemwiseType<1, 2>)
-.set_attr<FCorrectLayout>("FCorrectLayout", ElemwiseArbitraryLayout<1, 1>)
-.set_attr<FNumVisibleOutputs>("FNumVisibleOutputs", [](const NodeAttrs& attrs) {
-    return 1;
-  })
-.set_attr<FListOutputNames>("FListOutputNames", [](const NodeAttrs& attrs) {
-    return std::vector<std::string>{"output", "mask"};
-  })
-.set_support_level(1);
-*/
 
 /*
 // batchnorm
@@ -214,6 +206,7 @@ inline bool BatchNormCorrectLayout(const NodeAttrs& attrs,
   return true;
 }
 */
+
 // softmax
 /*
 DMLC_REGISTER_PARAMETER(SoftmaxParam);

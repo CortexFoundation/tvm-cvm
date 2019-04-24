@@ -287,7 +287,7 @@ struct AvgPool2DParam : public dmlc::Parameter<AvgPool2DParam> {
       .describe("When true, will include padding to compute the average");
   }
 };
-
+*/
 struct GlobalPool2DParam : public dmlc::Parameter<GlobalPool2DParam> {
   std::string layout;
 
@@ -299,7 +299,6 @@ struct GlobalPool2DParam : public dmlc::Parameter<GlobalPool2DParam> {
                 "'W' dimensions.");
   }
 };
-*/
 
 struct LayoutTransformParam : public dmlc::Parameter<LayoutTransformParam> {
   std::string src_layout;
