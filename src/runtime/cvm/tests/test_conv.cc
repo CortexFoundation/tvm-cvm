@@ -143,12 +143,12 @@ void print(int* data, int n, int c, int h, int w){
 }
 int main(){
     int i_n = 1;
-    int i_c = 2;
+    int i_c = 3;
     int i_h = 32;
     int i_w = 32;
     int f_h = 3;
     int f_w = 3;
-    int o_c = 2;
+    int o_c = 1024;
     int padding_h = 1;
     int padding_w = 1;
     int stride_h = 1;
@@ -212,7 +212,7 @@ int main(){
         stride_h, stride_w,
         dilation_h, dilation_w,
         1,
-        output2, i_n, o_c, o_h, o_w, true);
+        output2, i_n, o_c, o_h, o_w, 0, true);
 
     clock_t gpu_end = clock();
     std::cout << "gpu all time: " << gpu_end - end << std::endl;

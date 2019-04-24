@@ -152,7 +152,7 @@ int main()
         clock_t cvm_start = clock();
         clock_t delta = 0;
         clock_t last;
-        for (int i = 0; i < 1; i++) {
+        for (int i = 0; i < 10; i++) {
             delta += RunCVM(gpu_x, params_arr, json_data, mod_syslib, "cvm_runtime", gpu_y, (int)kDLGPU);
         }
         clock_t cvm_end = clock();

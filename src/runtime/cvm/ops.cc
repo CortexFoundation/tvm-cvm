@@ -705,7 +705,7 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.log")
         int32_t *x = static_cast<int32_t*>(dlx->data);
         for(int i = 0; i < 64; i++){
             int64_t tmp = (int64_t)1 << i;
-            if(x[0] <= tmp){
+            if(x[0] < tmp){
                 y_data[0] = i;
                 return;
             }
@@ -829,7 +829,7 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.conv2d")
                 strides[0], strides[1],
                 dilation[0], dilation[1],
                 groups,
-                y_data, n_batch, out_channels, o_h, o_w, DEBUG_OP);
+                y_data, n_batch, out_channels, o_h, o_w, x->ctx.device_id, DEBUG_OP);
         CHECK_EQ(errorStr == NULL, true) << errorStr;
     }else{
         const char* errorStr = cuda_depthwise_conv2d(
@@ -840,7 +840,7 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.conv2d")
                 strides[0], strides[1],
                 dilation[0], dilation[1],
                 groups,
-                y_data, n_batch, out_channels, o_h, o_w, DEBUG_OP);
+                y_data, n_batch, out_channels, o_h, o_w, x->ctx.device_id, DEBUG_OP);
         CHECK_EQ(errorStr == NULL, true) << errorStr;
 
     }
@@ -882,7 +882,7 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.cuda_max_pool2d")
             filter_h, filter_w,
             padding[0], padding[1],
             strides[0], strides[1],
-            y_data, n_batch, out_channels, o_h, o_w, DEBUG_OP);
+            y_data, n_batch, out_channels, o_h, o_w, x->ctx.device_id, DEBUG_OP);
     CHECK_EQ(errorStr == NULL, true) << errorStr;
     });
 TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.dense")
@@ -1067,7 +1067,7 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.max_pool2d")
             filter_h, filter_w,
             padding[0], padding[1],
             strides[0], strides[1],
-            y_data, n_batch, out_channels, o_h, o_w, DEBUG_OP);
+            y_data, n_batch, out_channels, o_h, o_w, x->ctx.device_id, DEBUG_OP);
     CHECK_EQ(errorStr == NULL, true) << errorStr;
 });
 

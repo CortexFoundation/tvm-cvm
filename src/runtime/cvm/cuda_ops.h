@@ -14,7 +14,7 @@ const char* cuda_conv2d(
         int32_t stride_h, int32_t stride_w,
         int32_t dilation_h, int32_t dilation_w,
         int32_t groups,
-        int32_t *output, int32_t o_n, int32_t o_c, int32_t o_h, int32_t o_w, bool debug);
+        int32_t *output, int32_t o_n, int32_t o_c, int32_t o_h, int32_t o_w, int32_t device_id, bool debug);
 const char* cuda_depthwise_conv2d(
         int32_t *input, int32_t i_n, int32_t i_c, int32_t i_h, int32_t i_w,
         int32_t *filter, int32_t f_n, int32_t f_c, int32_t f_h, int32_t f_w,
@@ -23,13 +23,13 @@ const char* cuda_depthwise_conv2d(
         int32_t stride_h, int32_t stride_w,
         int32_t dilation_h, int32_t dilation_w,
         int32_t groups,
-        int32_t *output, int32_t o_n, int32_t o_c, int32_t o_h, int32_t o_w, bool debug);
+        int32_t *output, int32_t o_n, int32_t o_c, int32_t o_h, int32_t o_w, int32_t device_id, bool debug);
 const char* cuda_max_pool(
         int32_t *input, int32_t i_n, int32_t i_c, int32_t i_h, int32_t i_w,
         int32_t f_h, int32_t f_w,
         int32_t padding_h, int32_t padding_w,
         int32_t stride_h, int32_t w,
-        int32_t *output, int32_t o_n, int32_t o_c, int32_t o_h, int32_t o_w, bool debug);
+        int32_t *output, int32_t o_n, int32_t o_c, int32_t o_h, int32_t o_w, int32_t device_id, bool debug);
 const char* cuda_dense(
         int32_t *a,
         int32_t *b,

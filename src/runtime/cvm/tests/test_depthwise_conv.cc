@@ -96,7 +96,7 @@ int main(){
         stride, stride,
         dilation_h, dilation_w,
         i_c,
-        output2, i_n, o_c, o_h, o_w, true);
+        output2, i_n, o_c, o_h, o_w, 0, true);
 
     clock_t gpu_end = clock();
     std::cout << "gpu all time: " << gpu_end - end << std::endl;
