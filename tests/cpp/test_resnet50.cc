@@ -124,7 +124,7 @@ int main()
         //    TVMStreamCreate(kDLGPU, device_id, &stream);
         //    TVMArrayCopyFromTo(x, t_gpu_x, stream);
         clock_t start = clock();
-        for(int i = 0; i < 10; i++){
+        for(int i = 0; i < 1; i++){
             RunCVM(x, params_arr, json_data_org, mod_org, "graph_runtime", y1,(int)kDLCPU);
         }
         clock_t end = clock();
@@ -153,12 +153,12 @@ int main()
         clock_t delta = 0;
         clock_t last;
         for (int i = 0; i < 1; i++) {
-            delta += RunCVM(gpu_x, params_arr, json_data, mod_syslib, "cvm_runtime", gpu_y, (int)kDLGPU);
+            delta += RunCVM(x, params_arr, json_data, mod_syslib, "cvm_runtime", y2, (int)kDLCPU);
         }
         clock_t cvm_end = clock();
         std::cout << (cvm_end - cvm_start - delta) * 1000 / CLOCKS_PER_SEC << "ms" << std::endl;
         std::cout << "cvm runtime: " << (cvm_end - cvm_start)*1.0 / CLOCKS_PER_SEC << " s" << std::endl;
-        TVMArrayCopyFromTo(gpu_y, y2, stream1);
+//        TVMArrayCopyFromTo(gpu_y, y2, stream1);
         //TVMArrayFree(y_cpu);
         for(int i = 0; i < 10; i++){
             std::cout << static_cast<int32_t*>(y2->data)[i] << " ";

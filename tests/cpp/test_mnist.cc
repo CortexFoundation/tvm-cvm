@@ -88,11 +88,11 @@ int main()
         npy::LoadArrayFromNumpy("data.npy", tshape, tdata);
 
         DLTensor* x;
-        int in_ndim = 3;
-        int64_t in_shape[3] = {1, 28, 28};
+        int in_ndim = 4;
+        int64_t in_shape[4] = {1, 1, 28, 28};
         TVMArrayAlloc(in_shape, in_ndim, dtype_code, dtype_bits, dtype_lanes, device_type, device_id, &x);
         auto x_iter = static_cast<int*>(x->data);
-        for (auto i = 0; i < 1*28*28; i++) {
+        for (auto i = 0; i < 1*1*28*28; i++) {
         //    std::cout << (int)((int8_t)tdata[i]) << " ";
         //    if(i != 0 && i %28 == 0) std::cout << std::endl;
             x_iter[i] = (int)((int8_t)tdata[i]);
@@ -119,7 +119,7 @@ int main()
         DLTensor* y1;
         int out_ndim = 2;
         int64_t out_shape[2] = {1, 10, };
-        TVMArrayAlloc(out_shape, out_ndim, dtype_code, dtype_bits, dtype_lanes, device_type, device_id, &y1);
+//        TVMArrayAlloc(out_shape, out_ndim, dtype_code, dtype_bits, dtype_lanes, device_type, device_id, &y1);
 
         //    DLTensor* t_gpu_x, *t_gpu_y;
         //    TVMArrayAlloc(in_shape, in_ndim, dtype_code, dtype_bits, dtype_lanes, kDLGPU, device_id, &t_gpu_x);
