@@ -62,7 +62,8 @@ Example::
 .set_attr<FInferType>("FInferType", ElemwiseType<1, 1>)
 .set_attr<FCorrectLayout>("FCorrectLayout", ElemwiseFixedLayoutUnknownOut<1, 1>)
 .add_argument("data", "Tensor", "Input data.")
-.set_support_level(1);
+.set_support_level(1)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwiseSamePrecision);
 
 // concatenate
 DMLC_REGISTER_PARAMETER(ConcatenateParam);
@@ -178,6 +179,7 @@ Example::
 .set_attr<FCorrectLayout>("FCorrectLayout", ConcatenateCorrectLayout)
 .set_num_outputs(1)
 .set_num_inputs(kVarg)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwiseSamePrecision)
 .set_support_level(1);
 
 // expand_dims
@@ -224,6 +226,7 @@ will return a new array with shape ``(2,1,1,1,1,1,3,4)``.
 .set_attr<FCorrectLayout>("FCorrectLayout", ElemwiseFixedLayoutUnknownOut<1, 1>)
 .set_num_inputs(1)
 .set_num_outputs(1)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwiseSamePrecision)
 .set_support_level(1);
 
 NNVM_REGISTER_OP(expand_like)
@@ -253,6 +256,7 @@ Examples::
 .set_attr<FCorrectLayout>("FCorrectLayout", ElemwiseFixedLayoutUnknownOut<1, 1>)
 .set_num_inputs(2)
 .set_num_outputs(1)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwiseSamePrecision)
 .set_support_level(4);
 
 // split
@@ -344,6 +348,7 @@ along which to split the array.
 .set_attr<FCorrectLayout>("FCorrectLayout", ElemwiseFixedLayoutUnknownOut<1, -1>)
 .set_num_inputs(1)
 .set_num_outputs(SplitNumOutputs)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwiseSamePrecision)
 .set_support_level(3);
 
 // cast
@@ -371,6 +376,25 @@ NNVM_REGISTER_OP(cast)
 .set_attr<FCorrectLayout>("FCorrectLayout", ElemwiseArbitraryLayout<1, 1>)
 .set_num_inputs(1)
 .set_num_outputs(1)
+.set_attr<FInferPrecision>("FInferPrecision", 
+  [](const NodeAttrs& attrs,
+   std::vector<TShape>* shapes,
+   std::vector<int>* iattr,
+   std::vector<int>* oattr) -> bool {
+  auto& param = cvm::get<CastParam>(attrs.parsed);
+  if (param.dtype == kUint8 || param.dtype == kInt8) {
+    (*oattr)[0] = std::max(iattr->at(0), 8);
+  } else if (param.dtype == kUint16 || param.dtype == kInt16) {
+    (*oattr)[0] = std::max(iattr->at(0), 16);
+  } else if (param.dtype == kUint32 || param.dtype == kInt32) {
+    (*oattr)[0] = std::max(iattr->at(0), 32);
+  } else if (param.dtype == kUint64 || param.dtype == kInt64) {
+    (*oattr)[0] = std::max(iattr->at(0), 64);
+  } else {
+    return false;
+  }
+  return true;
+})
 .set_support_level(1);
 
 
@@ -522,6 +546,7 @@ The significance of each is explained below:
 .set_attr<FInferShape>("FInferShape", ReshapeInferShape)
 .set_attr<FInferType>("FInferType", ElemwiseType<1, 1>)
 .set_attr<FCorrectLayout>("FCorrectLayout", ElemwiseFixedLayoutUnknownOut<1, 1>)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwiseSamePrecision)
 .set_num_inputs(1)
 .set_num_outputs(1)
 .set_support_level(3);
@@ -547,6 +572,7 @@ the input array into an output array with the same shape as the second input arr
 .set_num_inputs(2)
 .set_num_outputs(1)
 .set_attr<FInferType>("FInferType", ReshapeLikeInferType)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwiseSamePrecision)
 // never transform layout of the second input array.
 .set_attr<FCorrectLayout>("FCorrectLayout", ElemwiseFixedLayoutUnknownOut<1, 1>)
 .set_support_level(4);
@@ -627,6 +653,7 @@ Examples::
 .set_attr<cvm::FInferShape>("FInferShape", SqueezeShape)
 .set_attr<cvm::FInferType>("FInferType", ElemwiseType<1, 1>)
 .set_attr<FCorrectLayout>("FCorrectLayout", ElemwiseFixedLayoutUnknownOut<1, 1>)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwiseSamePrecision)
 .set_num_inputs(1)
 .set_num_outputs(1)
 .set_support_level(1);
@@ -728,6 +755,7 @@ Examples::
 .set_attr<cvm::FInferShape>("FInferShape", TransposeShape)
 .set_attr<cvm::FInferType>("FInferType", ElemwiseType<1, 1>)
 .set_attr<FCorrectLayout>("FCorrectLayout", TransposeCorrectLayout)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwiseSamePrecision)
 .set_num_inputs(1)
 .set_num_outputs(1)
 .set_support_level(4);
@@ -818,6 +846,7 @@ Examples::
 .set_attr<FInferShape>("FInferShape", StridedSliceInferShape)
 .set_attr<FInferType>("FInferType", ElemwiseType<1, 1>)
 .set_attr<FCorrectLayout>("FCorrectLayout", ElemwiseArbitraryLayout<1, 1>)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwiseSamePrecision)
 .set_num_inputs(1)
 .set_num_outputs(1)
 .set_support_level(1);
@@ -860,6 +889,7 @@ Examples::
 .set_attr<FGetAttrDict>("FGetAttrDict", ParamGetAttrDict<FlipParam>)
 .set_attr<cvm::FInferShape>("FInferShape", ElemwiseShape<1, 1>)
 .set_attr<cvm::FInferType>("FInferType", ElemwiseType<1, 1>)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwiseSamePrecision)
 .set_num_inputs(1)
 .set_num_outputs(1)
 .set_support_level(4);
@@ -966,6 +996,7 @@ Examples::
 .set_attr<FInferShape>("FInferShape", TakeInferShape)
 .set_attr<FInferType>("FInferType", TakeInferType)
 .set_attr<FCorrectLayout>("FCorrectLayout", TakeCorrectLayout)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwiseSamePrecision)
 .set_num_inputs(2)
 .set_num_outputs(1)
 .set_support_level(3);
@@ -1024,6 +1055,7 @@ NNVM_REGISTER_OP(slice_like)
 .set_attr<FGetAttrDict>("FGetAttrDict", ParamGetAttrDict<SliceLikeParam>)
 .set_attr<FInferShape>("FInferShape", SliceLikeShape)
 .set_attr<FInferType>("FInferType", ElemwiseType<2, 1>)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwiseSamePrecision)
 .set_attr<FCorrectLayout>("FCorrectLayout", ElemwiseBinaryKeepLeftLayout)
 .set_attr<FListInputNames>("FListInputNames", [](const NodeAttrs& attrs) {
     return std::vector<std::string>{"data", "slice_like"};
@@ -1109,6 +1141,7 @@ Examples::
 .set_num_outputs(1)
 .set_attr<FInferShape>("FInferShape", WhereShape)
 .set_attr<FInferType>("FInferType", WhereInferType)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwiseSamePrecision)
 .set_attr<FCorrectLayout>("FCorrectLayout", WhereCorrectLayout)
 .set_attr<FListInputNames>("FListInputNames", [](const NodeAttrs& attrs) {
   return std::vector<std::string>{"condition", "x", "y"};
@@ -1204,6 +1237,7 @@ Examples::
 .set_num_outputs(1)
 .set_attr<FInferShape>("FInferShape", GatherNDInferShape)
 .set_attr<FInferType>("FInferType", GatherNDInferType)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwiseSamePrecision)
 .set_attr<FCorrectLayout>("FCorrectLayout", GatherNDCorrectLayout)
 .set_attr<FListInputNames>("FListInputNames", [](const NodeAttrs& attrs) {
   return std::vector<std::string>{"data", "indices"};

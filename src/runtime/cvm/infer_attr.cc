@@ -4,7 +4,6 @@
  * \brief Inference the attrs given existin information.
  */
 #include "graph_runtime.h"
-#include "infer_precision.h"
 #include <cvm/op.h>
 #include <cvm/op_attr_types.h>
 #include <cvm/graph_attr_types.h>
@@ -74,8 +73,9 @@ void CvmRuntime::SetupPrecision() {
   // Temp space for shape inference.
   std::vector<int> iprec, oprec;
   std::vector<TShape> shapes;
-  auto finfer_prec = FInferPrecisionMap::getInstance();
-
+  static auto& finfer_prec =
+      Op::GetAttr<cvm::FInferPrecision>("FInferPrecision");
+ 
   // inference step function for nid
   auto infer_prec = [&](uint32_t nid) {
     const auto& inode = idx[nid];
@@ -96,7 +96,7 @@ void CvmRuntime::SetupPrecision() {
       }
       CHECK_GE(num_outputs, 1) << "an operator has at least 1 outputs";
       oprec.resize(num_outputs, -1);
-      auto finfer = finfer_prec.get(inode.attrs.op->name);
+      auto finfer = finfer_prec.get(inode.attrs.op, nullptr);
       // Call inference function of the operator.
       if (!finfer(inode.attrs, &shapes, &iprec, &oprec)) {
         throw dmlc::Error(std::string("error with ") + inode.attrs.op->name);
@@ -196,7 +196,6 @@ void CvmRuntime::SetupShape() {
       }
       // which raise an error if the op has not been registered.
       auto finfer = finfer_shape.get(inode.attrs.op, nullptr);
-      //TODO: flatten op attr unprovided
       if (finfer != nullptr) {
         // Call inference function of the operator.
         try {

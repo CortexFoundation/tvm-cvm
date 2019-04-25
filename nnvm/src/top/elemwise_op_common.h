@@ -334,7 +334,7 @@ inline bool ElemwiseBinaryKeepLeftLayout(const NodeAttrs& attrs,
                      std::vector<int>* out_attrs) {                 \
       CHECK_EQ(out_attrs->size(), 1U);                              \
       NNVM_ASSIGN_OUTPUT_TYPE(attrs, *out_attrs, 0,                 \
-        static_cast<int>(kFloat32));                                \
+        static_cast<int>(kInt32));                                  \
       return true;                                                  \
   })                                                                \
   .set_attr<FCorrectLayout>("FCorrectLayout",                       \

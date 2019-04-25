@@ -86,18 +86,18 @@ NNVM_REGISTER_ELEMWISE_UNARY_OP(sqrt)
 
 )code" NNVM_ADD_FILELINE)
 .set_attr<FInferPrecision>("FInferPrecision", 
-		[](const NodeAttrs& attrs,
-			std::vector<TShape>* shapes,
-			std::vector<int>* iattr,
-			std::vector<int>* oattr) -> bool {
-			if (iattr->size() != oattr->size()) {
-				return false;
-			}
-			for (int i = 0; i < oattr->size(); ++i) {
-				(*oattr)[i] = (iattr->at(i) + 1) >> 1;
-			}
-			return true;
-		})
+    [](const NodeAttrs& attrs,
+      std::vector<TShape>* shapes,
+      std::vector<int>* iattr,
+      std::vector<int>* oattr) -> bool {
+      if (iattr->size() != oattr->size()) {
+        return false;
+      }
+      for (int i = 0; i < oattr->size(); ++i) {
+        (*oattr)[i] = (iattr->at(i) + 1) >> 1;
+      }
+      return true;
+    })
 .set_support_level(1);
 
 // binary ops
@@ -193,17 +193,17 @@ NNVM_REGISTER_INIT_OP(full)
 .set_attr<FInferType>("FInferType", ZeroType<InitOpWithScalarParam>)
 .set_attr<FCorrectLayout>("FCorrectLayout", ZeroLayout)
 .set_attr<FInferPrecision>("FInferPrecision",
-		[](const NodeAttrs& attrs,
-			std::vector<TShape>* shapes,
-			std::vector<int>* iattr,
-			std::vector<int>* oattr) -> bool {
-	  auto& param = cvm::get<InitOpWithScalarParam>(attrs.parsed);
-		auto fill_value = param.fill_value;
-		int prec = CORTEX_LOG2(fill_value);
-		if (oattr->size() == 0) return false;
-		(*oattr)[0] = prec;
- 		return true;
-	})
+    [](const NodeAttrs& attrs,
+      std::vector<TShape>* shapes,
+      std::vector<int>* iattr,
+      std::vector<int>* oattr) -> bool {
+    auto& param = cvm::get<InitOpWithScalarParam>(attrs.parsed);
+    auto fill_value = param.fill_value;
+    int prec = CORTEX_LOG2(fill_value);
+    if (oattr->size() == 0) return false;
+    (*oattr)[0] = prec;
+     return true;
+  })
 .set_support_level(4);
 
 NNVM_REGISTER_INIT_OP(zeros)
@@ -244,17 +244,17 @@ as the input array
 .set_attr_parser(ParamParser<FillValueParam>)
 .set_attr<FGetAttrDict>("FGetAttrDict", ParamGetAttrDict<FillValueParam>)
 .set_attr<FInferPrecision>("FInferPrecision",
-		[](const NodeAttrs& attrs,
-			std::vector<TShape>* shapes,
-			std::vector<int>* iattr,
-			std::vector<int>* oattr) -> bool {
-	  auto& param = cvm::get<FillValueParam>(attrs.parsed);
-		auto fill_value = param.fill_value;
-		int prec = CORTEX_LOG2(fill_value);
-		if (oattr->size() == 0) return false;
-		(*oattr)[0] = prec;
- 		return true;
-	})
+    [](const NodeAttrs& attrs,
+      std::vector<TShape>* shapes,
+      std::vector<int>* iattr,
+      std::vector<int>* oattr) -> bool {
+    auto& param = cvm::get<FillValueParam>(attrs.parsed);
+    auto fill_value = param.fill_value;
+    int prec = CORTEX_LOG2(fill_value);
+    if (oattr->size() == 0) return false;
+    (*oattr)[0] = prec;
+     return true;
+  })
 .set_support_level(4);
 
 NNVM_REGISTER_INIT_LIKE_OP(zeros_like)
@@ -283,13 +283,13 @@ DMLC_REGISTER_PARAMETER(ScalarParam);
   .set_attr<FGetAttrDict>("FGetAttrDict", ParamGetAttrDict<ScalarParam>)
 
 inline bool AddScalarInferPrecision(const NodeAttrs& attrs,
-			std::vector<TShape>* shapes,
-			std::vector<int>* iattr,
-			std::vector<int>* oattr) {
-	auto& param = cvm::get<ScalarParam>(attrs.parsed);
-	int prec = CORTEX_LOG2(param.scalar);
-	(*oattr)[0] = std::max(prec, iattr->at(0)) + 1;
-	return true;
+      std::vector<TShape>* shapes,
+      std::vector<int>* iattr,
+      std::vector<int>* oattr) {
+  auto& param = cvm::get<ScalarParam>(attrs.parsed);
+  int prec = CORTEX_LOG2(param.scalar);
+  (*oattr)[0] = std::max(prec, iattr->at(0)) + 1;
+  return true;
 }
 
 NNVM_REGISTER_ELEMWISE_BINARY_SCALAR(__add_scalar__)
@@ -317,60 +317,113 @@ NNVM_REGISTER_ELEMWISE_BINARY_SCALAR(__lshift_scalar__)
 .describe(R"code(Tensor left shift by scalar
 
 )code"  NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision",
+  [](const NodeAttrs& attrs,
+   std::vector<TShape>* shapes,
+   std::vector<int>* iattr,
+   std::vector<int>* oattr) -> bool {
+  auto& param = cvm::get<ScalarParam>(attrs.parsed);
+  (*oattr)[0] = param.scalar + iattr->at(0);
+  return true;
+})
 .set_support_level(3);
 
 NNVM_REGISTER_ELEMWISE_BINARY_SCALAR(__rshift_scalar__)
 .describe(R"code(Tensor right shift by scalar
 
 )code"  NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision",
+  [](const NodeAttrs& attrs,
+   std::vector<TShape>* shapes,
+   std::vector<int>* iattr,
+   std::vector<int>* oattr) -> bool {
+  auto& param = cvm::get<ScalarParam>(attrs.parsed);
+  (*oattr)[0] = iattr->at(0) - param.scalar;
+  return true;
+})
 .set_support_level(3);
 
 NNVM_REGISTER_ELEMWISE_BINARY_SCALAR(__mul_scalar__)
 .describe(R"code(Tensor multiplies scalar
 
 )code"  NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision",
+  [](const NodeAttrs& attrs,
+   std::vector<TShape>* shapes,
+   std::vector<int>* iattr,
+   std::vector<int>* oattr) -> bool {
+  auto& param = cvm::get<ScalarParam>(attrs.parsed);
+  (*oattr)[0] = CORTEX_LOG2(param.scalar) + iattr->at(0);
+  return true;
+})
 .set_support_level(3);
 
 NNVM_REGISTER_ELEMWISE_BINARY_SCALAR(__div_scalar__)
 .describe(R"code(Tensor divides scalar
 
 )code"  NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision",
+  [](const NodeAttrs& attrs,
+   std::vector<TShape>* shapes,
+   std::vector<int>* iattr,
+   std::vector<int>* oattr) -> bool {
+  auto& param = cvm::get<ScalarParam>(attrs.parsed);
+  (*oattr)[0] = iattr->at(0) - CORTEX_LOG2(param.scalar);
+  return true;
+})
 .set_support_level(3);
 
 NNVM_REGISTER_ELEMWISE_BINARY_SCALAR(__rdiv_scalar__)
 .describe(R"code(scalar divides Tensor
 
 )code"  NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision",
+  [](const NodeAttrs& attrs,
+   std::vector<TShape>* shapes,
+   std::vector<int>* iattr,
+   std::vector<int>* oattr) -> bool {
+  auto& param = cvm::get<ScalarParam>(attrs.parsed);
+  (*oattr)[0] = CORTEX_LOG2(param.scalar);
+  return true;
+})
 .set_support_level(3);
 
 NNVM_REGISTER_ELEMWISE_BINARY_SCALAR(__pow_scalar__)
 .describe(R"code(Tensor power scalar
 
 )code"  NNVM_ADD_FILELINE)
-.set_support_level(3);
-
-NNVM_REGISTER_ELEMWISE_BINARY_SCALAR(__rpow_scalar__)
-.describe(R"code(scalar power Tensor
-
-)code"  NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision",
+  [](const NodeAttrs& attrs,
+   std::vector<TShape>* shapes,
+   std::vector<int>* iattr,
+   std::vector<int>* oattr) -> bool {
+  auto& param = cvm::get<ScalarParam>(attrs.parsed);
+  (*oattr)[0] = param.scalar * iattr->at(0);
+  return true;
+})
 .set_support_level(3);
 
 DMLC_REGISTER_PARAMETER(ElementWiseReduceParam);
+
+inline bool ElemwiseSumInferPrecision(const NodeAttrs& attrs,
+   std::vector<TShape>* shapes,
+   std::vector<int>* iattr,
+   std::vector<int>* oattr) {
+  uint64_t sum = 0;
+  for (auto x : *iattr) {
+    if (x > 32) return false;
+    sum += (1ull << x);
+  }
+  if (sum >= (1ull << 32)) return false;
+  (*oattr)[0] = CORTEX_LOG2(sum);
+  return true;
+}
 
 NNVM_REGISTER_ELEMWISE_REDUCE_OP(elemwise_sum)
 .describe(R"code(Adds all input arguments element-wise.
 
 )code"  NNVM_ADD_FILELINE)
-.set_support_level(4);
-
-NNVM_REGISTER_ELEMWISE_UNARY_OP(block_grad)
-.describe(R"code(Blocks gradient computation for input.
-
-)code" NNVM_ADD_FILELINE)
-.set_attr<cvm::FInplaceIdentity>(
-  "FInplaceIdentity", [](const NodeAttrs& attrs){
-    return std::vector<bool>{true};
-})
+.set_attr<FInferPrecision>("FInferPrecision", ElemwiseSumInferPrecision)
 .set_support_level(4);
 
 DMLC_REGISTER_PARAMETER(IndicatorParam);
@@ -385,6 +438,7 @@ with 1.0 if (left > right), otherwise 0.0 element-wise.
 .add_argument("rhs", "Tensor", "Second input")
 .set_num_inputs(2)
 .set_attr<cvm::FInferShape>("FInferShape", ElemwiseShape<2, 1>)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwisePrecision<1>)
 .set_support_level(4);
 
 
@@ -397,34 +451,8 @@ with 1.0 if (left < right), otherwise 0.0 element-wise.
 .add_argument("rhs", "Tensor", "Second input")
 .set_num_inputs(2)
 .set_attr<cvm::FInferShape>("FInferShape", ElemwiseShape<2, 1>)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwisePrecision<1>)
 .set_support_level(4);
-
-NNVM_REGISTER_INDICATOR_OP(_max_mask)
-  .describe(R"code(Function that returns a mask tensor
-with 1.0 if the value is maximum over given axes, otherwise 0.0 element-wise.
-
-)code" NNVM_ADD_FILELINE)
-.add_argument("data", "Tensor", "Input")
-.set_num_inputs(1)
-.add_arguments(IndicatorParam::__FIELDS__())
-.set_attr_parser(ParamParser<IndicatorParam>)
-.set_attr<FGetAttrDict>("FGetAttrDict", ParamGetAttrDict<IndicatorParam>)
-.set_attr<cvm::FInferShape>("FInferShape", ElemwiseShape<1, 1>)
-.set_support_level(1);
-
-NNVM_REGISTER_INDICATOR_OP(_min_mask)
-  .describe(R"code(Function that returns a mask tensor
-with 1.0 if the value is minimum over given axes, otherwise 0.0 element-wise.
-
-)code" NNVM_ADD_FILELINE)
-.add_argument("data", "Tensor", "Input")
-.set_num_inputs(1)
-.add_arguments(IndicatorParam::__FIELDS__())
-.set_attr_parser(ParamParser<IndicatorParam>)
-.set_attr<FGetAttrDict>("FGetAttrDict", ParamGetAttrDict<IndicatorParam>)
-.set_attr<cvm::FInferShape>("FInferShape", ElemwiseShape<1, 1>)
-.set_support_level(1);
-
 
 DMLC_REGISTER_PARAMETER(ClipParam);
 
@@ -443,7 +471,17 @@ Example::
 .set_attr<FGetAttrDict>("FGetAttrDict", ParamGetAttrDict<ClipParam>)
 .set_attr<cvm::FInferShape>("FInferShape", ElemwiseShape<1, 1>)
 .set_attr<cvm::FInferType>("FInferType", ElemwiseType<1, 1>)
+.set_attr<FInferPrecision>("FInferPrecision",
+  [](const NodeAttrs& attrs,
+   std::vector<TShape>* shapes,
+   std::vector<int>* iattr,
+   std::vector<int>* oattr) -> bool {
+  auto& param = cvm::get<ClipParam>(attrs.parsed);
+  (*oattr)[0] = CORTEX_LOG2(std::max(param.a_max, -param.a_min + 1));
+  return true;
+})
 .set_attr<cvm::FCorrectLayout>("FCorrectLayout", ElemwiseFixedLayoutUnknownOut<1, 1>)
+
 .add_argument("data", "NDArray-or-Symbol", "Input array.")
 .add_arguments(ClipParam::__FIELDS__())
 .set_support_level(4);
@@ -454,20 +492,20 @@ NNVM_REGISTER_OP(cvm_clip)
 .describe(R"doc(CVM clip input with precision.
 
 .. math::
-	range = 2 ** (precision - (is_sign ? 1 : 0)) - 1
-	a_min = is_sign ? -range : 0
-	a_max = range
-	Y = clip(X, a_min=a_min, a_max=a_max)
+  range = 2 ** (precision - (is_sign ? 1 : 0)) - 1
+  a_min = is_sign ? -range : 0
+  a_max = range
+  Y = clip(X, a_min=a_min, a_max=a_max)
 
 Example::
 
-	data = [275, 157, -23, -168, -275]
+  data = [275, 157, -23, -168, -275]
 
-	cvm_clip(data, precision=8, is_sign=True)
-	[127, 127, -23, -127, -127]
+  cvm_clip(data, precision=8, is_sign=True)
+  [127, 127, -23, -127, -127]
 
-	cvm_clip(data, precision=8, is_sign=False)
-	[255, 157, 0, 0, 0]
+  cvm_clip(data, precision=8, is_sign=False)
+  [255, 157, 0, 0, 0]
 )doc" NNVM_ADD_FILELINE)
 .set_num_inputs(1)
 .set_num_outputs(1)
@@ -476,6 +514,15 @@ Example::
 .set_attr<cvm::FInferShape>("FInferShape", ElemwiseShape<1, 1>)
 .set_attr<cvm::FInferType>("FInferType", ElemwiseType<1, 1>)
 .set_attr<cvm::FCorrectLayout>("FCorrectLayout", ElemwiseFixedLayoutUnknownOut<1, 1>)
+.set_attr<FInferPrecision>("FInferPrecision",
+  [](const NodeAttrs& attrs,
+   std::vector<TShape>* shapes,
+   std::vector<int>* iattr,
+   std::vector<int>* oattr) -> bool {
+  auto& param = cvm::get<CVMClipParam>(attrs.parsed);
+  (*oattr)[0] = param.precision;
+  return true;
+})
 .add_argument("data", "Tensor", "input")
 .add_arguments(CVMClipParam::__FIELDS__())
 .set_support_level(4);
@@ -486,9 +533,9 @@ NNVM_REGISTER_OP(cvm_left_shift)
 .describe(R"code(CVM left shift with precision-aware clip.
 
 .. math::
-	assert shift_bit > 0
-	tmp = X << shift_bit
-	Y = cvm_clip(tmp, precision)
+  assert shift_bit > 0
+  tmp = X << shift_bit
+  Y = cvm_clip(tmp, precision)
 )code" NNVM_ADD_FILELINE)
 .set_num_inputs(1)
 .set_num_outputs(1)
@@ -497,6 +544,16 @@ NNVM_REGISTER_OP(cvm_left_shift)
 .set_attr<cvm::FInferShape>("FInferShape", ElemwiseShape<1, 1>)
 .set_attr<cvm::FInferType>("FInferType", ElemwiseType<1, 1>)
 .set_attr<cvm::FCorrectLayout>("FCorrectLayout", ElemwiseFixedLayoutUnknownOut<1, 1>)
+.set_attr<FInferPrecision>("FInferPrecision",
+  [](const NodeAttrs& attrs,
+   std::vector<TShape>* shapes,
+   std::vector<int>* iattr,
+   std::vector<int>* oattr) -> bool {
+  auto& param = cvm::get<CVMLeftShiftParam>(attrs.parsed);
+  if (iattr->at(0) + param.shift_bit > 32) return false;
+  (*oattr)[0] = param.precision;
+  return true;
+})
 .add_argument("data", "Tensor", "input")
 .add_arguments(CVMLeftShiftParam::__FIELDS__())
 .set_support_level(4);
@@ -510,11 +567,11 @@ The right shift is equal to float number round divide operator,
 which means to implement via tricky equation.
 
 .. math::
-	assert shift_bit > 0
-	tmp = X >> (shift_bit - 1)
-	tmp = tmp + 1
-	tmp = tmp >> 1
-	Y = cvm_clip(tmp, precision)
+  assert shift_bit > 0
+  tmp = X >> (shift_bit - 1)
+  tmp = tmp + 1
+  tmp = tmp >> 1
+  Y = cvm_clip(tmp, precision)
 )code" NNVM_ADD_FILELINE)
 .set_num_inputs(1)
 .set_num_outputs(1)
@@ -523,6 +580,15 @@ which means to implement via tricky equation.
 .set_attr<cvm::FInferShape>("FInferShape", ElemwiseShape<1, 1>)
 .set_attr<cvm::FInferType>("FInferType", ElemwiseType<1, 1>)
 .set_attr<cvm::FCorrectLayout>("FCorrectLayout", ElemwiseFixedLayoutUnknownOut<1, 1>)
+.set_attr<FInferPrecision>("FInferPrecision",
+  [](const NodeAttrs& attrs,
+   std::vector<TShape>* shapes,
+   std::vector<int>* iattr,
+   std::vector<int>* oattr) -> bool {
+  auto& param = cvm::get<CVMRightShiftParam>(attrs.parsed);
+  (*oattr)[0] = param.precision;
+  return true;
+})
 .add_argument("data", "Tensor", "input")
 .add_arguments(CVMRightShiftParam::__FIELDS__())
 .set_support_level(4);
