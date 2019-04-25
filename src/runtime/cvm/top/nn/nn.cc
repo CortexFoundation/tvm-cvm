@@ -116,6 +116,7 @@ NNVM_REGISTER_ELEMWISE_UNARY_OP(relu)
    max(input, 0)
 
 )code" NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwiseSamePrecision)
 .set_support_level(1);
 
 /*

@@ -179,7 +179,7 @@ Example::
 .set_attr<FCorrectLayout>("FCorrectLayout", ConcatenateCorrectLayout)
 .set_num_outputs(1)
 .set_num_inputs(kVarg)
-.set_attr<FInferPrecision>("FInferPrecision", ElemwiseSamePrecision)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwiseMaxPrecision)
 .set_support_level(1);
 
 // expand_dims

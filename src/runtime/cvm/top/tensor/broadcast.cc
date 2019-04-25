@@ -364,7 +364,7 @@ Example::
                                   [ 4.,  5.,  6.]]
 
 )code" NNVM_ADD_FILELINE)
-.set_attr<FInferPrecision>("FInferPrecision", ElemwiseSamePrecision);
+.set_attr<FInferPrecision>("FInferPrecision", ElemwisePrecision<8>);
 
 NNVM_REGISTER_BINARY_BROADCAST_OP(broadcast_greater, greater)
 .add_alias("__greater_symbol__")

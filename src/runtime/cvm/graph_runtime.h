@@ -269,7 +269,9 @@ class CvmRuntime : public ModuleNode {
       std::istringstream is(json_);
       dmlc::JSONReader reader(&is);
       reader.Read(&attrs.dict);
-      attrs.op->attr_parser(&attrs);
+      if (attrs.op->attr_parser) {
+        attrs.op->attr_parser(&attrs);        
+      }
     }
   };
   struct GraphAttr {

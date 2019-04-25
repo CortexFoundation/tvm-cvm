@@ -6,6 +6,7 @@
 #include "graph_runtime.h"
 #include <cvm/op.h>
 #include <cvm/op_attr_types.h>
+#include "top/elemwise_op_common.h""
 #include <cvm/graph_attr_types.h>
 
 //#define CHECK_ATTR_DEBUG
@@ -98,6 +99,10 @@ void CvmRuntime::SetupPrecision() {
       oprec.resize(num_outputs, -1);
       auto finfer = finfer_prec.get(inode.attrs.op, nullptr);
       // Call inference function of the operator.
+      if (finfer == nullptr) {
+        std::cout << "no infer precision method " << inode.attrs.op->name << std::endl;
+        finfer = cvm::top::ElemwiseSamePrecision;  
+      }
       if (!finfer(inode.attrs, &shapes, &iprec, &oprec)) {
         throw dmlc::Error(std::string("error with ") + inode.attrs.op->name);
       }
