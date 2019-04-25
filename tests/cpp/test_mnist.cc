@@ -85,11 +85,11 @@ int main()
 
         std::vector<unsigned long> tshape;
         std::vector<unsigned char> tdata;
-        npy::LoadArrayFromNumpy("data.npy", tshape, tdata);
+        npy::LoadArrayFromNumpy("/tmp/data.npy", tshape, tdata);
 
         DLTensor* x;
-        int in_ndim = 3;
-        int64_t in_shape[3] = {1, 28, 28};
+        int in_ndim = 4;
+        int64_t in_shape[4] = {1, 1, 28, 28};
         TVMArrayAlloc(in_shape, in_ndim, dtype_code, dtype_bits, dtype_lanes, device_type, device_id, &x);
         auto x_iter = static_cast<int*>(x->data);
         for (auto i = 0; i < 1*28*28; i++) {
