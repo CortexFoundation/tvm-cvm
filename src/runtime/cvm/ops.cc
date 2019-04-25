@@ -801,6 +801,7 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.broadcast_max")
     });
 
 /*********************************cuda op*********************************************/
+#ifdef CVM_RUNTIME_CUDA
 TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.elemwise_add")
 .set_body([](tvm::runtime::TVMArgs args, tvm::runtime::TVMRetValue *rv){
     CHECK(args.num_args == 3);
@@ -1286,6 +1287,7 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm_cuda.broadcast_max")
                 DEBUG_OP);
         CHECK(errorStr == NULL) << errorStr;
     });
+#endif // end of CVM_RUNTIME_CUDA
 }
 }
 

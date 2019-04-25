@@ -93,6 +93,8 @@ set(USE_GRAPH_RUNTIME_DEBUG OFF)
 # - OFF: disbale llvm
 # - /path/to/llvm-config: enable specific LLVM when multiple llvm-dev is available.
 set(USE_LLVM OFF)
+set(USE_CVM_RUNTIME OFF)
+set(USE_CVM_RUNTIME_CUDA OFF)
 
 #---------------------------------------------
 # Contrib libraries

@@ -316,6 +316,7 @@ nnvm_identity_ext = {
     'log2': {},
 
     'clip': OpExt('clip', [INT32_TYPE], [INT8_TYPE]),
+    'concatenate': {},
 
     'cvm_clip': {},
     'cvm_left_shift': {},
