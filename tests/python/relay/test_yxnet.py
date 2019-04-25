@@ -261,7 +261,6 @@ def test_naive():
         print (graph_json)
 
 if __name__ == "__main__":
-    #test_naive()
     test_yxnet_mnist()
 
     #  test_yxnet_dog_cat()

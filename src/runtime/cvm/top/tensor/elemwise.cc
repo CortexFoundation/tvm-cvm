@@ -16,6 +16,7 @@
 namespace cvm {
 namespace top {
 
+
 // undefined op
 NNVM_REGISTER_ELEMWISE_UNARY_OP(__undef__)
 .describe(R"code(undefined op.
@@ -342,7 +343,6 @@ NNVM_REGISTER_ELEMWISE_UNARY_OP(block_grad)
   "FInplaceIdentity", [](const NodeAttrs& attrs){
     return std::vector<bool>{true};
 })
-.set_attr<cvm::FGradient>("FGradient", MakeZeroGradNodes)
 .set_support_level(4);
 
 DMLC_REGISTER_PARAMETER(IndicatorParam);
@@ -419,6 +419,87 @@ Example::
 .add_argument("data", "NDArray-or-Symbol", "Input array.")
 .add_arguments(ClipParam::__FIELDS__())
 .set_support_level(4);
+
+DMLC_REGISTER_PARAMETER(CVMClipParam);
+
+NNVM_REGISTER_OP(cvm_clip)
+.describe(R"doc(CVM clip input with precision.
+
+.. math::
+	range = 2 ** (precision - (is_sign ? 1 : 0)) - 1
+	a_min = is_sign ? -range : 0
+	a_max = range
+	Y = clip(X, a_min=a_min, a_max=a_max)
+
+Example::
+
+	data = [275, 157, -23, -168, -275]
+
+	cvm_clip(data, precision=8, is_sign=True)
+	[127, 127, -23, -127, -127]
+
+	cvm_clip(data, precision=8, is_sign=False)
+	[255, 157, 0, 0, 0]
+)doc" NNVM_ADD_FILELINE)
+.set_num_inputs(1)
+.set_num_outputs(1)
+.set_attr_parser(ParamParser<CVMClipParam>)
+.set_attr<FGetAttrDict>("FGetAttrDict", ParamGetAttrDict<CVMClipParam>)
+.set_attr<cvm::FInferShape>("FInferShape", ElemwiseShape<1, 1>)
+.set_attr<cvm::FInferType>("FInferType", ElemwiseType<1, 1>)
+.set_attr<cvm::FCorrectLayout>("FCorrectLayout", ElemwiseFixedLayoutUnknownOut<1, 1>)
+.add_argument("data", "Tensor", "input")
+.add_arguments(CVMClipParam::__FIELDS__())
+.set_support_level(4);
+
+DMLC_REGISTER_PARAMETER(CVMLeftShiftParam);
+
+NNVM_REGISTER_OP(cvm_left_shift)
+.describe(R"code(CVM left shift with precision-aware clip.
+
+.. math::
+	assert shift_bit > 0
+	tmp = X << shift_bit
+	Y = cvm_clip(tmp, precision)
+)code" NNVM_ADD_FILELINE)
+.set_num_inputs(1)
+.set_num_outputs(1)
+.set_attr_parser(ParamParser<CVMLeftShiftParam>)
+.set_attr<FGetAttrDict>("FGetAttrDict", ParamGetAttrDict<CVMLeftShiftParam>)
+.set_attr<cvm::FInferShape>("FInferShape", ElemwiseShape<1, 1>)
+.set_attr<cvm::FInferType>("FInferType", ElemwiseType<1, 1>)
+.set_attr<cvm::FCorrectLayout>("FCorrectLayout", ElemwiseFixedLayoutUnknownOut<1, 1>)
+.add_argument("data", "Tensor", "input")
+.add_arguments(CVMLeftShiftParam::__FIELDS__())
+.set_support_level(4);
+
+DMLC_REGISTER_PARAMETER(CVMRightShiftParam);
+
+NNVM_REGISTER_OP(cvm_right_shift)
+.describe(R"code(CVM right shift with precision-aware clip.
+
+The right shift is equal to float number round divide operator,
+which means to implement via tricky equation.
+
+.. math::
+	assert shift_bit > 0
+	tmp = X >> (shift_bit - 1)
+	tmp = tmp + 1
+	tmp = tmp >> 1
+	Y = cvm_clip(tmp, precision)
+)code" NNVM_ADD_FILELINE)
+.set_num_inputs(1)
+.set_num_outputs(1)
+.set_attr_parser(ParamParser<CVMRightShiftParam>)
+.set_attr<FGetAttrDict>("FGetAttrDict", ParamGetAttrDict<CVMRightShiftParam>)
+.set_attr<cvm::FInferShape>("FInferShape", ElemwiseShape<1, 1>)
+.set_attr<cvm::FInferType>("FInferType", ElemwiseType<1, 1>)
+.set_attr<cvm::FCorrectLayout>("FCorrectLayout", ElemwiseFixedLayoutUnknownOut<1, 1>)
+.add_argument("data", "Tensor", "input")
+.add_arguments(CVMRightShiftParam::__FIELDS__())
+.set_support_level(4);
+
+
 
 }  // namespace top
 }  // namespace cvm

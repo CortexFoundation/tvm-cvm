@@ -94,20 +94,6 @@ NNVM_REGISTER_ELEMWISE_UNARY_OP(relu)
    max(input, 0)
 
 )code" NNVM_ADD_FILELINE)
-.set_attr<FGradient>(
-  "FGradient", [](const NodePtr& n,
-                  const std::vector<NodeEntry>& ograds) {
-    // y = relu(x)
-    // grad = indicator(x > 0) * ograd
-    NodeEntry sub0 = MakeNode("zeros_like", n->attrs.name + "_sub0",
-                              {n->inputs[0]});
-    NodeEntry sub1 = MakeNode("greater", n->attrs.name + "_sub1",
-                              {n->inputs[0], sub0}, {{"exclude", "true"}});
-    return std::vector<NodeEntry>{
-      MakeNode("elemwise_mul", n->attrs.name + "_grad",
-               {ograds[0], sub1})
-    };
-})
 .set_support_level(1);
 
 /*
@@ -249,39 +235,7 @@ NNVM_REGISTER_OP(softmax)
 .set_attr<FInferShape>("FInferShape", ElemwiseShape<1, 1>)
 .set_attr<FInferType>("FInferType", ElemwiseType<1, 1>)
 .set_attr<FCorrectLayout>("FCorrectLayout", ElemwiseFixedLayoutCopyToOut<1, 1>)
-.set_support_level(1)
-.set_attr<FGradient>(
-  "FGradient", [](const NodePtr& n,
-                  const std::vector<NodeEntry>& ograds) {
-    // grad_x = grad_y dot jacobian of softmax
-    //
-    // jacobian of softmax
-    // [-y1y1 + y1, -y1y2,        ...    ]
-    // [ ...      , -y2y2 + y2,   ...    ]
-    // [ ...                      ...    ]
-    // [ ...                  ,-ynyn + yn]
-    //
-    // grad_x =
-    // [-y1*(ograd1*y1 - ograd1 + ograd2*y2 + ...),
-    //  -y2*(ograd1*y1 - ograd2 + ograd2*y2 + ...),
-    //  ...
-    //  -yn*(ograd1*y1 - ogradn + ograd2*y2 + ...)]
-
-    // grad_x = ograd elemwise_mul output
-    // grad_x = sum(grad_x, keepdim, axis)
-    // grad_x = grad_x broadcast_mul output
-    // grad_x = neg grad_x
-    // grad_x = grad_x + ograd elemwise_mul output
-    const SoftmaxParam& param = cvm::get<SoftmaxParam>(n->attrs.parsed);
-    NodeEntry output =  NodeEntry{n, 0, 0};
-    NodeEntry sub0 = MakeNode("elemwise_mul", n->attrs.name + "_grad_sub0", {ograds[0], output});
-    NodeEntry sub1 = MakeNode("sum", n->attrs.name + "_grad_sub1", {sub0},
-                              {{"axis", std::to_string(param.axis)}, {"keepdims", "true"}});
-    NodeEntry sub2 = MakeNode("broadcast_mul", n->attrs.name + "_grad_sub2", {sub1, output});
-    return std::vector<NodeEntry> {
-      MakeNode("elemwise_sub", n->attrs.name + "_grad", {sub0, sub2})
-    };
-});
+.set_support_level(1);
 */
 /*
 // log_softmax
@@ -302,38 +256,6 @@ NNVM_REGISTER_OP(log_softmax)
 .set_attr<FInferShape>("FInferShape", ElemwiseShape<1, 1>)
 .set_attr<FInferType>("FInferType", ElemwiseType<1, 1>)
 .set_attr<FCorrectLayout>("FCorrectLayout", ElemwiseFixedLayoutCopyToOut<1, 1>)
-.set_attr<FGradient>(
-  "FGradient", [](const NodePtr& n,
-                  const std::vector<NodeEntry>& ograds) {
-    // grad_x = grad_y dot jacobian of logsoftmax
-    //
-    // jacobian of logsoftmax
-    // [-y1 + 1, -y2,        ...    ]
-    // [ ...   , -y2 + 1,    ...    ]
-    // [ ...                 ...    ]
-    // [ ...                ,-yn + 1]
-    //
-    // grad_x =
-    // [ograd1 - exp(y1)*(ograd1 + ... + ogradn),
-    //  ograd2 - exp(y2)*(ograd1 + ... + ogradn),
-    //  ...
-    //  ogradn - exp(yn)*(ograd1 + ... + ogradn)]
-
-    // grad_x = sum(ograd, keepdim, axis)
-    // sigma = exp(output)
-    // grad_x = grad_x elemwise_mul sigma
-    // grad_x = neg grad_x
-    // grad_x = grad_x + ograd
-    const SoftmaxParam& param = cvm::get<SoftmaxParam>(n->attrs.parsed);
-    NodeEntry output =  NodeEntry{n, 0, 0};
-    NodeEntry sub0 = MakeNode("sum", n->attrs.name + "_grad_sub0", {ograds[0]},
-                              {{"axis", std::to_string(param.axis)}, {"keepdims", "true"}});
-    NodeEntry sub1 = MakeNode("exp", n->attrs.name + "_grad_sub1", {output});
-    NodeEntry sub2 = MakeNode("broadcast_mul", n->attrs.name + "_grad_sub2", {sub0, sub1});
-    return std::vector<NodeEntry> {
-      MakeNode("elemwise_sub", n->attrs.name + "_grad", {ograds[0], sub2})
-    };
-})
 .set_support_level(1);
 
 // leaky_relu
@@ -354,26 +276,6 @@ NNVM_REGISTER_OP(leaky_relu)
 .set_attr<FInferShape>("FInferShape", ElemwiseShape<1, 1>)
 .set_attr<FInferType>("FInferType", ElemwiseType<1, 1>)
 .set_attr<FCorrectLayout>("FCorrectLayout", ElemwiseArbitraryLayout<1, 1>)
-.set_attr<FGradient>(
-  "FGradient", [](const NodePtr& n,
-                  const std::vector<NodeEntry>& ograds) {
-    // y = leak_relu(x)
-    // grad = indicator(x > 0) + alpha * indicator(x < 0)
-    const LeakyReLUParam& param = cvm::get<LeakyReLUParam>(n->attrs.parsed);
-    NodeEntry zero = MakeNode("zeros_like", n->attrs.name + "_grad_zero",
-                              {n->inputs[0]});
-    NodeEntry sub0 = MakeNode("greater", n->attrs.name + "_pos_grad",
-                              {n->inputs[0], zero});
-    NodeEntry sub1 = MakeNode("less", n->attrs.name + "_neg_grad",
-                              {n->inputs[0], zero});
-    NodeEntry sub2 = MakeNode("__mul_scalar__", n->attrs.name + "_neg_mul_2",
-                              {sub1},
-                              {{"scalar", std::to_string(param.alpha)}});
-    NodeEntry sub3 = MakeNode("elemwise_add", n->attrs.name + "_sub3", {sub0, sub2});
-    return std::vector<NodeEntry>{
-      MakeNode("elemwise_mul", n->attrs.name + "_grad", {ograds[0], sub3})
-    };
-})
 .set_support_level(1);
 
 // prelu

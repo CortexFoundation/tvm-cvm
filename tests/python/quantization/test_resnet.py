@@ -284,8 +284,11 @@ def test_sym_nnvm(batch_size=10, iter_num=10):
     load_parameters(graph, params, ctx=mx_ctx)
     sim.load_ins_ext(params, inputs_ext)
     def graph_func(data):
-        data = sim.load_real_data(data, 'data', params)
-        return graph.forward(data.as_in_context(mx_ctx))
+        data = sim.load_real_data(data, 'data', inputs_ext)
+        np.save("/tmp/resnet18/data.npy", data.asnumpy().astype('int8'))
+        res = graph.forward(data.as_in_context(mx_ctx))
+        np.save("/tmp/resnet18/result.npy", res.asnumpy().astype('int8'))
+        return res
 
     nnvm_sym, _ = nnvm.frontend.from_mxnet(sym)
     nnvm_sym, real_params = nnvm_realize(nnvm_sym, params, inputs_ext)
@@ -302,25 +305,23 @@ def test_sym_nnvm(batch_size=10, iter_num=10):
     with nnvm.compiler.build_config(opt_level=0):
         deploy_graph, lib, real_params = nnvm.compiler.build(
             nnvm_sym, target=target, shape=inputs_shape,
-            params=real_params, dtype=use_dtype, runtime="tvm")
+            params=real_params, dtype=use_dtype, runtime="cvm")
     with open(dump_symbol, "w") as fout:
         fout.write(deploy_graph.json())
     with open(dump_params, "wb") as fout:
         param_bytes = nnvm.compiler.save_param_dict(real_params)
         fout.write(param_bytes)
-    lib.export_library(dump_lib)
 
-    exit()
+    # module = graph_runtime.create(deploy_graph, lib, tvm_ctx)
+    # module.load_params(param_bytes)
+    # def nnvm_real(data):
+    #     data = sim.load_real_data(data, 'data', inputs_ext)
+    #     data = tvm.nd.array(data.asnumpy(), tvm_ctx)
+    #     module.run(data=data.asnumpy())
+    #     res = nd.array(module.get_output(0).asnumpy())
+    #     return res
 
-    module = graph_runtime.create(deploy_graph, lib, tvm_ctx)
-    module.load_params(param_bytes)
-    def nnvm_real(data):
-        data = sim.load_quant_data(data, 'data', params)
-        data = tvm.nd.array(data.asnumpy(), tvm_ctx)
-        module.run(data=data.asnumpy())
-        return nd.array(module.get_output(0).asnumpy())
-
-    multi_eval_accuracy(graph_func, data_iter_func, nnvm_real,
+    multi_eval_accuracy(graph_func, data_iter_func, # nnvm_real,
             iter_num=iter_num, logger=logger)
 
 def test_sym_pass(quant_flag, batch_size=10, iter_num=10):
@@ -407,6 +408,6 @@ if __name__ == "__main__":
 
     # test_nnvm_load(batch_size=16, iter_num=10)
     # test_sym_pass(quant_flag, batch_size=16, iter_num=10000)
-    test_sym_nnvm(batch_size=100, iter_num=10)
+    test_sym_nnvm(batch_size=1, iter_num=1)
 
 

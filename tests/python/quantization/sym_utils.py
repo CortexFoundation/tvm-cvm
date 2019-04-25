@@ -323,21 +323,26 @@ nnvm_identity_ext = {
 }
 
 """Mxnet Symbol Operator Extension
-QUANT_TYPE:
-    0: No change
-    1: Rewrite
-    2: Op fuse
+Attribute Options:
+    0   : whether flag by default is support
+    1...: optional type
 """
 mx_identity_ext = {
     'null': {},
     'Convolution': {},
     'BatchNorm': {},
     'Pooling': {
-        'pool_type': ['max', 'avg'],
+        'pool_type': [False, 'max', 'avg'],
+        'count_include_pad': [True, 'True'],
+        # 'pooling_convention': [True, 'valid'],
     },
     'Flatten': {},
     'FullyConnected': {},
     'Activation': {
-        'act_type': ['relu'], # Only supported relu
+        'act_type': [False, 'relu'], # Only supported relu
     },
+    'Dropout': {
+        'mode': [True, 'training'],
+    },
+    'Concat': {},
 }

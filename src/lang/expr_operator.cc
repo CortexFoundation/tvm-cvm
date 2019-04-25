@@ -445,7 +445,7 @@ Expr log2(Expr x) {
 	const IntImm* px = x.as<IntImm>();
 	if (px) {
 		CHECK(px->value > 0);
-		for (int i = 0; i < 64; i++) 
+		for (int i = 0; i < 64; i++)
 			if (px->value <= (int64_t(1) << i)) return IntImm::make(x.type(), i);
 		return IntImm::make(x.type(), 64);
 	}

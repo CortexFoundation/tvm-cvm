@@ -133,7 +133,7 @@ def test_sym_pass(batch_size=10, iter_num=10):
     qgraph = nn.SymbolBlock(qsym, inputs)
     utils.load_parameters(qgraph, qparams, ctx=ctx)
     def simulate(data):
-        #  data = sim.load_sim_data(data, 'data', inputs_ext)
+        # data = sim.load_sim_data(data, 'data', inputs_ext)
         data = sim.load_real_data(data, 'data', inputs_ext)
         return qgraph.forward(data.as_in_context(ctx))
 
@@ -144,5 +144,5 @@ if __name__ == '__main__':
     utils.log_init()
 
     # zoo.save_mobilenet1_0()
-    # test_sym_pass(16, 10)
-    test_sym_nnvm(1, 100)
+    test_sym_pass(16, 10)
+    # test_sym_nnvm(1, 100)

@@ -375,27 +375,51 @@ def sym_infer_shape(symbol, params, inputs_ext):
 
     return infer_shapes
 
-def _sym_rewrite(sym, params, graph, inputs_ext, infer_shapes):
-    logger = logging.getLogger('log.calib.symbol.rewrite')
+def _sym_check(sym, params, graph, inputs_ext):
+    logger = logging.getLogger('log.prepare.symbol.check')
+    name, op_name = sym.attr('name'), sym.attr('op_name')
+    if op_name not in mx_identity_ext:
+        logger.error("%s(%s) has not been considered in quantization",
+                name, op_name)
+        return sym, params
+    attr = sym.list_attr()
+    std_attr = mx_identity_ext[op_name]
+    for k,v in std_attr.items():
+        if k in attr:
+            assert attr[k] in v, \
+                "%s(%s attr=%s) not match attribute %s (%s vs. %s)" \
+                % (name, op_name, attr, k, attr[k], v)
+        else:
+            assert v[0], "%s(%s attr=%s) not contains attribute %s" \
+                % (name, op_name, attr, k)
 
+    if op_name == 'Pooling':
+        msg = "%s(%s attr=%s) not match attribute %s (%s vs. %s)"
+        if 'pooling_convention' in attr:
+            pooling_convention = attr['pooling_convention']
+            if pooling_convention == 'full':
+                assert 'global_pool' in attr and \
+                    attr['global_pool'] == 'True', msg \
+                    % (name, op_name, attr, 'pooling_convention&global_pool',
+                    [attr['pooling_convention'], attr['global_pool']],
+                    ['full', 'True'])
+            else:
+                assert pooling_convention == 'valid', msg \
+                    % (name, op_name, attr, 'pooling_convention',
+                    attr['pooling_convention'], 'valid')
+    return sym, params
+
+def _sym_rewrite(sym, params, graph, inputs_ext, infer_shapes):
+    logger = logging.getLogger('log.prepare.symbol.rewrite')
     name = sym.attr('name')
     op_name = sym.attr('op_name')
     childs = sym_iter(sym.get_children())
     attr = sym.list_attr()
-
     node = sym
     if op_name == 'Pooling':
         pool_type = attr['pool_type']
-        pool_size = attr["kernel"]
         is_global = attr["global_pool"]
-
-        unchangable_pool_type = ["max", "sum"]
-        rewritable_pool_type = ["avg"]
-
-        if pool_type == 'avg':
-            assert is_global == 'True', "Only supported GlobalAvgPool2D \
-                    instead of attrs(%s)"%(attr)
-
+        if pool_type == 'avg' and is_global == 'True':
             input_name = childs[0].attr('name')
             input_shape = infer_shapes[input_name]
             assert len(input_shape) == 4
@@ -410,6 +434,29 @@ def _sym_rewrite(sym, params, graph, inputs_ext, infer_shapes):
 
             node = mx.sym.sum(childs[0], axis=(2, 3))
             node = mx.sym.broadcast_mul(node, scale_sym)
+        elif pool_type == 'avg':
+            X = childs[0]
+            X_shape = infer_shapes[X.attr('name')]
+            in_channel = X_shape[1]
+            conv_attr = {
+                'no_bias': 'True',
+                'dilate': '(1, 1)',
+                'kernel': attr['kernel'],
+                'stride': attr['stride'],
+                'pad': attr['pad'],
+                'layout': 'NCHW',
+                'num_filter': in_channel,
+                'num_group': in_channel,
+            }
+            kernel = attr['kernel'][1:-1].split(',')
+            kernel = [int(s) for s in kernel]
+            conv_name = name.replace('_fwd', '') + '_conv'
+            W_name = conv_name + '_weight'
+            assert W_name not in graph
+            W_shape = (in_channel, 1, kernel[0], kernel[1])
+            graph[W_name] = W = mx.sym.var(W_name, shape=W_shape)
+            params[W_name] = nd.full(shape=W_shape, val=(1/np.product(kernel)))
+            node = mx.sym.Convolution(X, W, **conv_attr, name=conv_name)
         else:
             assert pool_type == 'max', "Unsupported Pooling \
                     %s(%s, pool_type=%s)"%(op_name, name, pool_type)
@@ -451,6 +498,10 @@ def _sym_rewrite(sym, params, graph, inputs_ext, infer_shapes):
 
         logger.info("fuse Convolution=%-40s and batchnorm=%-40s",
                 conv_sym.attr('name'), name)
+    elif op_name == 'Dropout':
+    # dropout is identity during testing
+        node = childs[0]
+    infer_shapes[node.attr('name')] = infer_shapes[name]
     return node, params
 
 def _fuse_bias(sym, params, graph, inputs_ext, infer_shapes):
@@ -484,6 +535,10 @@ def _fuse_bias(sym, params, graph, inputs_ext, infer_shapes):
 
 def sym_quant_prepare(symbol, params, inputs_ext):
     logger = logging.getLogger('log.sym.pass.prepare')
+
+    topo_visit(symbol, params, get_op=get_mxnet_op,
+            logger=logger, inputs_ext=inputs_ext,
+            callback=_sym_check)
 
     infer_shapes = sym_infer_shape(symbol, params, inputs_ext)
     sym, params = topo_visit(symbol, params, get_op=get_mxnet_op,

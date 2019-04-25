@@ -21,78 +21,30 @@ using cvm::TShape;
 namespace tvm {
 namespace runtime {
 
-void CvmRuntime::SetupAttr() try {
-
-	SetupShape();
+bool CvmRuntime::CheckAttr() {
+  try {
+    SetupShape();
 #ifdef CHECK_ATTR_DEBUG
-	std::cout << "check shape pass" << std::endl;
+    std::cout << "check shape pass" << std::endl;
 #endif
 
-	SetupType();
+    SetupType();
 #ifdef CHECK_ATTR_DEBUG
-	std::cout << "check type pass" << std::endl;
+    std::cout << "check type pass" << std::endl;
 #endif
 
-  SetupPrecision();
+    SetupPrecision();
 #ifdef CHECK_ATTR_DEBUG
-	std::cout << "infer precision pass" << std::endl;
-	for (auto p:  attrs_.precision) {
-    std::cout << p << ' ';
-  }
-  std::cout << std::endl;
-#endif
-} catch (dmlc::Error &e) {
-	std::cout << e.what();
-}
-
-void CvmRuntime::SetupPrecision() {
-  std::vector<Node> &idx = nodes_;
-  std::vector<int> &precision = attrs_.precision;
-  precision.resize(nodes_.size(), -1);
-  // Temp space for shape inference.
-  std::vector<int> iprec, oprec;
-  auto finfer_prec = FInferPrecisionMap::getInstance();
-
-  // inference step function for nid
-  auto infer_prec = [&](uint32_t nid) {
-    const auto& inode = idx[nid];
-    if (inode.op_type == "null") {
-      if (precision[nid] == -1) {
-         precision[nid] = 8;
-      }
-      // Variable node. No operator. Only one output entry.
-    } else {
-      const uint32_t num_inputs = inode.param.num_inputs;
-      const uint32_t num_outputs = inode.param.num_outputs;
-      // Forward operator inference.
-      iprec.resize(num_inputs, -1);
-      for (uint32_t i = 0; i < iprec.size(); ++i) {
-        iprec[i] = precision[entry_id(inode.inputs[i])];
-      }
-			CHECK_GE(num_outputs, 1) << "an operator has at least 1 outputs";
-			oprec.resize(num_outputs, -1);
-      auto finfer = finfer_prec.get(inode.attrs.op->name);
-			// Call inference function of the operator.
-			cvm::NodeAttrs attrs;
-			if (!finfer(inode.attrs, &iprec, &oprec)) {
-				throw dmlc::Error(std::string("error with ") + inode.attrs.op->name);
-			}
-      // Save to the result map.
-      for (uint32_t i = 0; i < num_inputs; ++i) {
-          CHECK(iprec[i] <= 32)
-             << "Check precision failed, "
-             << "expected to be at most " << iprec[i]
-             << " but " << precision[entry_id(inode.inputs[i])];
-					precision[entry_id(inode.inputs[i])] = iprec[i];
-			}
-			for (uint32_t i = 0; i < num_outputs; ++i) {
-				precision[entry_id(nid, i)] = oprec[i];
-			}
+    std::cout << "infer precision pass" << std::endl;
+    for (auto p:  attrs_.precision) {
+      std::cout << p << ' ';
     }
-  };
-
-  for (uint32_t nid = 0; nid < idx.size(); ++nid) {
-    infer_prec(nid);
+    std::cout << std::endl;
+#endif
+    return true;
+  } catch (dmlc::Error &e) {
+    std::cout << e.what();
+    return false;
   }
 }
 
@@ -114,51 +66,105 @@ std::vector<TShape> GetTShapeArray(const std::vector<std::vector<int64_t> > &sha
   return ret;
 }
 
+void CvmRuntime::SetupPrecision() {
+  std::vector<Node> &idx = nodes_;
+  std::vector<int> &precision = attrs_.precision;
+  const auto rshape = GetTShapeArray(attrs_.shape);
+  precision.resize(nodes_.size(), -1);
+  // Temp space for shape inference.
+  std::vector<int> iprec, oprec;
+  std::vector<TShape> shapes;
+  auto finfer_prec = FInferPrecisionMap::getInstance();
+
+  // inference step function for nid
+  auto infer_prec = [&](uint32_t nid) {
+    const auto& inode = idx[nid];
+    if (inode.op_type == "null") {
+      if (precision[nid] == -1) {
+         precision[nid] = 8;
+      }
+      // Variable node. No operator. Only one output entry.
+    } else {
+      const uint32_t num_inputs = inode.param.num_inputs;
+      const uint32_t num_outputs = inode.param.num_outputs;
+      // Forward operator inference.
+      iprec.resize(num_inputs, -1);
+      shapes.resize(num_inputs, TShape());
+      for (uint32_t i = 0; i < iprec.size(); ++i) {
+        iprec[i] = precision[entry_id(inode.inputs[i])];
+        shapes[i] = rshape[entry_id(inode.inputs[i])];
+      }
+      CHECK_GE(num_outputs, 1) << "an operator has at least 1 outputs";
+      oprec.resize(num_outputs, -1);
+      auto finfer = finfer_prec.get(inode.attrs.op->name);
+      // Call inference function of the operator.
+      if (!finfer(inode.attrs, &shapes, &iprec, &oprec)) {
+        throw dmlc::Error(std::string("error with ") + inode.attrs.op->name);
+      }
+      // Save to the result map.
+      for (uint32_t i = 0; i < num_inputs; ++i) {
+          CHECK(iprec[i] <= 32)
+             << "Check precision failed, "
+             << "expected to be at most " << iprec[i]
+             << " but " << precision[entry_id(inode.inputs[i])];
+          precision[entry_id(inode.inputs[i])] = iprec[i];
+      }
+      for (uint32_t i = 0; i < num_outputs; ++i) {
+        precision[entry_id(nid, i)] = oprec[i];
+      }
+    }
+  };
+
+  for (uint32_t nid = 0; nid < idx.size(); ++nid) {
+    infer_prec(nid);
+  }
+}
+
 int64_t CvmRuntime::GetOps() {
   auto &idx = nodes_;
   const auto rshape = GetTShapeArray(attrs_.shape);
   // inference step function for nid
-	int64_t ret = 0;
-	std::vector<std::string> ops;
-	std::unordered_map<std::string, int64_t> opcount;
+  int64_t ret = 0;
+  std::vector<std::string> ops;
+  std::unordered_map<std::string, int64_t> opcount;
   for (uint32_t nid = 0; nid < idx.size(); ++nid) {
-		auto inode = idx[nid];
-		if (inode.op_type == "null") {
-			ret += rshape[nid].Size();
-		} else {
-			auto op = idx[nid].attrs.op->name;
-			if (opcount.find(op) == opcount.end()) {
-				opcount[op] = 0;
-				ops.push_back(op);
-			}
+    auto inode = idx[nid];
+    if (inode.op_type == "null") {
+      ret += rshape[nid].Size();
+    } else {
+      auto op = idx[nid].attrs.op->name;
+      if (opcount.find(op) == opcount.end()) {
+        opcount[op] = 0;
+        ops.push_back(op);
+      }
 
-			if (op == "dense") {
-				auto shape1 = rshape[inode.inputs[0].node_id];
-				auto shape2 = rshape[inode.inputs[1].node_id];
-				auto t = shape1[0] * shape1[1] * shape2[0];
-				ret += t;
-				opcount[op] += t;
-			} else if (op == "conv2d") {
-				auto shape1 = rshape[inode.inputs[0].node_id];
-				auto shape2 = rshape[inode.inputs[1].node_id];
-				auto oshape = rshape[nid];
-				auto t = ((int64_t)shape2[1] * shape2[2] * shape2[3] + 1)
-								* shape1[2] * shape1[3] * shape2[0] * 2;
-				ret += t;
-				opcount[op] += t;
-			} else {
-				auto t = rshape[nid].Size();
-				ret += t;
-				opcount[op] += t;
-			}
-		}
-	}
+      int64_t t;
+      if (op == "dense") {
+        auto shape1 = rshape[inode.inputs[0].node_id];
+        auto shape2 = rshape[inode.inputs[1].node_id];
+        t = static_cast<int64_t>(shape1[0]) * shape1[1] * shape2[0];
+      } else if (op == "conv2d") {
+        auto shape1 = rshape[inode.inputs[0].node_id];
+        auto shape2 = rshape[inode.inputs[1].node_id];
+        t = (static_cast<int64_t>(shape2[1]) * shape2[2] * shape2[3] + 1)
+           * static_cast<int64_t>(shape1[2]) * shape1[3] * shape2[0] * 2;
+      } else if (op == "max_pool2d") {
+        t = rshape[nid].Size();
+        auto& param = cvm::get<cvm::top::MaxPool2DParam>(inode.attrs.parsed);
+        t *= param.pool_size.Size();
+      } else {
+         t = rshape[nid].Size();
+      }
+      ret += t;
+      opcount[op] += t;
+    }
+  }
 #ifdef CHECK_ATTR_DEBUG
-	for (auto op: ops) {
-  	std::cout << op << ' ' << opcount[op] << std::endl;
+  for (auto op: ops) {
+    std::cout << op << ' ' << opcount[op] << std::endl;
   }
 #endif
-	return ret;
+  return ret;
 }
 
 void CvmRuntime::SetupShape() {
@@ -185,35 +191,35 @@ void CvmRuntime::SetupShape() {
         ishape[i] = rshape[entry_id(inode.inputs[i])];
       }
       oshape.resize(num_outputs, TShape());
-			for (uint32_t i = 0; i < oshape.size(); ++i) {
-				oshape[i] = TShape();
-			}
+      for (uint32_t i = 0; i < oshape.size(); ++i) {
+        oshape[i] = TShape();
+      }
       // which raise an error if the op has not been registered.
       auto finfer = finfer_shape.get(inode.attrs.op, nullptr);
-			//TODO: flatten op attr unprovided
-			if (finfer != nullptr) {
-				// Call inference function of the operator.
-				try {
-					finfer(inode.attrs, &ishape, &oshape);
-				} catch (const std::exception& e) {
-					throw dmlc::Error(e.what() + std::string(" with ") + inode.attrs.op->name);
-				}
-			} else {
-				throw dmlc::Error(std::string("check shape method is undefined with") + inode.attrs.op->name);
-			}
+      //TODO: flatten op attr unprovided
+      if (finfer != nullptr) {
+        // Call inference function of the operator.
+        try {
+          finfer(inode.attrs, &ishape, &oshape);
+        } catch (const std::exception& e) {
+          throw dmlc::Error(e.what() + std::string(" with ") + inode.attrs.op->name);
+        }
+      } else {
+        throw dmlc::Error(std::string("check shape method is undefined with") + inode.attrs.op->name);
+      }
       // Save to the result map.
       for (uint32_t i = 0; i < num_inputs; ++i) {
         CHECK_EQ(ishape[i], rshape[entry_id(inode.inputs[i])])
-					<< "Check input shape failed, "
-					<< "expected to be " << ishape[i]
-					<< " but " << rshape[entry_id(inode.inputs[i])];
+          << "Check input shape failed, "
+          << "expected to be " << ishape[i]
+          << " but " << rshape[entry_id(inode.inputs[i])];
       }
-			for (uint32_t i = 0; i < num_outputs; ++i) {
-				CHECK_EQ(oshape[i], rshape[entry_id(nid, i)])
+      for (uint32_t i = 0; i < num_outputs; ++i) {
+        CHECK_EQ(oshape[i], rshape[entry_id(nid, i)])
           << "Check output shape failed, "
           << "expected to be " << oshape[i]
           << " but " << rshape[entry_id(nid, i)];
-			}
+      }
     }
   };
 
@@ -257,7 +263,7 @@ void CvmRuntime::SetupType() {
       Op::GetAttr<cvm::FInferNodeEntryAttr<int> >("FInferType");
   // reshape shape vector
 
-	// Temp space for shape inference.
+  // Temp space for shape inference.
   std::vector<int> itype, otype;
 
   // inference step function for nid
@@ -274,34 +280,34 @@ void CvmRuntime::SetupType() {
         itype[i] = rtype[entry_id(inode.inputs[i])];
       }
       otype.resize(num_outputs, -1);
-			for (uint32_t i = 0; i < num_outputs; ++i) {
-				otype[i] = -1;
-			}
+      for (uint32_t i = 0; i < num_outputs; ++i) {
+        otype[i] = -1;
+      }
       // which raise an error if the op has bit been registered.
       auto finfer = finfer_type.get(inode.attrs.op, SameType);
-			if (finfer != nullptr) {
-				try {
-					cvm::NodeAttrs attrs;
-					finfer(inode.attrs, &itype, &otype);
-				} catch (const std::exception& e) {
-					throw dmlc::Error(e.what() + std::string(" with ") + inode.attrs.op->name);
-				}
-			} else {
-				throw dmlc::Error(std::string("check type method is undefined with") + inode.attrs.op->name);
-			}
+      if (finfer != nullptr) {
+        try {
+          cvm::NodeAttrs attrs;
+          finfer(inode.attrs, &itype, &otype);
+        } catch (const std::exception& e) {
+          throw dmlc::Error(e.what() + std::string(" with ") + inode.attrs.op->name);
+        }
+      } else {
+        throw dmlc::Error(std::string("check type method is undefined with") + inode.attrs.op->name);
+      }
       // Save to the result map.
       for (uint32_t i = 0; i < num_inputs; ++i) {
         CHECK_EQ(itype[i], rtype[entry_id(inode.inputs[i])])
           << "Check type failed, "
           << "expected to be " << itype[i]
           << " but " << rtype[entry_id(inode.inputs[i])];
-			}
-			for (uint32_t i = 0; i < num_outputs; ++i) {
-				CHECK_EQ(otype[i], rtype[entry_id(nid, i)])
-					<< "Check type failed, "
-					<< "expected to be " << otype[i]
-					<< " but " << rtype[entry_id(nid, i)];
-			}
+      }
+      for (uint32_t i = 0; i < num_outputs; ++i) {
+        CHECK_EQ(otype[i], rtype[entry_id(nid, i)])
+          << "Check type failed, "
+          << "expected to be " << otype[i]
+          << " but " << rtype[entry_id(nid, i)];
+      }
     }
   };
 
