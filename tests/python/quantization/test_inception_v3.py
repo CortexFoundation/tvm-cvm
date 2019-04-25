@@ -62,21 +62,21 @@ def test_sym_nnvm(batch_size=10, iter_num=10):
     nnvm_graph = nnvm.graph.create(nnvm_sym)
     save_symbol_file, _ = get_dump_fname("nnvm.realize")
     with open(save_symbol_file, "w") as fout:
-       fout.write(nnvm_graph.json())
+      fout.write(nnvm_graph.json())
 
     use_dtype = "int32"
     for key, value in list(real_params.items()):
-        real_params[key] = tvm.nd.array(value.asnumpy().astype(use_dtype), tvm_ctx)
+       real_params[key] = tvm.nd.array(value.asnumpy().astype(use_dtype), tvm_ctx)
 
     with nnvm.compiler.build_config(opt_level=0): #, add_pass=["PrecomputePrune"]):
-        deploy_graph, lib, real_params = nnvm.compiler.build(
-            nnvm_sym, target=target, shape=inputs_shape,
-            params=real_params, dtype=use_dtype)
-    with open(dump_symbol, "w") as fout:
-        fout.write(deploy_graph.json())
-    with open(dump_params, "wb") as fout:
-        param_bytes = nnvm.compiler.save_param_dict(real_params)
-        fout.write(param_bytes)
+       deploy_graph, lib, real_params = nnvm.compiler.build(
+           nnvm_sym, target=target, shape=inputs_shape,
+           params=real_params, dtype=use_dtype)
+    # with open(dump_symbol, "w") as fout:
+    #     fout.write(deploy_graph.json())
+    # with open(dump_params, "wb") as fout:
+    #     param_bytes = nnvm.compiler.save_param_dict(real_params)
+    #     fout.write(param_bytes)
 
     # module = graph_runtime.create(deploy_graph, lib, tvm_ctx)
     # module.load_params(param_bytes)

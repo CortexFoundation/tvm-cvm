@@ -36,7 +36,7 @@ std::unordered_map<std::string,InferFunc> InferFuncMap({
 inline bool InferPrecisionForward(const NodeAttrs& attrs,
                      std::vector<int> *iattr,
                      std::vector<int> *oattr) {
-    std::cout << attrs.op->name << ' ' << iattr->size() << ' ' << oattr->size() << std::endl;
+    // std::cout << attrs.op->name << ' ' << iattr->size() << ' ' << oattr->size() << std::endl;
 
     return true;
 }

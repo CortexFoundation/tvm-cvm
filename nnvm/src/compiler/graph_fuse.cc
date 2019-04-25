@@ -309,8 +309,8 @@ nnvm::Graph GraphFuse(nnvm::Graph g) {
   const DTypeVector& dtype_vec = g.GetAttr<DTypeVector>("dtype");
   const GroupVec& group_vec = g.GetAttr<GroupVec>("group_root");
   const PatternVec& pattern_vec = g.GetAttr<PatternVec>("pattern");
-  std::cout << group_vec.size() << " " << idx.num_nodes() << "\n";
-  std::cout << pattern_vec.size() << " " << idx.num_nodes() << "\n";
+  // std::cout << group_vec.size() << " " << idx.num_nodes() << "\n";
+  // std::cout << pattern_vec.size() << " " << idx.num_nodes() << "\n";
 
   // Specially handle assign op.
   const nnvm::Op* assign_op = nnvm::Op::Get("_assign");
