@@ -395,8 +395,6 @@ inline bool ElemwiseBinaryKeepLeftLayout(const NodeAttrs& attrs,
   .set_attr<FInferType>("FInferType", ElemwiseType<1, 1>)           \
   .set_attr<FCorrectLayout>("FCorrectLayout",                       \
     ElemwiseArbitraryLayout<1, 1>)                                  \
-  .set_attr<FInferPrecision>("FInferPrecision",                     \
-		ElemwiseSamePrecision)                                          \
   .set_attr<FInplaceOption>("FInplaceOption",                       \
     [](const NodeAttrs& attrs){                                     \
       return std::vector<std::pair<int, int> >{{0, 0}};             \
