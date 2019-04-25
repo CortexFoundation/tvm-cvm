@@ -52,7 +52,7 @@ void print(int* data, int c, int h, int w, char* label){
 }
 int main(){
     int i_n = 2;
-    int i_c = 1;
+    int i_c = 2;
     int i_h = 64;
     int i_w = 64;
     int f_h = 3;
@@ -93,7 +93,7 @@ int main(){
         f_h, f_w,
         padding, padding,
         stride, stride,
-        output2, i_n, o_c, o_h, o_w, true);
+        output2, i_n, o_c, o_h, o_w, 0, true);
 
     clock_t gpu_end = clock();
     std::cout << "gpu all time: " << gpu_end - end << std::endl;

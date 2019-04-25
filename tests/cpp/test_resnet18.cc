@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include <time.h>
+#include "npy.hpp"
 
 int dtype_code = kDLInt;
 int dtype_bits = 32;
@@ -83,15 +84,16 @@ int main()
     for(int in = 0; in < 1; in++){
 
         std::vector<unsigned long> tshape;
-        std::vector<unsigned char> tdata;
+        std::vector<char> tdata;
+        npy::LoadArrayFromNumpy("/tmp/resnet18/data.npy", tshape, tdata);
 
         DLTensor* x;
         int in_ndim = 4;
-        int64_t in_shape[4] = {100, 3, 224, 224};
+        int64_t in_shape[4] = {1, 3, 224, 224};
         TVMArrayAlloc(in_shape, in_ndim, dtype_code, dtype_bits, dtype_lanes, device_type, device_id, &x);
         auto x_iter = static_cast<int*>(x->data);
-        for (auto i = 0; i < 100*3*224*224; i++) {
-            x_iter[i] = i % 225 - 127;
+        for (auto i = 0; i < 1*3*224*224; i++) {
+            x_iter[i] = (int)((int8_t)tdata[i]);
         }
 
             std::cout << "\n";
@@ -115,7 +117,7 @@ int main()
         DLTensor* y1;
         int out_ndim = 2;
         int64_t out_shape[2] = {1, 1000, };
-        TVMArrayAlloc(out_shape, out_ndim, dtype_code, dtype_bits, dtype_lanes, device_type, device_id, &y1);
+//        TVMArrayAlloc(out_shape, out_ndim, dtype_code, dtype_bits, dtype_lanes, device_type, device_id, &y1);
 
 //        DLTensor* t_gpu_x, *t_gpu_y;
 //        TVMArrayAlloc(in_shape, in_ndim, dtype_code, dtype_bits, dtype_lanes, kDLGPU, device_id, &t_gpu_x);
@@ -160,14 +162,22 @@ int main()
         std::cout << "cvm runtime: " << (cvm_end - cvm_start)*1.0 / CLOCKS_PER_SEC << " s" << std::endl;
         TVMArrayCopyFromTo(gpu_y, y2, stream1);
         //TVMArrayFree(y_cpu);
-        for(int i = 0; i < 10; i++){
-            std::cout << static_cast<int32_t*>(y2->data)[i] << " ";
-        }
         std::cout << std::endl;
-//        std::cout << (memcmp(y1->data, y2->data, 1000*sizeof(int32_t)) == 0 ? "pass" : "failed") << std::endl;
+        npy::LoadArrayFromNumpy("/tmp/resnet18/result.npy", tshape, tdata);
+        for(int i = 0; i < 1000; i++){
+            if(i < 10){
+                std::cout << static_cast<int32_t*>(y2->data)[i] << " ";
+            }
+            if((int32_t)tdata[i] != static_cast<int32_t*>(y2->data)[i]){
+                std::cout << "failed\n";
+                return 0;
+            }
+
+        }
+        std::cout << "\npass\n";
         TVMArrayFree(x);
-        TVMArrayFree(gpu_x);
-        TVMArrayFree(gpu_y);
+//        TVMArrayFree(gpu_x);
+//        TVMArrayFree(gpu_y);
         //    TVMArrayFree(t_gpu_x);
         //    TVMArrayFree(t_gpu_y);
         TVMArrayFree(y2);
