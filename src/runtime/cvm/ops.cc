@@ -795,10 +795,16 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.broadcast_max")
         int32_t* b_data = static_cast<int32_t*>(b->data);
         int32_t* c_data = static_cast<int32_t*>(c->data);
 
+        int o_index = -1;
         for(uint32_t i = 0; i < getSize(a); i++){
-            c_data[i] = (a_data[i] > b_data[i] ? a_data[i] : b_data[i]);
+            o_index = broadcast_o_index(c->shape, c->ndim, o_index);
+            int32_t a_index = broadcast_i_index(c->shape, o_index, a->shape, a->ndim);
+            int32_t b_index = broadcast_i_index(c->shape, o_index, b->shape, b->ndim);
+            //c_data[i] = (a_data[i] > b_data[i] ? a_data[i] : b_data[i]);
+            c_data[i] = a_data[a_index] > b_data[b_index] ? a_data[a_index] : b_data[b_index];
         }
     });
+
 TVM_REGISTER_GLOBAL("tvm.runtime.cvm.concatenate")
 .set_body([](TVMArgs args, TVMRetValue *ret){
         int len = args.num_args;
@@ -812,14 +818,14 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.concatenate")
         if(axis < 0) axis += ndim;
         CHECK(axis < input0->ndim) << "axis out of bounds.";
 
-        std::cout << "call concatenate: " << args.num_args << " " << axis  << " " << input0->shape[1] << " " << out->shape[1]<< std::endl;
-        for(int i = 0; i < args.num_args-1; i++){
-            DLTensor* dl = args[i];
-            for(int j = 0; j < dl->ndim; j++){
-                std::cout << dl->shape[j] << " ";
-            }
-            std::cout << std::endl;
-        }
+ //       std::cout << "call concatenate: " << args.num_args << " " << axis  << " " << input0->shape[1] << " " << out->shape[1]<< std::endl;
+ //       for(int i = 0; i < args.num_args-1; i++){
+ //           DLTensor* dl = args[i];
+ //           for(int j = 0; j < dl->ndim; j++){
+ //               std::cout << dl->shape[j] << " ";
+ //           }
+ //           std::cout << std::endl;
+ //       }
 
         int32_t *out_data = static_cast<int32_t*>(out->data);
         int tmpi = 0;
@@ -845,7 +851,7 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.concatenate")
                 DLTensor* input = args[in_i];
                 shapeSize = (j == out->ndim-1 ? input->shape[j] : shapeSize * input->shape[j]);
             }
-            if(tmpi != in_i) {std::cout << in_i << " " << in_i2<< std::endl; tmpi = in_i;}
+//            if(tmpi != in_i) {std::cout << in_i << " " << in_i2<< std::endl; tmpi = in_i;}
             DLTensor *input = args[in_i];
             int32_t *input_data = static_cast<int32_t*>(input->data);
             out_data[i] = input_data[in_i2];
