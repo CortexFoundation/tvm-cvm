@@ -241,6 +241,7 @@ runtime::Module BuildCHost(Array<LoweredFunc> funcs) {
     cg.AddFunction(f);
   }
   std::string code = cg.Finish();
+  std::cout << code << std::endl;
   return CSourceModuleCreate(code, "c");
 }
 

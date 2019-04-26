@@ -653,7 +653,7 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.reshape")
  */
 TVM_REGISTER_GLOBAL("tvm.runtime.cvm.cvm_clip")
     .set_body([](TVMArgs args, TVMRetValue *ret){
-         CHECK(args.num_args == 2);
+         CHECK(args.num_args == 3);
          DLTensor *x = args[0];
 		 DLTensor *y = args[1];
          int32_t *x_data = static_cast<int32_t*>(x->data);
@@ -803,19 +803,52 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.concatenate")
 .set_body([](TVMArgs args, TVMRetValue *ret){
         int len = args.num_args;
         CHECK(len >= 3);
-        DLTensor *out = args[--len];
+        DLTensor *input0 = args[0];
         std::string str_axis = args[--len];
+        DLTensor *out = args[--len];
         int32_t axis = std::atoi(str_axis.c_str());
-        int32_t ndim = static_cast<int32_t>(args[0]->ndim);
+        int32_t ndim = static_cast<int32_t>(input0->ndim);
         CHECK(-ndim <= axis && axis < ndim);
         if(axis < 0) axis += ndim;
-        CHECK(axis < args[0]->shape[0]) << "axis out of bounds.";
+        CHECK(axis < input0->ndim) << "axis out of bounds.";
 
-        for(int i = 0; i < getSize(out); i++){
-            int32_t o_i = 0;
-            for(int j = 0; j < out->ndim; j++){
-                o_i = i % out->shape[out->ndim - 1 - i];
+        std::cout << "call concatenate: " << args.num_args << " " << axis  << " " << input0->shape[1] << " " << out->shape[1]<< std::endl;
+        for(int i = 0; i < args.num_args-1; i++){
+            DLTensor* dl = args[i];
+            for(int j = 0; j < dl->ndim; j++){
+                std::cout << dl->shape[j] << " ";
             }
+            std::cout << std::endl;
+        }
+
+        int32_t *out_data = static_cast<int32_t*>(out->data);
+        int tmpi = 0;
+        for(int i = 0; i < getSize(out); i++){
+            int32_t o_i = i, in_i = 0, in_i2 = 0, shapeSize = 0;
+            for(int j = out->ndim-1; j >= 0; j--){
+                int32_t col = o_i % out->shape[j];
+                o_i /= out->shape[j];
+                int32_t tmpcol = col;
+                if(j == axis){
+                    int32_t allShapeSize = 0;
+                    for(int k = 0; k < len; k++){
+                        tmpcol = col - allShapeSize;
+                        DLTensor *input = args[k];
+                        allShapeSize += input->shape[axis];
+                        if(col < allShapeSize){
+                            in_i = k;
+                            break;
+                        }
+                    }
+                }
+                in_i2 += (j == out->ndim-1 ? tmpcol : tmpcol * shapeSize);
+                DLTensor* input = args[in_i];
+                shapeSize = (j == out->ndim-1 ? input->shape[j] : shapeSize * input->shape[j]);
+            }
+            if(tmpi != in_i) {std::cout << in_i << " " << in_i2<< std::endl; tmpi = in_i;}
+            DLTensor *input = args[in_i];
+            int32_t *input_data = static_cast<int32_t*>(input->data);
+            out_data[i] = input_data[in_i2];
         }
 });
 

@@ -86,6 +86,7 @@ def create_llvm(inputs,
         cmd += options
     cmd += ["-o", output]
     cmd += input_files
+    print(cmd)
     proc = subprocess.Popen(
         cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     (out, _) = proc.communicate()
