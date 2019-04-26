@@ -799,6 +799,25 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.broadcast_max")
             c_data[i] = (a_data[i] > b_data[i] ? a_data[i] : b_data[i]);
         }
     });
+TVM_REGISTER_GLOBAL("tvm.runtime.cvm.concatenate")
+.set_body([](TVMArgs args, TVMRetValue *ret){
+        int len = args.num_args;
+        CHECK(len >= 3);
+        DLTensor *out = args[--len];
+        std::string str_axis = args[--len];
+        int32_t axis = std::atoi(str_axis.c_str());
+        int32_t ndim = static_cast<int32_t>(args[0]->ndim);
+        CHECK(-ndim <= axis && axis < ndim);
+        if(axis < 0) axis += ndim;
+        CHECK(axis < args[0]->shape[0]) << "axis out of bounds.";
+
+        for(int i = 0; i < getSize(out); i++){
+            int32_t o_i = 0;
+            for(int j = 0; j < out->ndim; j++){
+                o_i = i % out->shape[out->ndim - 1 - i];
+            }
+        }
+});
 
 /*********************************cuda op*********************************************/
 #ifdef CVM_RUNTIME_CUDA
