@@ -17,9 +17,14 @@ import cvm_op as cvm
 import logging
 import numpy as np
 
+# version = '1_0'
+version = '_v2_1_0'
+identity = 'mobilenet' + version
+prefix = './data/'
+symbol_file, params_file = prefix+identity+'.json', prefix+identity+'.params'
 def get_dump_fname(suffix="quant"):
-    return './data/mobilenet1_0.json.%s'%suffix, \
-        './data/mobilenet1_0.params.%s'%suffix
+    return './data/%s.%s.json'%(identity, suffix), \
+        './data/%s.%s.params'%(identity, suffix)
 
 def test_sym_nnvm(batch_size=10, iter_num=10):
     logger = logging.getLogger("log.test.nnvm")
@@ -107,7 +112,6 @@ def test_sym_pass(batch_size=10, iter_num=10):
         return data.data[0], data.label[0]
     data, _ = data_iter_func()
 
-    symbol_file, params_file = "./data/mobilenet1_0.json", "./data/mobilenet1_0.params"
     sym, params = mx.sym.load(symbol_file), nd.load(params_file)
     sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
     dump_sym, dump_params = get_dump_fname('sym.sim.prepare')
@@ -143,6 +147,8 @@ def test_sym_pass(batch_size=10, iter_num=10):
 if __name__ == '__main__':
     utils.log_init()
 
+    # zoo.save_mobilenet_v2_1_0()
     # zoo.save_mobilenet1_0()
+
     test_sym_pass(16, 10)
     # test_sym_nnvm(1, 100)

@@ -154,5 +154,5 @@ if __name__ == '__main__':
     utils.log_init()
 
     # zoo.save_inception_v3()
-    # test_sym_pass(16, 100000)
-    test_sym_nnvm(1, 1)
+    test_sym_pass(16, 100000)
+    # test_sym_nnvm(1, 1)
