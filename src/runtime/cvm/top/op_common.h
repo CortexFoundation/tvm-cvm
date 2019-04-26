@@ -10,6 +10,7 @@
 #include <dmlc/parameter.h>
 #include <cvm/top/tensor.h>
 #include <cvm/node.h>
+#include <cvm/op_attr_types.h>
 #include <string>
 #include <vector>
 #include <utility>

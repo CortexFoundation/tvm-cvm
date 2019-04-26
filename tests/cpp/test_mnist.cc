@@ -85,7 +85,7 @@ int main()
 
         std::vector<unsigned long> tshape;
         std::vector<unsigned char> tdata;
-        npy::LoadArrayFromNumpy("data.npy", tshape, tdata);
+        npy::LoadArrayFromNumpy("/tmp/data.npy", tshape, tdata);
 
         DLTensor* x;
         int in_ndim = 4;

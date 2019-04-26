@@ -14,6 +14,8 @@
 #include <functional>
 #include "op_common.h"
 
+#define CORTEX_LOG2(x) (32 - __builtin_clz(unsigned(x)))
+
 namespace cvm {
 namespace top {
 
@@ -71,6 +73,126 @@ inline bool ElemwiseShape(const NodeAttrs& attrs,
   }
   return ElemwiseAttr<TShape, shape_is_none, shape_assign, true, shape_string>(
     attrs, in_attrs, out_attrs, TShape());
+}
+
+template<int def_v>
+inline bool ElemwisePrecision(const NodeAttrs& attrs, 
+                                  std::vector<TShape>* shapes,
+																	std::vector<int>* iattr, 
+																	std::vector<int>* oattr) {
+  for (int& v : *oattr) {
+    v = def_v;
+  }
+  return true;
+}
+
+inline bool ElemwiseSamePrecision(const NodeAttrs& attrs, 
+                                  std::vector<TShape>* shapes,
+																	std::vector<int>* iattr, 
+																	std::vector<int>* oattr) {
+  int def_v = -1;
+  for (int v : *iattr) {
+    if (v != -1) {
+      def_v = v; break;
+    }
+  }
+  if (def_v == -1) return false;
+  for (int& v : *oattr) {
+    v = def_v;
+  }
+  for (int& v : *iattr) {
+    v = def_v;
+  }
+  return true;
+}
+
+inline bool ElemwisePlusonePrecision(const NodeAttrs& attrs,
+		                                 std::vector<TShape>* shapes,
+																		 std::vector<int>* iattr,
+																		 std::vector<int>* oattr) {
+  int def_v = -1;
+  for (int v : *iattr) {
+    if (v > def_v) {
+      def_v = v;
+    }
+  }
+  if (def_v == -1) return false;
+  for (int& v : *oattr) {
+    v = def_v + 1;
+  }
+  for (int& v : *iattr) {
+    if (v == -1) v = def_v;
+  }
+  return true;
+}
+
+inline bool ElemwiseMaxPrecision(const NodeAttrs& attrs,
+		                                 std::vector<TShape>* shapes,
+																		 std::vector<int>* iattr,
+																		 std::vector<int>* oattr) {
+  int def_v = -1;
+  for (int v : *iattr) {
+    if (v > def_v) {
+      def_v = v;
+    }
+  }
+  if (def_v == -1) return false;
+  for (int& v : *oattr) {
+    v = def_v;
+  }
+  for (int& v : *iattr) {
+    if (v == -1) v = def_v;
+  }
+  return true;
+}
+
+inline bool ElemwiseSumPrecision(const NodeAttrs& attrs,
+                                 std::vector<TShape>* shapes,
+																 std::vector<int>* iattr,
+																 std::vector<int>* oattr) {
+  int def_v = 0;
+  for (int v : *iattr) {
+    if (v == -1) {
+      return false;
+    }
+    def_v += v;
+  }
+  for (int& v : *oattr) {
+    v = def_v;
+  }
+  return true;
+}
+
+inline bool ElemwiseSecondPrecision(const NodeAttrs& attrs,
+		                               std::vector<TShape>* shapes,
+																	 std::vector<int>* iattr,
+																	 std::vector<int>* oattr) {
+  if (iattr->size() < 2) return false;
+	int def_v = iattr->at(1);
+  if (def_v == -1) return false;
+  for (int& v : *oattr) {
+    v = def_v;
+  }
+  for (int& v : *iattr) {
+    if (v == -1) v = def_v;
+  }
+  return true;
+}
+
+inline bool ElemwiseFirstPrecision(const NodeAttrs& attrs,
+		                               std::vector<TShape>* shapes,
+																	 std::vector<int>* iattr,
+																	 std::vector<int>* oattr) {
+  if (iattr->size() == 0) return false;
+	int def_v = iattr->at(0);
+  if (def_v == -1) return false;
+  for (int& v : *oattr) {
+    v = def_v;
+  }
+  for (int& v : *iattr) {
+    if (v == -1) v = def_v;
+  }
+  return true;
 }
 
 template<int n_in, int n_out>
@@ -333,7 +455,7 @@ inline bool ElemwiseBinaryKeepLeftLayout(const NodeAttrs& attrs,
                      std::vector<int>* out_attrs) {                 \
       CHECK_EQ(out_attrs->size(), 1U);                              \
       NNVM_ASSIGN_OUTPUT_TYPE(attrs, *out_attrs, 0,                 \
-        static_cast<int>(kFloat32));                                \
+        static_cast<int>(kInt32));                                  \
       return true;                                                  \
   })                                                                \
   .set_attr<FCorrectLayout>("FCorrectLayout",                       \

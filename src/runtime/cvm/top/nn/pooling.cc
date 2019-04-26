@@ -144,25 +144,10 @@ NNVM_REGISTER_OP(max_pool2d)
 .set_num_inputs(1)
 .set_attr<FInferShape>("FInferShape", Pool2DInferShape<MaxPool2DParam>)
 .set_attr<FInferType>("FInferType", ElemwiseType<1, 1>)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwiseSamePrecision)
 .set_attr<FCorrectLayout>("FCorrectLayout", Pool2DCorrectLayout<MaxPool2DParam>)
 .set_support_level(2);
 
-NNVM_REGISTER_OP(_max_pool2d_grad)
-  .describe(R"code(Max pooling 2D grad.
-
-)code" NNVM_ADD_FILELINE)
-.add_argument("ograd", "4D Tensor", "Output grad.")
-.add_argument("input", "4D Tensor", "Input data of max_pool2d grad.")
-.add_argument("output", "4D Tensor", "Output data of max_pool2d grad.")
-.set_num_inputs(3)
-.set_num_outputs(1)
-.set_attr_parser(ParamParser<MaxPool2DParam>)
-.set_attr<FGetAttrDict>("FGetAttrDict", ParamGetAttrDict<MaxPool2DParam>)
-.set_attr<FInferShape>("FInferShape", AssignOutputAttr<TShape, 1, 0>)
-.set_attr<FInferType>("FInferType", ElemwiseType<3, 1>)
-.set_attr<TIsBackward>("TIsBackward", true);
-
-/*
 DMLC_REGISTER_PARAMETER(GlobalPool2DParam);
 
 inline bool GlobalPool2DInferShape(const cvm::NodeAttrs& attrs,
@@ -224,8 +209,7 @@ inline bool GlobalPool2DCorrectLayout(const NodeAttrs& attrs,
 
   return true;
 }
-*/
-/*
+
 NNVM_REGISTER_OP(global_max_pool2d)
 .describe(R"code(Global max pooling operation for 2D data.
 
@@ -241,10 +225,11 @@ NNVM_REGISTER_OP(global_max_pool2d)
 .set_attr<FGetAttrDict>("FGetAttrDict", ParamGetAttrDict<GlobalPool2DParam>)
 .set_attr<FInferShape>("FInferShape", GlobalPool2DInferShape)
 .set_attr<FInferType>("FInferType", ElemwiseType<1, 1>)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwiseSamePrecision)
 .set_attr<FCorrectLayout>("FCorrectLayout", GlobalPool2DCorrectLayout)
 .set_num_outputs(1)
 .set_num_inputs(1)
 .set_support_level(2);
-*/
+
 }  // namespace top
 }  // namespace cvm

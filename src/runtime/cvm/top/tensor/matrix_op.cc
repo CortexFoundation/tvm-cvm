@@ -95,6 +95,21 @@ NNVM_REGISTER_OP(matmul)
 .add_argument("rhs", "NDArray-or-Symbol", "The second input")
 .set_attr<FInferShape>("FInferShape", DotShape)
 .set_attr<FInferType>("FInferType", ElemwiseType<2, 1>)
+.set_attr<FInferPrecision>("FInferPrecision",
+  [](const NodeAttrs& attrs,
+   std::vector<TShape>* shapes,
+   std::vector<int>* iattr,
+   std::vector<int>* oattr) -> bool {
+  auto& param = cvm::get<MatMulParam>(attrs.parsed);
+  int prec = iattr->at(0) + iattr->at(1);
+  if (param.transpose_a) {
+    prec += CORTEX_LOG2(shapes->at(0)[0]) + 1;
+  } else {
+    prec += CORTEX_LOG2(shapes->at(0)[1]) + 1;
+  }
+  (*oattr)[0] = prec;
+  return true;
+})
 .set_attr<FCorrectLayout>("FCorrectLayout", DotCorrectLayout);
 
 }  // namespace top

@@ -150,17 +150,30 @@ Example::
   sum(data, axis=[1,2])
   [ 12.  19.  27.]
 
-)code" NNVM_ADD_FILELINE);
+)code" NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision",
+  [](const NodeAttrs& attrs,
+   std::vector<TShape>* shapes,
+   std::vector<int>* iattr,
+   std::vector<int>* oattr) -> bool {
+  auto& param = cvm::get<ReduceParam>(attrs.parsed);
+  int ndim = param.axis.ndim();
+  if (ndim == 0) ndim = 1;
+  (*oattr)[0] = ndim * iattr->at(0);
+  return true;
+});
 
 NNVM_REGISTER_REDUCE_OP(max)
 .describe(R"code(Computes the max of array elements over given axes.
 
-)code" NNVM_ADD_FILELINE);
+)code" NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwiseSamePrecision);
 
 NNVM_REGISTER_REDUCE_OP(min)
 .describe(R"code(Computes the min of array elements over given axes.
 
-)code" NNVM_ADD_FILELINE);
+)code" NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwiseSamePrecision);
 
 NNVM_REGISTER_BASE_REDUCE_OP(collapse_sum)
 .add_argument("data", "Tensor", "The input")
@@ -218,7 +231,8 @@ Example::
   mean(data, axis=[1,2])
   [ 2.  3.16666667  4.5]
 
-)code" NNVM_ADD_FILELINE);
+)code" NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwiseSamePrecision);
 
 NNVM_REGISTER_REDUCE_OP(prod)
   .describe(R"code(Computes the products of array elements over given axes.

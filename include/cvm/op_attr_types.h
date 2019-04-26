@@ -75,6 +75,13 @@ using FInferNodeEntryAttr = std::function<bool (const NodeAttrs& attrs,
                                                 std::vector<AttrType> *in_attrs,
                                                 std::vector<AttrType> *out_attrs)>;
 
+using FInferPrecision =
+  std::function<bool (const NodeAttrs& attrs,
+    std::vector<TShape>* shapes,
+    std::vector<int>* in_attrs,
+    std::vector<int>* out_attrs)>;
+
+
 /*!
  * \brief Get attribute dictionary from node.
  *
@@ -106,17 +113,6 @@ using FInferShape = FInferNodeEntryAttr<TShape>;
  *  by default set all the output types to 0.
  */
 using FInferType = FInferNodeEntryAttr<int>;
-
-
-/*!
- * \brief Precision inference function.
- *  Update the precision given the known precision information.
- *
- * \note Register under "FInferPrecision",
- *  by default set all the output precisions to 8.
- */
-using FInferPrecision = FInferNodeEntryAttr<int>;
-
 
 /*!
  * \brief Whether this op is an explicit backward operator,
@@ -163,19 +159,6 @@ using FInplaceIdentity = std::function<std::vector<bool> (const NodeAttrs& attrs
  */
 using FIgnoreInputs = std::function<
   std::vector<uint32_t> (const NodeAttrs& attrs)>;
-
-/*!
- * \brief Get the gradient node of the op node
- *  This function generates the backward graph of the node
- * \param nodeptr The node to take gradient
- * \param out_grads Gradient of current node's outputs
- * \return gradients of the inputs
- *
- * \note Register under "FGradient"
- */
-using FGradient = std::function<std::vector<NodeEntry>(
-    const NodePtr& nodeptr,
-    const std::vector<NodeEntry>& out_grads)>;
 
 /*!
  * \brief Set the attributes of input variable.

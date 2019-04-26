@@ -157,7 +157,7 @@ struct SqueezeParam : public dmlc::Parameter<SqueezeParam> {
 };
 
 struct ScalarParam : public dmlc::Parameter<ScalarParam> {
-  double scalar;
+  int scalar;
 
   DMLC_DECLARE_PARAMETER(ScalarParam) {
     DMLC_DECLARE_FIELD(scalar);
@@ -165,7 +165,7 @@ struct ScalarParam : public dmlc::Parameter<ScalarParam> {
 };
 
 struct FillValueParam : public dmlc::Parameter<FillValueParam> {
-  double fill_value;
+  int fill_value;
 
   DMLC_DECLARE_PARAMETER(FillValueParam) {
     DMLC_DECLARE_FIELD(fill_value)
@@ -235,11 +235,11 @@ struct ReduceParam : public dmlc::Parameter<ReduceParam> {
 struct InitOpWithScalarParam : public dmlc::Parameter<InitOpWithScalarParam> {
   TShape shape;
   int dtype;
-  double fill_value;
+  int fill_value;
 
   DMLC_DECLARE_PARAMETER(InitOpWithScalarParam) {
     DMLC_DECLARE_FIELD(shape).set_default(TShape());
-    DMLC_DECLARE_DTYPE_FIELD(dtype).set_default(kFloat32)
+    DMLC_DECLARE_DTYPE_FIELD(dtype).set_default(kInt32)
       .describe("Target data type.");
     DMLC_DECLARE_FIELD(fill_value).describe("Scalar value to fill");
   }
@@ -251,7 +251,7 @@ struct InitOpParam : public dmlc::Parameter<InitOpParam> {
 
   DMLC_DECLARE_PARAMETER(InitOpParam) {
     DMLC_DECLARE_FIELD(shape).set_default(TShape());
-    DMLC_DECLARE_DTYPE_FIELD(dtype).set_default(kFloat32)
+    DMLC_DECLARE_DTYPE_FIELD(dtype).set_default(kInt32)
       .describe("Target data type.");
   }
 };

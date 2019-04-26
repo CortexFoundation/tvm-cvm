@@ -14,7 +14,6 @@
 #include <tvm/runtime/ndarray.h>
 #include <tvm/runtime/packed_func.h>
 #include <cvm/node.h>
-#include <cvm/bind.h>
 #include <cvm/top/nn.h>
 
 #include <memory>
@@ -267,10 +266,12 @@ class CvmRuntime : public ModuleNode {
     }
 
     void LoadOpAttr(std::string json_) {
-      if (json_ == "") json_ = "{}";
-      auto& binding = cvm::OpParamBinding::instance();
-      if (!binding.has(attrs.name)) return;
-      attrs.parsed = std::move(binding.get(attrs.name, json_));
+      std::istringstream is(json_);
+      dmlc::JSONReader reader(&is);
+      reader.Read(&attrs.dict);
+      if (attrs.op->attr_parser) {
+        attrs.op->attr_parser(&attrs);        
+      }
     }
   };
   struct GraphAttr {

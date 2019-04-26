@@ -71,6 +71,7 @@ So with `shape=(2,0)`, we will obtain the same result as in the above example.
 .set_attr<FInferShape>("FInferShape", BroadcastToInferShape)
 .set_attr<FInferType>("FInferType", ElemwiseType<1, 1>)
 .set_attr<FCorrectLayout>("FCorrectLayout", ElemwiseFixedLayoutUnknownOut<1, 1>)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwiseSamePrecision)
 .set_num_inputs(1)
 .set_num_outputs(1)
 .set_support_level(4);
@@ -218,8 +219,8 @@ Example::
    broadcast_add(x, y) = [[ 1.,  1.,  1.],
                           [ 2.,  2.,  2.]]
 
-)code" NNVM_ADD_FILELINE);
-
+)code" NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwisePlusonePrecision);
 
 NNVM_REGISTER_BINARY_BROADCAST_OP(broadcast_sub, subtract)
 .add_alias("__sub_symbol__")
@@ -236,8 +237,8 @@ Example::
    broadcast_sub(x, y) = [[ 1.,  1.,  1.],
                           [ 0.,  0.,  0.]]
 
-)code" NNVM_ADD_FILELINE);
-
+)code" NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwisePlusonePrecision);
 
 NNVM_REGISTER_BINARY_BROADCAST_OP(broadcast_mul, multiply)
 .add_alias("__mul_symbol__")
@@ -253,7 +254,8 @@ Example::
 
    broadcast_mul(x, y) = [[ 0.,  0.,  0.],
                           [ 1.,  1.,  1.]]
-)code" NNVM_ADD_FILELINE);
+)code" NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwiseSumPrecision);
 
 
 NNVM_REGISTER_BINARY_BROADCAST_OP(broadcast_div, divide)
@@ -271,7 +273,8 @@ Example::
    broadcast_div(x, y) = [[ 3.,  3.,  3.],
                           [ 2.,  2.,  2.]]
 
-)code" NNVM_ADD_FILELINE);
+)code" NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwiseFirstPrecision);
 
 NNVM_REGISTER_BINARY_BROADCAST_OP(broadcast_mod, mod)
 .add_alias("__mod_symbol__")
@@ -288,7 +291,8 @@ Example::
    broadcast_mod(x, y) = [[ 1.,  0.,  1.],
                           [ 1.,  2.,  0.]]
 
-)code" NNVM_ADD_FILELINE);
+)code" NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwiseSecondPrecision);
 
 NNVM_REGISTER_BINARY_BROADCAST_OP(broadcast_max, maximum)
 .add_alias("__max_symbol__")
@@ -305,7 +309,8 @@ Example::
    broadcast_max(x, y) = [[ 2.,  2.,  3.],
                           [ 4.,  5.,  6.]]
 
-)code" NNVM_ADD_FILELINE);
+)code" NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwiseMaxPrecision);
 
 NNVM_REGISTER_BINARY_BROADCAST_OP(broadcast_min, minimum)
 .add_alias("__min_symbol__")
@@ -322,24 +327,8 @@ Example::
    broadcast_min(x, y) = [[ 1.,  2.,  2.],
                           [ 3.,  3.,  3.]]
 
-)code" NNVM_ADD_FILELINE);
-
-NNVM_REGISTER_BINARY_BROADCAST_OP(broadcast_pow, power)
-.add_alias("__pow_symbol__")
-.describe(R"code(Returns element-wise x^y of the input arrays with broadcasting.
-
-Example::
-
-   x = [[ 1.,  2.,  3.],
-        [ 4.,  5.,  6.]]
-
-   y = [[ 1.],
-        [ 2.]]
-
-   broadcast_pow(x, y) = [[ 1.,   2.,   3. ],
-                          [ 16.,  25.,  36.]]
-
-)code" NNVM_ADD_FILELINE);
+)code" NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwiseMaxPrecision);
 
 NNVM_REGISTER_BINARY_BROADCAST_OP(broadcast_left_shift, left_shift)
 .add_alias("__left_shift_symbol__")
@@ -356,7 +345,8 @@ Example::
    broadcast_left_shift(x, y) = [[ 4.,  8.,  12.],
                                  [ 8.,  10., 12.]]
 
-)code" NNVM_ADD_FILELINE);
+)code" NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwisePrecision<32>);
 
 NNVM_REGISTER_BINARY_BROADCAST_OP(broadcast_right_shift, right_shift)
 .add_alias("__right_shift_symbol__")
@@ -373,7 +363,8 @@ Example::
    broadcast_right_shift(x, y) = [[ 1.,  2.,  3.],
                                   [ 4.,  5.,  6.]]
 
-)code" NNVM_ADD_FILELINE);
+)code" NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwisePrecision<8>);
 
 NNVM_REGISTER_BINARY_BROADCAST_OP(broadcast_greater, greater)
 .add_alias("__greater_symbol__")
@@ -390,7 +381,8 @@ Example::
    broadcast_greater(x, y) = [[ 0.,  0.,  1.],
                               [ 1.,  1.,  1.]]
 
-)code" NNVM_ADD_FILELINE);
+)code" NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwisePrecision<1>);
 
 NNVM_REGISTER_BINARY_BROADCAST_OP(broadcast_less, less)
 .add_alias("__less_symbol__")
@@ -407,7 +399,8 @@ Example::
    broadcast_less(x, y) = [[ 1.,  0.,  0.],
                            [ 0.,  0.,  0.]]
 
-)code" NNVM_ADD_FILELINE);
+)code" NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwisePrecision<1>);
 
 NNVM_REGISTER_BINARY_BROADCAST_OP(broadcast_equal, equal)
 .add_alias("__equal_symbol__")
@@ -424,7 +417,8 @@ Example::
    broadcast_equal(x, y) = [[ 0.,  1.,  0.],
                             [ 0.,  1.,  0.]]
 
-)code" NNVM_ADD_FILELINE);
+)code" NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwisePrecision<1>);
 
 NNVM_REGISTER_BINARY_BROADCAST_OP(broadcast_not_equal, not_equal)
 .add_alias("__not_equal_symbol__")
@@ -441,7 +435,8 @@ Example::
    broadcast_not_equal(x, y) = [[ 1.,  0.,  1.],
                                 [ 0.,  1.,  1.]]
 
-)code" NNVM_ADD_FILELINE);
+)code" NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwisePrecision<1>);
 
 NNVM_REGISTER_BINARY_BROADCAST_OP(broadcast_greater_equal, greater_equal)
 .add_alias("__greater_equal_symbol__")
@@ -458,7 +453,8 @@ Example::
    broadcast_greater_equal(x, y) = [[ 0.,  1.,  1.],
                                     [ 0.,  0.,  1.]]
 
-)code" NNVM_ADD_FILELINE);
+)code" NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwisePrecision<1>);
 
 NNVM_REGISTER_BINARY_BROADCAST_OP(broadcast_less_equal, less_equal)
 .add_alias("__less_equal_symbol__")
@@ -475,7 +471,8 @@ Example::
    broadcast_less_equal(x, y) = [[ 1.,  0.,  0.],
                                  [ 1.,  1.,  0.]]
 
-)code" NNVM_ADD_FILELINE);
+)code" NNVM_ADD_FILELINE)
+.set_attr<FInferPrecision>("FInferPrecision", ElemwisePrecision<1>);
 
 }  // namespace top
 }  // namespace cvm
