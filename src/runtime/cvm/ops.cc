@@ -275,7 +275,7 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.conv2d").set_body([]
             }
             return y_sum;
         };
-        if (filter_w == 1) {
+        if (filter_w == 100) {
             for (int n = 0; n < n_batch; ++n) {
                 for (int k = 0; k < out_channels; ++k) {
                     for (int p = 0; p < o_h; ++p) {
@@ -291,7 +291,7 @@ TVM_REGISTER_GLOBAL("tvm.runtime.cvm.conv2d").set_body([]
                     }
                 }
             }
-        } else if (filter_w == 3) {
+        } else if (filter_w == 300) {
             std::vector<int32_t> y_sum(in_channels * o_h * o_w, 0);
 //            std::cout << "buff " << y_sum.size() << "\n";
             for (int n = 0; n < n_batch; ++n) {
