@@ -3,11 +3,13 @@ import math
 import numpy as np
 
 import mxnet as mx
+from mxnet.gluon import nn, SymbolBlock
 from mxnet import ndarray as nd
 import nnvm as nnvm
 import tvm
 
 from sym_utils import *
+from utils import *
 
 def fold_cond_op(symbol, params, graph, quant_flag):
     logger = logging.getLogger("log.quant.fold.condition")
@@ -243,7 +245,7 @@ def nnvm_realize(symbol, params, inputs_ext):
     for key, value in params.items():
         if key not in args:
             logger.warn("key:%s not exists in graph", key)
-            ret_params[key] = value
+            # ret_params[key] = value
         else:
             msg = "key:%s value:%s"%(key, value)
             flat = value.asnumpy().flatten()
@@ -576,6 +578,66 @@ def sym_attach_attrs(symbol, params, inputs_ext, **kwargs):
     return topo_visit(symbol, params, get_op=get_mxnet_op,
             logger=logger, inputs_ext=inputs_ext,
             callback=_attach_attr, **kwargs)
+
+def sym_dump_layer_outputs(symbol, params, inputs_ext,
+        data, allows, datadir, dtype='float64', out_dtype='int32', ctx=mx.gpu()):
+    logger = logging.getLogger('log.sym.dump.internals')
+    def _run_layer(sym, params, inputs_ext):
+        args = sym.list_inputs()
+        inputs = [mx.sym.var(n) for n in inputs_ext if n in args]
+        graph = SymbolBlock(sym, inputs)
+        load_parameters(graph, params, ctx=ctx, dtype=dtype)
+        return graph.forward(data.astype(dtype).as_in_context(ctx))
+    def _str_output(out, max_num=None):
+        out = out.asnumpy().flatten()
+        out = out[:max_num] if max_num else out
+        dump = ' '.join(str(d) for d in out)
+        return dump
+    def _str_feature(out):
+        a_max = out.max().asscalar()
+        a_min = out.min().asscalar()
+        return "max: %s, min: %s" % (a_max, a_min)
+
+    in_file, out_file = datadir+'/in.txt', datadir+'/out.txt'
+    fin, fout = open(in_file, "w+"), open(out_file, "w+")
+    for sym in topo_sort(symbol, logger):
+        name, op_name = sym.attr('name'), sym.attr('op_name')
+        if op_name not in allows:
+            continue
+        if name != 'C2_conv2_fwd_C2_batchnorm2_fwd':
+            continue
+
+        logger.info("Dump layer %-40s output", name)
+        childs = sym_iter(sym.get_children())
+        prefix = datadir + '/' + name
+        for idx, c in enumerate(childs):
+            if c.attr('name') in inputs_ext:
+                out = data.astype(out_dtype)
+            elif c.attr('op_name') == 'null':
+                out = params[c.attr('name')].astype(out_dtype)
+            else:
+                out = _run_layer(c, params, inputs_ext).astype(out_dtype)
+            dump_str = name + '_' + op_name + '_in' + str(idx) + ':\n'
+            dump_str += _str_output(out, 100) + '\n'
+            fin.write(dump_str)
+
+            if name == 'C2_conv2_fwd_C2_batchnorm2_fwd':
+                np.save(datadir+c.attr('name'), out.asnumpy().astype('int32'))
+
+        out = _run_layer(sym, params, inputs_ext).astype(out_dtype)
+        dump_str = name + '_' + op_name + '_out:' + _str_feature(out) + '\n'
+        dump_str += _str_output(out, 100) + ' ' + '\n'
+        fout.write(dump_str)
+
+        if name == 'C2_conv2_fwd_C2_batchnorm2_fwd':
+            np.save(datadir+name, out.asnumpy().astype('int32'))
+
+    fin.close()
+    fout.close()
+
+
+
+
 
 
 

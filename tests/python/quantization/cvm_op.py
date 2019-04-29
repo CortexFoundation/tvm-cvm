@@ -98,18 +98,28 @@ if __name__ == '__main__':
                 input_idx_from_broadcast(ovars, shape1),
                 input_idx_from_broadcast(ovars, shape2))
 
+cvm_log = open('/tmp/inception_v3/out/cvm_op1.txt', "w+")
 class Clip(mx.operator.CustomOp):
-    def __init__(self, precision, **kwargs):
+    def __init__(self, precision, cvm_name, **kwargs):
         super(Clip, self).__init__(**kwargs)
         clip = 2 ** (int(precision) - 1) - 1
         self.min = int(-clip)
         self.max = int(clip)
+        self.cvm_name = cvm_name
 
     def forward(self, is_train, req, in_data, out_data, aux):
         assert is_train == False
         X = in_data[0]
         a_min, a_max = self.min, self.max
-        out = X.clip(a_min=a_min, a_max=a_max)
+        out = X.round()
+        out = out.clip(a_min=a_min, a_max=a_max)
+
+        X_max, X_min = X.max().asscalar(), X.min().asscalar()
+        omax, omin = out.max().asscalar(), out.min().asscalar()
+        cvm_log.write("%s:\n %d %d %d %d %s \n" % (self.cvm_name,
+                    round(X_max), round(X_min),
+                    round(omax), round(omin),
+                    " ".join(str(int(round(d))) for d in X.asnumpy().flatten()[:10])))
         self.assign(out_data[0], req[0], out)
 
     def backward(self, req, out_grad, in_data, out_data, in_grad, aux):
@@ -128,7 +138,8 @@ class LeftShift(mx.operator.CustomOp):
         assert is_train == False
         X = in_data[0]
         a_min, a_max = self.min, self.max
-        out = X * (2 ** (self.sb))
+        out = X.round()
+        out = out * (2 ** (self.sb))
         out = out.clip(a_min=a_min, a_max=a_max)
         self.assign(out_data[0], req[0], out)
 
@@ -136,24 +147,32 @@ class LeftShift(mx.operator.CustomOp):
         assert False
 
 class RightShift(mx.operator.CustomOp):
-    def __init__(self, precision, shift_bit, **kwargs):
+    def __init__(self, precision, shift_bit, cvm_name, **kwargs):
         super(RightShift, self).__init__(**kwargs)
         clip = 2 ** (int(precision) - 1) - 1
         self.min = int(-clip)
         self.max = int(clip)
         self.sb = int(shift_bit)
         assert self.sb > 0
+        self.cvm_name = cvm_name
 
     def forward(self, is_train, req, in_data, out_data, aux):
         assert is_train == False
         X = in_data[0]
         a_min, a_max = self.min, self.max
-        out = X / (2 ** (self.sb-1))
+        out = X.round()
+        out = out / (2 ** (self.sb-1))
         out = out.floor()
         out = out + 1
         out = out / 2
         out = out.floor()
         out = out.clip(a_min=a_min, a_max=a_max)
+        X_max, X_min = X.max().asscalar(), X.min().asscalar()
+        omax, omin = out.max().asscalar(), out.min().asscalar()
+        cvm_log.write("%s:\n %d %d %d %d %s \n" % (self.cvm_name,
+                    round(X_max), round(X_min),
+                    round(omax), round(omin),
+                    " ".join(str(int(round(d))) for d in X.asnumpy().flatten()[:10])))
         self.assign(out_data[0], req[0], out)
 
     def backward(self, req, out_grad, in_data, out_data, in_grad, aux):
@@ -161,9 +180,10 @@ class RightShift(mx.operator.CustomOp):
 
 @mx.operator.register("cvm_clip")
 class ClipProp(mx.operator.CustomOpProp):
-    def __init__(self, precision=8, shift_bit=0):
+    def __init__(self, precision=8, shift_bit=0, cvm_name='clip'):
         self.precision= precision
         self.shift_bit = shift_bit
+        self.cvm_name = cvm_name
         super(ClipProp, self).__init__(need_top_grad=False)
     def list_arguments(self):
         return ['data']
@@ -177,7 +197,7 @@ class ClipProp(mx.operator.CustomOpProp):
         X_type = in_type[0]
         return [X_type], [X_type], []
     def create_operator(self, ctx, shapes, dtypes):
-        return Clip(self.precision)
+        return Clip(self.precision, self.cvm_name)
 
 @mx.operator.register("cvm_left_shift")
 class LeftShiftProp(mx.operator.CustomOpProp):
@@ -201,9 +221,10 @@ class LeftShiftProp(mx.operator.CustomOpProp):
 
 @mx.operator.register("cvm_right_shift")
 class RightShiftProp(mx.operator.CustomOpProp):
-    def __init__(self, precision=8, shift_bit=0):
+    def __init__(self, precision=8, shift_bit=0, cvm_name='right_shift'):
         self.precision= precision
         self.shift_bit = shift_bit
+        self.cvm_name = cvm_name
         super(RightShiftProp, self).__init__(need_top_grad=False)
     def list_arguments(self):
         return ['data']
@@ -217,7 +238,7 @@ class RightShiftProp(mx.operator.CustomOpProp):
         X_type = in_type[0]
         return [X_type], [X_type], []
     def create_operator(self, ctx, shapes, dtypes):
-        return RightShift(self.precision, self.shift_bit)
+        return RightShift(self.precision, self.shift_bit, self.cvm_name)
 
 
 

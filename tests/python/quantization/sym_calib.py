@@ -194,11 +194,6 @@ def _calib_sym_collect_thresholds(sym, params, graph, inputs_ext,
         load_parameters(graph, params, ctx=ctx)
         last_out[0] = output = graph.forward(calib_data.as_in_context(ctx))
 
-    if name == 'conv2_fwd_batchnorm2_fwd':
-        np.save('/tmp/conv2_fwd_batchnorm2_fwd', output.asnumpy())
-    elif name == 'conv1_fwd_batchnorm1_fwd':
-        np.save('/tmp/conv1_fwd_batchnorm1_fwd', output.asnumpy())
-
     slices = [output]
     shape = scale_shapes[name]
     for idx, s in enumerate(shape):
@@ -451,12 +446,14 @@ def _realize_cvm_requant_op(sym, sb, params, graph, target_bit=8):
     assert requant_op not in graph
     if sb == 0:
         return mx.sym.Custom(sym, precision=target_bit,
+                cvm_name=requant_op,
                 name=requant_op, op_type='cvm_clip')
     elif sb < 0:
         return mx.sym.Custom(sym, shift_bit=-sb, precision=target_bit,
                 name=requant_op, op_type='cvm_left_shift')
     else:
         return mx.sym.Custom(sym, shift_bit=sb, precision=target_bit,
+                cvm_name=requant_op,
                 name=requant_op, op_type='cvm_right_shift')
 
 def _collect_layer_scale(sym, params, graph, inputs_ext,
