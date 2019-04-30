@@ -102,7 +102,7 @@ def examine_parameters(symbol, params, inputs_ext, allows=[], callback=None):
     return new_params
 
 def op_const(number, graph, var=mx.sym.var):
-    name = 'const_var' + str(number)
+    name = 'const_var_' + str(number)
     if name not in graph:
         graph[name] = var(name, shape=(1,))
     return graph[name], name
@@ -310,6 +310,8 @@ nnvm_identity_ext = {
     'broadcast_add': OpExt('broadcast_add', [INT32_TYPE], [INT32_TYPE]),
     'broadcast_sub': OpExt('broadcast_sub', [INT32_TYPE], [INT32_TYPE]),
     'broadcast_max': OpExt('broadcast_max', [INT32_TYPE], [INT32_TYPE]),
+
+    '__add_scalar__': {},
 
     'max': {},
     'abs': {},

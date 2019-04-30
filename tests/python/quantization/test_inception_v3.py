@@ -20,6 +20,11 @@ def get_dump_fname(suffix="quant"):
     return './data/inception_v3.%s.json'%suffix, \
         './data/inception_v3.%s.params'%suffix
 
+def load_fname(version, suffix=None):
+    suffix = "."+suffix if suffix is not None else ""
+    return "./data/inception%s%s.json"%(version, suffix), \
+        "./data/inception%s%s.params"%(version, suffix)
+
 def test_sym_nnvm(batch_size=10, iter_num=10):
     logger = logging.getLogger("log.test.nnvm")
     logger.info("=== Log Test NNVM ===")
@@ -204,10 +209,41 @@ def test_mxnet_sym(batch_size=10):
     np.save("/tmp/inception_v3/test_result1.npy", res.asnumpy().astype('int32'))
     print (res.asnumpy().flatten()[:10])
 
+def test_mx_quantize(batch_size=10, iter_num=10):
+    logger = logging.getLogger("log.test.mx.quantize")
+
+    ctx = mx.cpu()
+    input_size = 299
+    inputs_ext = { 'data': {
+        'shape': (batch_size, 3, 299, 299),
+    }}
+    inputs = [mx.sym.var(n) for n in inputs_ext]
+
+    data_iter = utils.load_dataset(batch_size, input_size)
+    def data_iter_func():
+        data = data_iter.next()
+        return data.data[0], data.label[0]
+    data, _ = data_iter_func()
+
+    net1 = utils.load_model(*load_fname("_v3"), inputs, ctx=ctx)
+    def graph_func(data):
+        return net1.forward(data.as_in_context(ctx))
+
+    net2 = utils.load_model(*load_fname("v3"), inputs, ctx=ctx)
+    def gluon_cv(data):
+        return net2.forward(data.as_in_context(ctx))
+
+    utils.multi_eval_accuracy(graph_func, data_iter_func,
+            gluon_cv,
+            iter_num=iter_num, logger=logger)
+
 if __name__ == '__main__':
     utils.log_init()
 
     # zoo.save_inception_v3()
-    test_sym_pass(16, 100000)
+    # zoo.save_model('inceptionv3', 1000)
+
+    # test_sym_pass(16, 100000)
     # test_sym_nnvm(1, 1)
     # test_mxnet_sym(1)
+    test_mx_quantize(16, 10)

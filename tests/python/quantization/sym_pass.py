@@ -159,8 +159,8 @@ def yxnet_realize(symbol, params, inputs_ext):
 def nnvm_realize(symbol, params, inputs_ext):
     """Transform Sim-Quant(Float32 Simulate Int8) to Int8-Inference Graph
         Works:
-        *) Remove floor layer in Int8 graph
-        *) Cast _*_scalar op to Int32
+        *) Remove floor|ceil|round layer in Int8 graph
+        *) Cast __div_scalar__ op to right shift
         *) Remove unused params in graph
         *) Check&cast params type from Float32 to Int8|Int32
         *) Check supported op in cvm engine
@@ -180,11 +180,8 @@ def nnvm_realize(symbol, params, inputs_ext):
     logger = logging.getLogger("log.quant.nnvm.realize")
 
     def _realize(sym, params, graph, inputs_ext):
-        name = sym.attr('name')
-        attr = sym.list_attr()
-        op_name = sym.attr('op_name')
-        childs = sym_iter(sym.get_children())
-
+        name, op_name = sym.attr('name'), sym.attr('op_name')
+        attr, childs = sym.list_attr(), sym_iter(sym.get_children())
         node = sym
         if 'scalar' in attr:
             scalar = float(attr['scalar'])
@@ -193,40 +190,21 @@ def nnvm_realize(symbol, params, inputs_ext):
             assert scalar >= INT32_MIN and scalar <= INT32_MAX, msg
             assert float(int(scalar)) == scalar, msg
 
-            #  attr['scalar'] = max(min(int(scalar), INT8_MAX), INT8_MIN)
             attr['scalar'] = int(scalar)
             node = get_nnvm_op(op_name)(*childs, **attr)
 
-        # remove layer: floor in int8
-        if op_name in ['floor', 'ceil']:
+        if op_name in ['floor', 'ceil', 'round']:
             node = childs[0]
-        # elif op_name == '__rpow_scalar__':
-        #     print (name, op_name, attr, len(childs))
-        #     base = int(attr['scalar'])
-        #     if base == 2:
-        #         const_1, const_name = op_const(1, graph, var=nnvm.sym.Variable)
-        #         params[const_name] = nd.array([1])
-        #         node = nnvm.sym.broadcast_left_shift(const_1, childs[0])
-        # elif op_name == "broadcast_div":
-        #    msg = '%s(op=%s, inputs=%s)'%(name, op_name, [c.attr('name') for c in childs])
-        #    input_sym = childs[0]
-        #    div_sym = childs[1]
-        #    assert div_sym.attr('op_name') == 'null' # params or constant
-        #    div_sym_name = div_sym.attr('name')
+        elif op_name == '__div_scalar__':
+            scalar = int(attr['scalar'])
+            sb = math.log2(scalar)
+            assert int(sb) == sb, "op(%s name=%s) scalar (%s vs. %s)" \
+                % (op_name, name, scalar, sb)
 
-        #    div = params[div_sym_name]
-        #    shift_bits = mx.ndarray.log2(div).astype('float32')
-        #    assert all(div >= 0)
-        #    assert shift_bits.astype('int8').astype('float32') == shift_bits, msg
-
-        #    sb_sym_name = div_sym_name.replace('_scale', '') + '_shift_bits'
-        #    if sb_sym_name in graph:
-        #        sb_sym = graph[sb_sym_name]
-        #    else:
-        #        sb_sym = nnvm.sym.Variable(sb_sym_name, shape=(1,))
-        #        graph[sb_sym_name] = sb_sym
-        #        params[sb_sym_name] = shift_bits
-        #    node = nnvm.sym.broadcast_right_shift(input_sym, sb_sym)
+            X = childs[0]
+            sb_sym, sb_name = op_const(int(sb), graph, var=nnvm.sym.Variable)
+            params[sb_name] = nd.array([int(sb)])
+            node = nnvm.sym.broadcast_right_shift(X, sb_sym)
         elif op_name not in nnvm_identity_ext:
             logger.critical(
                 "Unsupported op:%s(name=%s, attr=%s) in INT8 Inference network",
@@ -234,9 +212,7 @@ def nnvm_realize(symbol, params, inputs_ext):
 
         return node, params
 
-    ops = sym_collect_attr(symbol)
-    print (ops)
-
+    print (sym_collect_attr(symbol))
     ret_sym, params = topo_visit(symbol, params, get_op=get_nnvm_op,
             logger=logger, inputs_ext=inputs_ext, callback=_realize)
 
@@ -245,14 +221,12 @@ def nnvm_realize(symbol, params, inputs_ext):
     for key, value in params.items():
         if key not in args:
             logger.warn("key:%s not exists in graph", key)
-            # ret_params[key] = value
         else:
             msg = "key:%s value:%s"%(key, value)
             flat = value.asnumpy().flatten()
             assert all(flat >= INT32_MIN) and all(flat <= INT32_MAX), msg
             assert all(flat.astype('int32').astype('float32') == flat), msg
             ret_params[key] = tvm.nd.array(value.astype('int32').asnumpy())
-
     return ret_sym, ret_params
 
 MATRIX_MAXIMUM_SIZE = 65536 # 2 ** 16

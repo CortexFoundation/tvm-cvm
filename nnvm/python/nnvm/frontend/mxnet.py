@@ -337,7 +337,7 @@ _identity_list = ['__add_scalar__', '__add_symbol__', '__div_scalar__',
                   'flatten', 'log', 'log2', 'log_softmax', 'max', 'min', 'negative',
                   'ones_like', 'relu', 'sigmoid', 'slice_like', 'softmax',
                   'sum', 'tanh', 'transpose', 'zeros_like', 'gather_nd',
-                  'reshape_like', 'where', 'floor', 'ceil']
+                  'reshape_like', 'where', 'floor', 'round', 'ceil']
 
 _convert_map = {
     'Custom'        : _custom,
