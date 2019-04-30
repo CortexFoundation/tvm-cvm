@@ -18,7 +18,6 @@ OPT_PASS_LEVEL = {
     "OpFusion": 1,
     "FoldScaleAxis": 3,
     "AlterOpLayout": 3,
-    "OpQuantizationFuse": 4,
 }
 
 # List of optimization pass and level when switch on
@@ -34,6 +33,7 @@ class BuildConfig(object):
     defaults = {
         "opt_level": 2,
         "add_pass": None,
+        "runtime": "cvm",
     }
     def __init__(self, **kwargs):
         self._old_scope = None
@@ -184,7 +184,7 @@ def optimize(graph, shape, dtype="float32", layout=None):
 
 
 def build(graph, target=None, shape=None, dtype="float32",
-          params=None, target_host=None, layout=None, runtime="cvm"):
+          params=None, target_host=None, layout=None):
     """Build graph into runtime library.
 
     The build function will optimize the graph and do the compilation.
@@ -285,11 +285,6 @@ def build(graph, target=None, shape=None, dtype="float32",
         # Clear extra params without nodes.
         _remove_noref_params(params, graph)
 
-        # Fuse op for quantization
-        if cfg.pass_enabled("OpQuantizationFuse"):
-            graph, params = op_quant_fuse(graph, params)
-            shape, dtype = _update_shape_dtype(shape, dtype, params)
-
         # Precompute prune
         if params and cfg.pass_enabled("PrecomputePrune"):
             graph, params = precompute_prune(graph, params)
@@ -310,12 +305,12 @@ def build(graph, target=None, shape=None, dtype="float32",
         graph = graph.apply("GraphFindFusibleGroups")
         graph = graph.apply("GraphFuse")
         with target:
-            if runtime == "cvm":
+            if cfg.runtime == "cvm":
                 graph = graph.apply("GraphCompile")
-            elif runtime == "tvm":
+            elif cfg.runtime == "tvm":
                 graph = graph.apply("TVMGraphCompile")
             else:
-                raise TypeError("runtime %s is not supported."%runtime)
+                raise TypeError("runtime %s is not supported."%cfg.runtime)
         libmod = graph_attr._move_out_module(graph, "module")
         #Write variable initial values into params
         if init_var:
@@ -419,13 +414,6 @@ def precompute_prune(graph, params):
     with tvm.build_config(auto_unroll_max_step=0):
         out_arrs = _run_graph(pre_graph, params)
     return graph, dict(zip(out_names, out_arrs))
-
-
-def op_quant_fuse(graph, params):
-    graph = graph if isinstance(graph, _graph.Graph) else _graph.create(graph)
-    graph._set_json_attr("quant_param_name_list", list(params.keys()), "list_str")
-    graph = graph.apply("OpQuantizationFuse")
-    op_quant_graph = graph_attr._move_out_graph(graph, "op_quant_graph")
 
 
 def initialize_variables(ishape, idtype):

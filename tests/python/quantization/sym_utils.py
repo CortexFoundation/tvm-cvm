@@ -348,4 +348,5 @@ mx_identity_ext = {
         'mode': [True, 'training'],
     },
     'Concat': {},
+    'elemwise_add': {},
 }

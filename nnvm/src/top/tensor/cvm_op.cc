@@ -22,6 +22,8 @@ using namespace nnvm::compiler;
 
 DMLC_REGISTER_PARAMETER(CVMClipParam);
 
+#define INT_PREC 32
+
 NNVM_REGISTER_OP(cvm_clip)
 .describe(R"doc(CVM clip input with precision.
 
@@ -62,8 +64,8 @@ Example::
 			a_min = 0;
 		}
     return Array<Tensor>{
-      topi::clip(inputs[0], tvm::make_const(tvm::Int(32), a_min),
-                 tvm::make_const(tvm::Int(32), a_max)) };
+      topi::clip(inputs[0], tvm::make_const(tvm::Int(INT_PREC), a_min),
+                 tvm::make_const(tvm::Int(INT_PREC), a_max)) };
   }, 11)
 .add_argument("data", "Tensor", "input")
 .add_arguments(CVMClipParam::__FIELDS__())
@@ -100,10 +102,10 @@ NNVM_REGISTER_OP(cvm_left_shift)
 		a_min = 0;
 	}
 	const Tensor& tmp = topi::left_shift(inputs[0],
-			tvm::make_const(tvm::Int(32), params.shift_bit));
+			tvm::make_const(tvm::Int(INT_PREC), params.shift_bit));
     return Array<Tensor>{
-      topi::clip(tmp, tvm::make_const(tvm::Int(32), a_min),
-                 tvm::make_const(tvm::Int(32), a_max)) };
+      topi::clip(tmp, tvm::make_const(tvm::Int(INT_PREC), a_min),
+                 tvm::make_const(tvm::Int(INT_PREC), a_max)) };
   }, 11)
 .add_argument("data", "Tensor", "input")
 .add_arguments(CVMLeftShiftParam::__FIELDS__())
@@ -147,15 +149,15 @@ which means to implement via tricky equation.
 	Tensor tmp = inputs[0];
 	if (params.shift_bit > 1) {
 		tmp = topi::right_shift(tmp,
-				tvm::make_const(tvm::Int(32), params.shift_bit-1));
+				tvm::make_const(tvm::Int(INT_PREC), params.shift_bit-1));
 	}
 	tmp = topi::add(tmp,
-			tvm::make_const(tvm::Int(32), 1));
+			tvm::make_const(tvm::Int(INT_PREC), 1));
 	tmp = topi::right_shift(tmp,
-			tvm::make_const(tvm::Int(32), 1));
+			tvm::make_const(tvm::Int(INT_PREC), 1));
     return Array<Tensor>{
-      topi::clip(tmp, tvm::make_const(tvm::Int(32), a_min),
-                 tvm::make_const(tvm::Int(32), a_max)) };
+      topi::clip(tmp, tvm::make_const(tvm::Int(INT_PREC), a_min),
+                 tvm::make_const(tvm::Int(INT_PREC), a_max)) };
   }, 11)
 .add_argument("data", "Tensor", "input")
 .add_arguments(CVMRightShiftParam::__FIELDS__())

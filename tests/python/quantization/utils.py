@@ -3,6 +3,7 @@ from mxnet import ndarray as nd
 
 import logging
 import math
+import time
 
 class ColoredFormatter(logging.Formatter):
     def __init__(self, fmt=None, datefmt=None, style='%'):
@@ -180,34 +181,40 @@ def multi_eval_accuracy(base_func, data_iter_func, *comp_funcs,
         logger.info(log_str, i, 100.*acc/total,
                 *[100.*acc/total for acc in comp_accs], total)
 
-def eval_accuracy(graph_func, data_iter_func, iter_num=10,
-        graph_comp_func=None, logger=logging):
+def eval_time_accuracy(base_func, data_iter_func, comp_func=None,
+        iter_num=10, logger=logging):
+    log_str = "Iteration: %3d | Accuracy: %5.2f%%(%.4f sec) | "
+    log_str += comp_func.__name__ if comp_func else "NULL"
+    log_str += ": %5.2f%%(%.4f sec), diff: %5.2f%% | "
+    log_str += "Total Sample: %5d"
 
     acc, comp_acc, diff, total = 0, 0, 0, 0
+    sec, comp_sec = 0, 0
     for i in range(iter_num):
         data, label = data_iter_func()
 
-        res = graph_func(data)
-        if graph_comp_func is not None:
-            res_comp = graph_comp_func(data)
+        start = time.time()
+        res = base_func(data)
+        sec += time.time() - start
+        if comp_func is not None:
+            start = time.time()
+            res_comp = comp_func(data)
+            comp_sec += time.time() - start
 
         for idx in range(res.shape[0]):
             res_label = res[idx].asnumpy().argmax()
             data_label = label[idx].asnumpy()
             acc += 1 if res_label == data_label else 0
 
-            if graph_comp_func is not None:
+            if comp_func is not None:
                 res_comp_label = res_comp[idx].asnumpy().argmax()
                 comp_acc += 1 if res_comp_label == data_label else 0
                 diff += 0 if res_label == res_comp_label else 1
 
             total += 1
 
-        logger.info(" \
-Iteration: %5d | Accuracy: %5.2f%% | \
-Compare Accuracy: %5.2f%% | Difference: %5.2f%% | \
-Total Sample: %5d",
-                i, 100.*acc/total, 100.*comp_acc/total, 100.*diff/total, total)
+        logger.info(log_str, i, 100.*acc/total, sec/total,
+            100.*comp_acc/total, comp_sec/total, 100.*diff/total, total)
 
 
 

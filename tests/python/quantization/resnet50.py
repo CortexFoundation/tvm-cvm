@@ -2,8 +2,8 @@ from mxnet.gluon.model_zoo import vision
 
 from resnet import *
 
-SYMBOL_FILE = "./data/resnet50-symbol.json"
-PARAMS_FILE = "./data/resnet50-0000.params"
+SYMBOL_FILE = "./data/resnet50_mxg.json"
+PARAMS_FILE = "./data/resnet50_mxg.params"
 
 def load_quant_graph(quant_flag):
     layers, channels = ([3, 4, 6, 3], [64, 256, 512, 1024, 2048])
