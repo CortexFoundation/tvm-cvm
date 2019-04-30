@@ -62,8 +62,8 @@ Example::
 			a_min = 0;
 		}
     return Array<Tensor>{
-      topi::clip(inputs[0], tvm::make_const(tvm::Int(64), a_min),
-                 tvm::make_const(tvm::Int(64), a_max)) };
+      topi::clip(inputs[0], tvm::make_const(tvm::Int(32), a_min),
+                 tvm::make_const(tvm::Int(32), a_max)) };
   }, 11)
 .add_argument("data", "Tensor", "input")
 .add_arguments(CVMClipParam::__FIELDS__())
@@ -91,19 +91,19 @@ NNVM_REGISTER_OP(cvm_left_shift)
                     const Array<Tensor>& inputs,
                     const Array<Tensor>& out_info) {
     const CVMLeftShiftParam params = get<CVMLeftShiftParam>(attrs.parsed);
-		int64_t a_max, a_min;
-		if (params.is_sign) {
-			a_max = (1 << (params.precision-1)) - 1;
-			a_min = -a_max;
-		} else {
-			a_max = (1 << params.precision) - 1;
-			a_min = 0;
-		}
-		const Tensor& tmp = topi::left_shift(inputs[0],
-				tvm::make_const(tvm::Int(64), params.shift_bit));
+	int64_t a_max, a_min;
+	if (params.is_sign) {
+		a_max = (1 << (params.precision-1)) - 1;
+		a_min = -a_max;
+	} else {
+		a_max = (1 << params.precision) - 1;
+		a_min = 0;
+	}
+	const Tensor& tmp = topi::left_shift(inputs[0],
+			tvm::make_const(tvm::Int(32), params.shift_bit));
     return Array<Tensor>{
-      topi::clip(inputs[0], tvm::make_const(tvm::Int(64), a_min),
-                 tvm::make_const(tvm::Int(64), a_max)) };
+      topi::clip(tmp, tvm::make_const(tvm::Int(32), a_min),
+                 tvm::make_const(tvm::Int(32), a_max)) };
   }, 11)
 .add_argument("data", "Tensor", "input")
 .add_arguments(CVMLeftShiftParam::__FIELDS__())
@@ -136,19 +136,26 @@ which means to implement via tricky equation.
                     const Array<Tensor>& inputs,
                     const Array<Tensor>& out_info) {
     const CVMRightShiftParam params = get<CVMRightShiftParam>(attrs.parsed);
-		int64_t a_max, a_min;
-		if (params.is_sign) {
-			a_max = (1 << (params.precision-1)) - 1;
-			a_min = -a_max;
-		} else {
-			a_max = (1 << params.precision) - 1;
-			a_min = 0;
-		}
-		const Tensor& tmp = topi::right_shift(inputs[0],
-				tvm::make_const(tvm::Int(64), params.shift_bit));
+	int64_t a_max, a_min;
+	if (params.is_sign) {
+		a_max = (1 << (params.precision-1)) - 1;
+		a_min = -a_max;
+	} else {
+		a_max = (1 << params.precision) - 1;
+		a_min = 0;
+	}
+	Tensor tmp = inputs[0];
+	if (params.shift_bit > 1) {
+		tmp = topi::right_shift(tmp,
+				tvm::make_const(tvm::Int(32), params.shift_bit-1));
+	}
+	tmp = topi::add(tmp,
+			tvm::make_const(tvm::Int(32), 1));
+	tmp = topi::right_shift(tmp,
+			tvm::make_const(tvm::Int(32), 1));
     return Array<Tensor>{
-      topi::clip(tmp, tvm::make_const(tvm::Int(64), a_min),
-                 tvm::make_const(tvm::Int(64), a_max)) };
+      topi::clip(tmp, tvm::make_const(tvm::Int(32), a_min),
+                 tvm::make_const(tvm::Int(32), a_max)) };
   }, 11)
 .add_argument("data", "Tensor", "input")
 .add_arguments(CVMRightShiftParam::__FIELDS__())

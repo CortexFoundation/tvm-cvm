@@ -172,7 +172,7 @@ def test_mx_quantize(batch_size=10, iter_num=10):
     open(dump_sym, "w").write(sym.tojson())
 
     qsym, qparams = calib.sym_simulate(sym, params, inputs_ext, data, ctx)
-    qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, "tvm")
+    qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, "cvm")
     sim.save_ins_ext(qparams, inputs_ext)
     dump_sym, dump_params = load_fname(origin, "sym.quantize")
     nd.save(dump_params, qparams)
@@ -201,4 +201,3 @@ if __name__ == '__main__':
     # test_sym_pass(16, 10)
     # test_mx_quantize(16, 10)
     test_sym_nnvm(16, 10)
-    # test_mx_quantize(16, 10)
