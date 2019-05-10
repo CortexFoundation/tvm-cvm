@@ -56,26 +56,29 @@ class BroadcastShift(mx.operator.CustomOp):
 
     def forward(self, is_train, req, in_data, out_data, aux):
         assert is_train == False
-        X, SB = in_data[0], in_data[1]
+        X, SB, TB = in_data[0], in_data[1], in_data[2]
         Y = out_data[0]
-        bh = self.broadcast_shape(X.shape, SB.shape)
-        assert Y.shape == bh
+        bh = broadcast_shape(X.shape, SB.shape)
+        assert list(Y.shape) == bh, "%s vs. %s in: %s %s" % (Y.shape, bh, X.shape, SB.shape)
         ovars = None
         for i in range(np.product(bh)):
             ovars = vars_increment(ovars, bh)
-            xvars = input_idx_from_broadcast(ovars, X.shape)
-            sbvars = input_idx_from_broadcast(ovars, SB.shape)
+            xvars = tuple(input_idx_from_broadcast(ovars, X.shape))
+            sbvars = tuple(input_idx_from_broadcast(ovars, SB.shape))
             x, sb = X[xvars].asscalar(), SB[sbvars].asscalar()
+            x, sb = int(round(x)), int(round(sb))
+            tb = int(round(TB[sbvars].asscalar()))
             if sb > 0:
                 if sb > 1:
-                    x = int(x) >> (sb - 1)
+                    x = x >> (sb - 1)
                 x += 1
                 x = x >> 1
             elif sb < 0:
                 x = x << (-sb)
-            Y[ovars] = x
-        a_min, a_max = self.min, self.max
-        Y = Y.clip(a_min=a_min, a_max=a_max)
+            clip = 2 ** (tb - 1) - 1
+            Y[ovars] = max(min(x, clip), -clip)
+        #  a_min, a_max = self.min, self.max
+        #  Y = Y.clip(a_min=a_min, a_max=a_max)
         self.assign(out_data[0], req[0], Y)
 
     def backward(self, req, out_grad, in_data, out_data, in_grad, aux):
@@ -113,13 +116,12 @@ class Clip(mx.operator.CustomOp):
         a_min, a_max = self.min, self.max
         out = X.round()
         out = out.clip(a_min=a_min, a_max=a_max)
-
-        X_max, X_min = X.max().asscalar(), X.min().asscalar()
-        omax, omin = out.max().asscalar(), out.min().asscalar()
-        cvm_log.write("%s:\n %d %d %d %d %s \n" % (self.cvm_name,
-                    round(X_max), round(X_min),
-                    round(omax), round(omin),
-                    " ".join(str(int(round(d))) for d in X.asnumpy().flatten()[:10])))
+        # X_max, X_min = X.max().asscalar(), X.min().asscalar()
+        # omax, omin = out.max().asscalar(), out.min().asscalar()
+        # cvm_log.write("%s:\n %d %d %d %d %s \n" % (self.cvm_name,
+        #             round(X_max), round(X_min),
+        #             round(omax), round(omin),
+        #             " ".join(str(int(round(d))) for d in X.asnumpy().flatten()[:10])))
         self.assign(out_data[0], req[0], out)
 
     def backward(self, req, out_grad, in_data, out_data, in_grad, aux):
@@ -161,18 +163,19 @@ class RightShift(mx.operator.CustomOp):
         X = in_data[0]
         a_min, a_max = self.min, self.max
         out = X.round()
-        out = out / (2 ** (self.sb-1))
-        out = out.floor()
+        if self.sb > 1:
+            out = out / (2 ** (self.sb-1))
+            out = out.floor()
         out = out + 1
         out = out / 2
         out = out.floor()
         out = out.clip(a_min=a_min, a_max=a_max)
-        X_max, X_min = X.max().asscalar(), X.min().asscalar()
-        omax, omin = out.max().asscalar(), out.min().asscalar()
-        cvm_log.write("%s:\n %d %d %d %d %s \n" % (self.cvm_name,
-                    round(X_max), round(X_min),
-                    round(omax), round(omin),
-                    " ".join(str(int(round(d))) for d in X.asnumpy().flatten()[:10])))
+        # X_max, X_min = X.max().asscalar(), X.min().asscalar()
+        # omax, omin = out.max().asscalar(), out.min().asscalar()
+        # cvm_log.write("%s:\n %d %d %d %d %s \n" % (self.cvm_name,
+        #             round(X_max), round(X_min),
+        #             round(omax), round(omin),
+        #             " ".join(str(int(round(d))) for d in X.asnumpy().flatten()[:10])))
         self.assign(out_data[0], req[0], out)
 
     def backward(self, req, out_grad, in_data, out_data, in_grad, aux):
@@ -239,6 +242,34 @@ class RightShiftProp(mx.operator.CustomOpProp):
         return [X_type], [X_type], []
     def create_operator(self, ctx, shapes, dtypes):
         return RightShift(self.precision, self.shift_bit, self.cvm_name)
+
+@mx.operator.register("cvm_broadcast_shift")
+class BroadcastShiftProp(mx.operator.CustomOpProp):
+    def __init__(self, precision=8):
+        self.precision= precision
+        super(BroadcastShiftProp, self).__init__(need_top_grad=False)
+    def list_arguments(self):
+        return ['data', 'shift_bits', 'target_bits']
+    def list_outputs(self):
+        return ['output']
+    def infer_shape(self, in_shape):
+        X_shape = in_shape[0]
+        B_shape = in_shape[1]
+        P_shape = in_shape[1]
+        out_shape = broadcast_shape(X_shape, B_shape)
+        return [X_shape, B_shape, P_shape], [out_shape], []
+    def infer_type(self, in_type):
+        X_type = in_type[0]
+        B_type = P_type = X_type
+        return [X_type, B_type, P_type], [X_type], []
+    def create_operator(self, ctx, shapes, dtypes):
+        return BroadcastShift(self.precision)
+
+
+
+
+
+
 
 
 

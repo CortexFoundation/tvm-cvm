@@ -30,7 +30,7 @@ def save_mobilenet_v2_1_0():
         fout.write(sym.tojson())
     graph.save_parameters('./data/mobilenet_v2_1_0.params')
 
-def get_model(name, classes):
+def get_model(name, **kwargs):
     """Returns a pre-defined model by name
 
     Parameters
@@ -46,10 +46,12 @@ def get_model(name, classes):
         The model.
     """
     return cv.model_zoo.get_model(name, pretrained=True,
-            ctx=mx.gpu(), classes=classes)
-def save_model(name, classes):
-    net = get_model(name, classes)
+            ctx=mx.gpu(), **kwargs)
+def save_model(name, **kwargs):
+    net = get_model(name, **kwargs)
     sym = net(mx.sym.var('data'))
+    if isinstance(sym, tuple):
+        sym = mx.sym.Group([*sym])
     with open("./data/%s.json"%name, "w") as fout:
         fout.write(sym.tojson())
     net.collect_params().save("./data/%s.params"%name)

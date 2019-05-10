@@ -17,7 +17,7 @@ def save_ins_ext(params, inputs_ext):
         ext = inputs_ext[name]
         scale, target_bit = ext['scale'], ext['target_bit']
         params[name+'_scale'] = ext['scale']
-        params[name+'_target_bit'] = nd.array([ext['target_bit']])
+        params[name+'_target_bit'] = ext['target_bit']
 def load_ins_ext(params, inputs_ext):
     for name in inputs_ext:
         ext = inputs_ext[name]
@@ -76,10 +76,34 @@ def parse_nd_float(array):
     shape= array.shape
     array = array.asnumpy().flatten()
     size = len(array)
+
     fracs, sbs = [None] * size, [None] * size
     for idx in range(size):
         fracs[idx], sbs[idx] = extract_float(array[idx])
-    return nd.array(fracs).reshape(shape), nd.array(sbs).reshape(shape)
+    return nd.array(fracs), nd.array(sbs)
+
+
+    max_bit = math.ceil(math.log2(array.max())) + 1
+    assert max_bit <= 24
+    min_bit = max_bit - 24
+
+    fracs, min_sb = [None] * size, None
+    for idx in range(size):
+        frac, sb = extract_float(array[idx])
+        if frac != 0:
+            min_sb = sb if min_sb is None else min(min_sb, sb)
+
+    min_sb = max(min_sb, min_bit)
+    # min_frac = int(abs(round(min_v / (2**min_sb))))
+    # if min_frac == 0:
+    #     min_frac_bit = 0
+    # else:
+    #     min_frac_bit = math.ceil(math.log2(min_frac)) + 1
+    # if min_frac_bit > min_bit:
+    #     min_sb += (min_frac_bit - min_bit)
+    for idx in range(size):
+        fracs[idx] = int(round(array[idx] / (2 ** min_sb)))
+    return nd.array(fracs).reshape(shape), min_sb
 
 def extract_float(number):
     sign, binary = float_bin(number, 24)

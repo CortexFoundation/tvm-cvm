@@ -1,4 +1,3 @@
-
 import mxnet as mx
 from mxnet import ndarray as nd
 from mxnet.gluon import nn
@@ -164,31 +163,45 @@ def test_mx_quantize(batch_size=10, iter_num=10):
     # def gluon_cv_quantize(data):
     #     return net3.forward(data.as_in_context(ctx))
 
-    origin = "1_0"
+    origin = "1.0"
+    sim_ctx, quant_ctx= mx.gpu(1), mx.gpu(2)
+
     sym_fname, param_fname = load_fname(origin)
     sym, params = mx.sym.load(sym_fname), nd.load(param_fname)
     sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
-    dump_sym, dump_params = load_fname(origin, suffix="sym.sim.prepare")
-    nd.save(dump_params, params)
-    open(dump_sym, "w").write(sym.tojson())
 
-    qsym, qparams = calib.sym_simulate(sym, params, inputs_ext, data, ctx)
-    qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, "cvm")
+    qsym, qparams, precisions = calib.sym_simulate(sym, params, inputs_ext,
+            data, sim_ctx)
+    sim.save_ins_ext(qparams, inputs_ext)
+    dump_sym, dump_params = load_fname(origin, "sym.simulate")
+    nd.save(dump_params, qparams)
+    open(dump_sym, "w").write(qsym.tojson())
+    open("target_bits", "w").write("\n".join(["%s: %s"%(k, v) for k, v in precisions.items()]))
+
+    dump_sym, dump_params = load_fname(origin, "sym.simulate")
+    sim.load_ins_ext(nd.load(dump_params), inputs_ext)
+    net4 = utils.load_model(dump_sym, dump_params, inputs, ctx=sim_ctx)
+    def cvm_simulate(data):
+        data = sim.load_sim_data(data, 'data', inputs_ext)
+        return net4.forward(data.as_in_context(sim_ctx))
+
+    qsym, qparams = mx.sym.load(dump_sym), nd.load(dump_params)
+    qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext,
+            precisions, data, "cvm")
     sim.save_ins_ext(qparams, inputs_ext)
     dump_sym, dump_params = load_fname(origin, "sym.quantize")
     nd.save(dump_params, qparams)
     open(dump_sym, "w").write(qsym.tojson())
 
-    cvm_ctx = mx.gpu()
     dump_sym, dump_params = load_fname(origin, "sym.quantize")
     sim.load_ins_ext(nd.load(dump_params), inputs_ext)
-    net4 = utils.load_model(dump_sym, dump_params, inputs, ctx=cvm_ctx)
+    net5 = utils.load_model(dump_sym, dump_params, inputs, ctx=quant_ctx)
     def cvm_quantize(data):
         data = sim.load_real_data(data, 'data', inputs_ext)
-        return net4.forward(data.as_in_context(cvm_ctx))
+        return net5.forward(data.as_in_context(quant_ctx))
 
     utils.multi_eval_accuracy(graph_func, data_iter_func,
-            gluon_cv, cvm_quantize,
+            gluon_cv, cvm_simulate, cvm_quantize,
             iter_num=iter_num, logger=logger)
 
 def test_performance(batch_size=10, iter_num=10):
@@ -253,6 +266,6 @@ if __name__ == '__main__':
     # zoo.save_model('mobilenet1.0_int8', 1000)
 
     # test_sym_pass(16, 10)
-    # test_mx_quantize(16, 10)
+    test_mx_quantize(16, 10)
     # test_sym_nnvm(16, 10)
-    test_performance(16, 10)
+    # test_performance(16, 10)

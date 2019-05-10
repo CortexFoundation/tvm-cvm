@@ -75,10 +75,11 @@ def test_sym_nnvm(batch_size=10, iter_num=10):
            nnvm_sym, target=target, shape=inputs_shape,
            params=real_params, dtype=use_dtype)
 
+    real_params = spass.tvm_params_reduce(nnvm_sym, real_params, inputs_ext, tvm_ctx)
+
     dump_symbol, dump_params = '/tmp/inception_v3/symbol.json', '/tmp/inception_v3/params'
     with open(dump_symbol, "w") as fout:
        fout.write(deploy_graph.json())
-    print (real_params['A1_pool0_conv_weight'])
     with open(dump_params, "wb") as fout:
        param_bytes = nnvm.compiler.save_param_dict(real_params)
        fout.write(param_bytes)
@@ -108,7 +109,7 @@ def test_sym_pass(batch_size=10, iter_num=10):
     inputs = [mx.sym.var(name) for name in inputs_ext]
 
     logger.info("load dataset, symbol and parameters")
-    data_iter = utils.load_dataset(batch_size, (3, 299, 299))
+    data_iter = utils.load_dataset(batch_size, 299)
     def data_iter_func():
         data = data_iter.next()
         return data.data[0], data.label[0]
@@ -122,45 +123,34 @@ def test_sym_pass(batch_size=10, iter_num=10):
     def graph_func(data):
         return graph_comp.forward(data.as_in_context(ctx))
 
-
-    utils.multi_eval_accuracy(graph_func, data_iter_func,
-            iter_num=iter_num, logger=logger)
-    exit()
-
-    ops = sutils.sym_collect_attr(sym)
-    print (ops)
-
     sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
-    dump_sym, dump_params = get_dump_fname('sym.sim.prepare')
+    dump_sym, dump_params = get_dump_fname('sym.prepare')
     nd.save(dump_params, params)
-    with open(dump_sym, 'w') as fout:
-       fout.write(sym.tojson())
+    open(dump_sym, "w").write(sym.tojson())
     graph = nn.SymbolBlock(sym, inputs)
     utils.load_parameters(graph, params, ctx=ctx)
-    def prepare(data):
+    def cvm_prepare(data):
         return graph.forward(data.as_in_context(ctx))
-
-    ops = sutils.sym_collect_attr(sym)
-    print (ops)
 
     qsym, qparams = calib.sym_simulate(sym, params, inputs_ext, data, ctx)
     qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext)
 
     sim.save_ins_ext(qparams, inputs_ext)
-    dump_sym, dump_params = get_dump_fname('sym.sim.simulate')
+    dump_sym, dump_params = get_dump_fname('sym.quantize')
     nd.save(dump_params, qparams)
-    with open(dump_sym, 'w') as fout:
-      fout.write(qsym.tojson())
+    open(dump_sym, "w").write(qsym.tojson())
+
     qsym, qparams = mx.sym.load(dump_sym), nd.load(dump_params)
     sim.load_ins_ext(qparams, inputs_ext)
     qgraph = nn.SymbolBlock(qsym, inputs)
     utils.load_parameters(qgraph, qparams, ctx=ctx)
-    def simulate(data):
+    def cvm_quantize(data):
         #  data = sim.load_sim_data(data, 'data', inputs_ext)
         data = sim.load_real_data(data, 'data', inputs_ext)
         return qgraph.forward(data.as_in_context(ctx))
 
-    utils.multi_eval_accuracy(graph_func, data_iter_func, prepare, simulate,
+    utils.multi_eval_accuracy(graph_func, data_iter_func,
+            cvm_prepare, cvm_quantize,
             iter_num=iter_num, logger=logger)
 
 def test_mxnet_sym(batch_size=10):
@@ -243,7 +233,7 @@ if __name__ == '__main__':
     # zoo.save_inception_v3()
     # zoo.save_model('inceptionv3', 1000)
 
-    # test_sym_pass(16, 100000)
-    # test_sym_nnvm(1, 1)
+    # test_sym_pass(16, 10)
+    test_sym_nnvm(1, 1)
     # test_mxnet_sym(1)
-    test_mx_quantize(16, 10)
+    # test_mx_quantize(16, 10)

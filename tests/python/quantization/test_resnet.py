@@ -135,8 +135,8 @@ def test_sym_pass(quant_flag, batch_size=10, iter_num=10):
     sym_fname, param_fname = load_fname("mxg")
     sym, params = mx.sym.load(sym_fname), nd.load(param_fname)
     sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
-    qsym, qparams= calib.sym_simulate(sym, params, inputs_ext, data, ctx)
-    qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, "tvm")
+    qsym, qparams, precs = calib.sym_simulate(sym, params, inputs_ext, data, ctx)
+    qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, precs, "cvm")
     dump_sym, dump_params = load_fname("mxg", "sym.quantize")
     sim.save_ins_ext(qparams, inputs_ext)
     nd.save(dump_params, qparams)
@@ -230,8 +230,8 @@ if __name__ == "__main__":
     # save_data()
 
     # test_nnvm_load(batch_size=16, iter_num=10)
-    # test_sym_pass(quant_flag, batch_size=16, iter_num=10)
+    test_sym_pass(quant_flag, batch_size=16, iter_num=10)
     # test_sym_nnvm(batch_size=1, iter_num=1)
-    test_performance(16, 10)
+    # test_performance(16, 10)
 
 

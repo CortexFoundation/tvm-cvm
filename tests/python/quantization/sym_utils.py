@@ -57,13 +57,15 @@ def get_nd_op(op_name):
         raise RuntimeError("Unable to map op_name {} to mxnet.ndarray".format(op_name))
     return op
 
+_MX_OP_CONTRIB_PREFIX = '_contrib_'
 def get_mxnet_op(op_name):
-    try:
-        op = getattr(_internal, op_name)
-    except:
-        op = getattr(_sym, op_name)
+    op = getattr(_internal, op_name, None)
+    if op is None:
+        op = getattr(_sym, op_name, None)
+    if op_name.startswith(_MX_OP_CONTRIB_PREFIX):
+        op = getattr(_sym.contrib, op_name[len(_MX_OP_CONTRIB_PREFIX):], None)
 
-    if not op:
+    if op is None:
         raise RuntimeError("Unable to map op_name {} to mxnet.sym".format(op_name))
     return op
 
@@ -177,8 +179,8 @@ def get_node(sym, graph):
         assert False, "Unrecognized layer:%s in graph"%name
     return graph[name]
 
-def topo_visit(symbol, params, get_op=get_mxnet_op,
-        logger=logging, callback=None, inputs_ext={}, **kwargs):
+def topo_visit(symbol, params, inputs_ext={}, get_op=get_mxnet_op,
+        logger=logging, callback=None, **kwargs):
     graph = {}
     params = {k:v[:] for k,v in params.items()}
     for sym in topo_sort(symbol, logger):
@@ -208,9 +210,6 @@ attention used in non-changable graph pass",
                     'symbol:%s(%s) parameter:%s is missing in params dict:%s' \
                     % (name, [c.attr('name') for c in childs],
                         cname, params.keys())
-        elif op_name != 'null':
-            assert False, "Unrecognized symbol:%s(%s) with none input" \
-                    % (op_name, name)
 
         if callback is not None:
             # process symbol and params

@@ -229,6 +229,18 @@ def nnvm_realize(symbol, params, inputs_ext):
             ret_params[key] = tvm.nd.array(value.astype('int32').asnumpy())
     return ret_sym, ret_params
 
+def tvm_params_reduce(symbol, params, inputs_ext, ctx):
+    for sym in topo_sort(symbol):
+        name, attr = sym.attr('name'), sym.list_attr()
+        if sym.attr('op_name') == 'null' and name not in inputs_ext:
+            precision = eval(attr['precision'])
+            val = params[name]
+            if precision > 8:
+                params[name] = tvm.nd.array(val.asnumpy().astype('int32'), ctx)
+            else:
+                params[name] = tvm.nd.array(val.asnumpy().astype('int8'), ctx)
+    return params
+
 MATRIX_MAXIMUM_SIZE = 65536 # 2 ** 16
 def _matrix_decomposition(sym, params, graph, inputs_ext, infer_shapes):
     logger = logging.getLogger('log.sym.pass.matrix_decomposition')
@@ -458,7 +470,7 @@ def _sym_rewrite(sym, params, graph, inputs_ext, infer_shapes):
                     weight.shape[1:])).reshape(weight.shape)
         params[weight_name] = weight * weight_scale
 
-        bias_name = conv_sym.attr('name') + '_conv_bias'
+        bias_name = conv_sym.attr('name') + '_bias'
         assert bias_name not in graph, "bias name %s has existed in graph %s" \
             % (name, graph.keys())
         bias = beta - scale * data_mean
@@ -466,7 +478,9 @@ def _sym_rewrite(sym, params, graph, inputs_ext, infer_shapes):
             bias += params[conv_childs[2].attr('name')]
         params[bias_name] = bias
 
-        conv_name = conv_sym.attr('name') + '_' + name
+        conv_name = conv_sym.attr('name')
+        suffix = [n for n in name.split("_") if n not in conv_name.split("_")]
+        conv_name = "%s_%s" % (conv_name, "_".join(suffix))
         conv_attr['no_bias'] = 'False'
         bias_sym = graph[bias_name] = mx.sym.var(bias_name, shape=bias.shape)
         node = mx.sym.Convolution(conv_childs[0], conv_childs[1],
