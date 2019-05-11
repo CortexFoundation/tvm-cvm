@@ -154,7 +154,7 @@ def load_dataset(batch_size=10, input_size=224):
     )
 
 def multi_validate(base_func, data_iter, *comp_funcs,
-        iter_num=10, logger=logging, contexts=[]):
+        iter_num=10, logger=logging):
     log_str = "Iteration: {:3d} | Accuracy: {:5.2%} | "
     for func in comp_funcs:
         log_str += func.__name__ + ": {:5.2%} | "
@@ -163,11 +163,11 @@ def multi_validate(base_func, data_iter, *comp_funcs,
     total = 0
     for i in range(iter_num):
         data, label = data_iter()
-        base_acc = base_func(data)
-        comp_acc = [func(data) for func in comp_funcs]
+        base_acc = base_func(data, label)
+        comp_acc = [func(data, label) for func in comp_funcs]
         total += data.shape[0]
 
-        msg = log_str.format(base_acc, *comp_acc, total)
+        msg = log_str.format(i, base_acc, *comp_acc, total)
         logger.info(msg)
 
 def multi_eval_accuracy(base_func, data_iter_func, *comp_funcs,

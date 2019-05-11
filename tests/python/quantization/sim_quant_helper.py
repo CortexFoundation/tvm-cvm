@@ -1,5 +1,6 @@
 import logging
 import math
+import json
 
 import mxnet as mx
 from mxnet import ndarray as nd
@@ -28,8 +29,23 @@ def load_sim_data(data, name, inputs_ext):
 def load_real_data(data, name, inputs_ext):
     logger = logging.getLogger('log.data.load')
     data = load_sim_data(data, name, inputs_ext)
-    return int_realize(data, inputs_ext[name]['target_bit'].asscalar(),
+    return int_realize(data, inputs_ext[name]['target_bit'],
             logger=logger)
+
+def save_ext(fname, *infos, logger=logging):
+    fout = open(fname, "w")
+    for info in infos:
+        try:
+            json.dump(info, fout)
+        except:
+            logger.error("Json seralize invalid with data: %s", info)
+        fout.write('\n')
+def load_ext(fname):
+    fin = open(fname, "r")
+    infos = []
+    for line in fin:
+        infos.append(json.loads(line))
+    return tuple(infos)
 
 def save_data_scale(name, scale, params):
     params[name+'_scale'] = scale
@@ -56,7 +72,8 @@ def get_sim_scale(thresholds, target_bit):
     for value in thresholds:
         alpha = value.abs().max().asscalar()
         sim_max = 2 ** (target_bit - 1) - 1
-        scales.append(sim_max / alpha)
+        scale = 0 if alpha == 0 else sim_max / alpha
+        scales.append(scale)
     return nd.array(scales)
 
 def int_realize(data, target_bit, logger=logging):

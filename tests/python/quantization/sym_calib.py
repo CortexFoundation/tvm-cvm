@@ -21,8 +21,10 @@ max_bit = 32 # INT32
 default_target_bit = 8 # INT8
 bias_target_bit = default_target_bit * 4 - 1
 disable_requant_ops = [
-    'Activation', 'Pooling', 'Flatten',
-    'slice', 'clip',
+    'Activation', 'relu',
+    'Pooling', 'Flatten',
+    'slice', 'slice_like', 'clip',
+    'negative', 'repeat',
 ]
 
 def _collect_symbol_ext(sym, params, graph, inputs_ext, scale_shapes):
@@ -71,7 +73,6 @@ def _calib_sym_collect_thresholds(sym, params, graph, inputs_ext,
         else:
             output = params[name]
     elif op_name in disable_requant_ops:
-        assert len(childs) == 1
         th_dict[name] = th_dict[childs[0].attr('name')]
         return sym, params
     else:
@@ -186,7 +187,7 @@ def _collect_scale_helper(sym, params, graph, inputs_ext,
     target_bits[name] = default_target_bit
     if op_name == 'null':
         if name in inputs_ext:
-            inputs_ext[name]['target_bit'] = nd.array([default_target_bit])
+            inputs_ext[name]['target_bit'] = default_target_bit
     elif op_name in ['Convolution', 'FullyConnected']:
         X_name, W_name = childs[0].attr('name'), childs[1].attr('name')
         if attr['no_bias'] == 'False':
@@ -240,7 +241,8 @@ def _annotate_layer(sym, params, graph, inputs_ext,
         requant_scale = scale_helper[name] / in_scale
     elif op_name in ['Convolution', 'FullyConnected', 'broadcast_mul']:
         requant_scale = scale_helper[name] / (cscales[0] * cscales[1])
-    elif op_name in ['elemwise_add', 'broadcast_add', 'broadcast_sub', 'Concat']:
+    elif op_name in ['elemwise_add', 'elemwise_sub',
+            'broadcast_add', 'broadcast_sub', 'Concat']:
         new_childs = []
         in_scale = min(cscales)
         for idx, c in enumerate(childs):
@@ -282,7 +284,7 @@ def _annotate_parameters(sym, params, graph, inputs_ext,
         return sym, params
     name = sym.attr('name')
     if name in inputs_ext:
-        inputs_ext[name]['scale'] = scale_helper[name]
+        inputs_ext[name]['scale'] = float(scale_helper[name].asscalar())
     elif name in scale_helper:
         params[name] = params[name] * scale_helper[name]
     return sym, params
@@ -423,10 +425,12 @@ def sym_simulate(symbol, params, inputs_ext, calib_data, ctx):
             callback=_annotate_parameters,
             scale_helper=scale_helper, target_bits=target_bits)
 
+    out_scales = [float(scale_helper[s.attr('name')].asscalar()) for s in symbol]
+
     params = examine_parameters(symbol, params, inputs_ext)
     symbol, params = sym_attach_attrs(symbol, params, inputs_ext,
             precision=target_bits)
-    return symbol, params, target_bits
+    return symbol, params, target_bits, out_scales
 
 def sym_realize(symbol, params, inputs_ext, target_bits, runtime="cvm"):
     logger = logging.getLogger('log.realize')

@@ -305,6 +305,7 @@ def _matrix_decomposition(sym, params, graph, inputs_ext, infer_shapes):
                 weight = mx.sym.var(weight_name)
                 graph[weight_name] = weight
 
+                # TODO: use slice_axis instead of slice
                 tmp = mx.sym.slice(X, begin=(0, start), end=(batch, stop))
                 tmp = mx.sym.FullyConnected(tmp, weight, bias, **attr)
                 nodes.append(tmp)
@@ -342,11 +343,12 @@ def sym_infer_shape(symbol, params, inputs_ext):
 
         inputs_shape = {k:v['shape'] for k,v in inputs_ext.items() if k in args}
         _, out_shapes, _ = sym.infer_shape(**inputs_shape)
+        assert len(out_shapes) == 1, 'Infer shape %s'%(name)
         if name in infer_shapes:
             logger.warn("Symbol:%s has been infered shape in graph", out_shapes)
-            assert infer_shapes[name] == out_shapes
+            assert infer_shapes[name] == out_shapes[0], "%s shape %s vs. %s" \
+                    % (name, infer_shapes[name], out_shapes)
 
-        assert len(out_shapes) == 1, 'Infer shape %s'%(name)
         infer_shapes[name] = out_shapes[0]
 
         return sym, params
@@ -399,10 +401,8 @@ def _sym_check(sym, params, graph, inputs_ext):
 
 def _sym_rewrite(sym, params, graph, inputs_ext, infer_shapes):
     logger = logging.getLogger('log.prepare.symbol.rewrite')
-    name = sym.attr('name')
-    op_name = sym.attr('op_name')
-    childs = sym_iter(sym.get_children())
-    attr = sym.list_attr()
+    name, op_name = sym.attr('name'), sym.attr('op_name')
+    childs, attr = sym_iter(sym.get_children()), sym.list_attr()
     node = sym
     if op_name == 'Pooling':
         pool_type = attr['pool_type']
@@ -448,6 +448,20 @@ def _sym_rewrite(sym, params, graph, inputs_ext, infer_shapes):
         else:
             assert pool_type == 'max', "Unsupported Pooling \
                     %s(%s, pool_type=%s)"%(op_name, name, pool_type)
+    elif op_name == 'LeakyReLU':
+        act = attr['act_type']
+        slope = eval(attr['slope'])
+        assert act == 'leaky', "Unsupported LeakyReLU %s for act_type: %s" \
+                % (name, act)
+        X = childs[0]
+        posi_X = mx.sym.relu(X)
+        nega_X = mx.sym.negative(X)
+        nega_X = mx.sym.relu(nega_X)
+        slope_name = name + "_slope"
+        params[slope_name] = nd.array([slope])
+        graph[slope_name] = slope_sym = mx.sym.var(slope_name, shape=(1,))
+        scale_X = mx.sym.broadcast_mul(nega_X, slope_sym)
+        node = posi_X - scale_X
     elif op_name == 'BatchNorm':
         # data, gamma, beta, data_mean, data_var
         assert len(childs) == 5
@@ -491,6 +505,31 @@ def _sym_rewrite(sym, params, graph, inputs_ext, infer_shapes):
     elif op_name == 'Dropout':
     # dropout is identity during testing
         node = childs[0]
+    elif op_name == '_mul_scalar':
+        X = childs[0]
+        scalar = eval(attr['scalar'])
+        sname = name + '_scalar'
+        params[sname] = nd.array([scalar])
+        graph[sname] = scale = mx.sym.var(sname, shape=(1,))
+        node = mx.sym.broadcast_mul(X, scale, name=name)
+    elif op_name == '_div_scalar':
+        X = childs[0]
+        scalar = eval(attr['scalar'])
+        sname = name + '_scalar'
+        params[sname] = nd.array([1 / scalar])
+        graph[sname] = scale = mx.sym.var(sname, shape=(1,))
+        node = mx.sym.broadcast_mul(X, scale, name=name)
+    elif op_name == 'slice_like':
+        A, B = childs[0], childs[1]
+        A_name, B_name = A.attr('name'), B.attr('name')
+        axes = eval(attr['axes'])
+        A_shape, B_shape = infer_shapes[A_name], infer_shapes[B_name]
+        oshape = [None] * len(A_shape)
+        begin, end = [None] * len(A_shape), [None] * len(A_shape)
+        for ax in axes:
+            assert B_shape[ax] <= A_shape[ax]
+            begin[ax], end[ax] = 0, B_shape[ax]
+        node = mx.sym.slice(A, begin=begin, end=end)
     infer_shapes[node.attr('name')] = infer_shapes[name]
     return node, params
 
@@ -523,6 +562,29 @@ def _fuse_bias(sym, params, graph, inputs_ext, infer_shapes):
 
     return node, params
 
+def _fuse_constant(sym, params, graph, inputs_ext):
+    name, op_name = sym.attr('name'), sym.attr('op_name')
+    childs, attr = sym_iter(sym.get_children()), sym.list_attr()
+
+    node = sym
+    if op_name == 'null':
+        return node, params
+    elif childs is None:
+        out = get_nd_op(op_name)(**attr)
+        params[name] = out
+        node = mx.sym.var(name, shape=out.shape)
+    else:
+        is_const = lambda c: (c.attr('op_name')=='null') and \
+                        (c.attr('name') not in inputs_ext)
+        flag = all([is_const(c) for c in childs])
+        if flag:
+            in_params = [params[c.attr('name')] for c in childs]
+            out = get_nd_op(op_name)(*in_params, **attr)
+            params[name] = out
+            node = mx.sym.var(name, shape=out.shape)
+    return node, params
+
+
 def sym_quant_prepare(symbol, params, inputs_ext):
     logger = logging.getLogger('log.sym.pass.prepare')
 
@@ -545,6 +607,11 @@ def sym_quant_prepare(symbol, params, inputs_ext):
             logger=logger, inputs_ext=inputs_ext,
             callback=_matrix_decomposition, infer_shapes=infer_shapes)
 
+    sym, params = topo_visit(sym, params, get_op=get_mxnet_op,
+            logger=logger, inputs_ext=inputs_ext,
+            callback=_fuse_constant)
+
+    params = examine_parameters(sym, params, inputs_ext)
     return sym, params
 
 def sym_attach_attrs(symbol, params, inputs_ext, **kwargs):

@@ -51,9 +51,11 @@ class GraphHelper(object):
         return default
 
 def get_nd_op(op_name):
-    op = getattr(nd, op_name)
+    op = getattr(nd, op_name, None)
+    if op is None:
+        op = getattr(nd._internal, op_name, None)
 
-    if not op:
+    if op is None:
         raise RuntimeError("Unable to map op_name {} to mxnet.ndarray".format(op_name))
     return op
 
@@ -348,4 +350,24 @@ mx_identity_ext = {
     },
     'Concat': {},
     'elemwise_add': {},
+    'LeakyReLU': {
+        'act_type': [True, 'leaky']
+    },
+    'slice_like': {},
+    'slice_axis': {},
+    'repeat': {},
+    'Reshape': {},
+    'transpose': {},
+    'tile': {},
+    'expand_dims': {},
+
+    '_arange': {},
+
+    # Not supported broadcast_div
+    'broadcast_mul': {},
+    'broadcast_add': {},
+    'broadcast_sub': {},
+
+    '_mul_scalar': {},
+    '_div_scalar': {},
 }

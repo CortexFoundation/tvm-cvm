@@ -181,6 +181,26 @@ class RightShift(mx.operator.CustomOp):
     def backward(self, req, out_grad, in_data, out_data, in_grad, aux):
         assert False
 
+class LUT(mx.operator.CustomOp):
+    def __init__(self, precision, **kwargs):
+        super(LUT, self).__init__(**kwargs)
+
+    def forward(self, is_train, req, in_data, out_data, aux):
+        assert is_train == False
+        X, T = in_data[0], in_data[1]
+        Y = out_data[0]
+        tsize = T.shape[0]
+        xvars = vars_increment(None, X.shape)
+        while xvars != list(X.shape):
+            idx = int(round(X[xvars].asscalar()))
+            idx = max(min(idx, tsize-1), 0)
+            Y[xvars] = T[idx]
+            xvars = vars_increment(xvars, X.shape)
+        self.assign(out_data[0], req[0], Y)
+
+    def backward(self, req, out_grad, in_data, out_data, in_grad, aux):
+        assert False
+
 @mx.operator.register("cvm_clip")
 class ClipProp(mx.operator.CustomOpProp):
     def __init__(self, precision=8, shift_bit=0, cvm_name='clip'):
@@ -264,6 +284,26 @@ class BroadcastShiftProp(mx.operator.CustomOpProp):
         return [X_type, B_type, P_type], [X_type], []
     def create_operator(self, ctx, shapes, dtypes):
         return BroadcastShift(self.precision)
+
+@mx.operator.register("cvm_lut")
+class LUTProp(mx.operator.CustomOpProp):
+    def __init__(self):
+        super(LUTProp, self).__init__(need_top_grad=False)
+    def list_arguments(self):
+        return ['data', 'table']
+    def list_outputs(self):
+        return ['output']
+    def infer_shape(self, in_shape):
+        X_shape = in_shape[0]
+        B_shape = in_shape[1]
+        out_shape = in_shape[0]
+        return [X_shape, B_shape], [out_shape], []
+    def infer_type(self, in_type):
+        X_type = in_type[0]
+        B_type = X_type
+        return [X_type, B_type], [X_type], []
+    def create_operator(self, ctx, shapes, dtypes):
+        return LUT()
 
 
 
