@@ -18,13 +18,16 @@ import cvm_op as cvm
 from scipy import stats
 
 max_bit = 32 # INT32
+input_target_bit = 8
 default_target_bit = 8 # INT8
 bias_target_bit = default_target_bit * 4 - 1
 disable_requant_ops = [
     'Activation', 'relu',
-    'Pooling', 'Flatten',
-    'slice', 'slice_like', 'clip',
-    'negative', 'repeat',
+    'Pooling',
+    'slice', 'slice_like', 'slice_axis',
+    'clip', 'negative',
+    'repeat', 'tile', 'expand_dims',
+    'Reshape', 'transpose', 'Flatten',
 ]
 
 def _collect_symbol_ext(sym, params, graph, inputs_ext, scale_shapes):
@@ -69,7 +72,10 @@ def _calib_sym_collect_thresholds(sym, params, graph, inputs_ext,
 
     if op_name == 'null':
         if name in inputs_ext:
-            output = calib_data
+            if calib_data is not None:
+                output = calib_data
+            else:
+                output = inputs_ext[name]['data']
         else:
             output = params[name]
     elif op_name in disable_requant_ops:
@@ -78,9 +84,14 @@ def _calib_sym_collect_thresholds(sym, params, graph, inputs_ext,
     else:
         args = sym.list_inputs()
         inputs = [mx.sym.var(n) for n in inputs_ext if n in args]
+        if calib_data is not None:
+            data = [calib_data.as_in_context(ctx)]
+        else:
+            data = [inputs_ext[n.attr('name')]['data'] for n in inputs]
+            data = [d.as_in_context(ctx) for d in data]
         graph = SymbolBlock(sym, inputs)
         load_parameters(graph, params, ctx=ctx)
-        output = graph.forward(calib_data.as_in_context(ctx))
+        output = graph.forward(*data)
 
     slices = [output]
     shape = scale_shapes[name]
@@ -104,8 +115,8 @@ def _calib_sym_collect_thresholds(sym, params, graph, inputs_ext,
             th_dict[name].min().asscalar(), th_dict[name].max().asscalar())
     return sym, params
 
-def _sim_requantize_op(sym, scale, params, graph):
-    name = sym.attr('name')
+def _sim_requantize_op(sym, scale, params, graph, prefix=None):
+    name = sym.attr('name') if prefix is None else prefix
     scale_name = name + '_requant_scale'
     assert scale_name not in graph, "scale name %s has existed in graph" \
             % (scale_name)
@@ -187,13 +198,23 @@ def _collect_scale_helper(sym, params, graph, inputs_ext,
     target_bits[name] = default_target_bit
     if op_name == 'null':
         if name in inputs_ext:
-            inputs_ext[name]['target_bit'] = default_target_bit
+            inputs_ext[name]['target_bit'] = input_target_bit
+            target_bits[name] = input_target_bit
     elif op_name in ['Convolution', 'FullyConnected']:
         X_name, W_name = childs[0].attr('name'), childs[1].attr('name')
         if attr['no_bias'] == 'False':
             B_name = childs[2].attr('name')
             scale_helper[B_name] = (scale_helper[X_name] * scale_helper[W_name]).min()
             target_bits[B_name] = bias_target_bit
+    elif op_name in ['sigmoid', 'exp']:
+        X_name = childs[0].attr('name')
+        X_bit = target_bits[X_name]
+        _range = (2 ** (X_bit - 1)) - 1
+        d = nd.concat(nd.arange(0, _range+1), nd.arange(-_range, 0), dim=0)
+        lut = get_nd_op(op_name)(d / scale_helper[X_name])
+        th = nd.array([[lut.max().asscalar(), lut.min().asscalar()]])
+        scale_helper[name] = get_scale(th, default_target_bit)
+        params[name + '_lut'] = lut * scale_helper[name]
     return sym, params
 def _annotate_layer(sym, params, graph, inputs_ext,
         scale_helper, target_bits, infer_shapes):
@@ -208,6 +229,13 @@ def _annotate_layer(sym, params, graph, inputs_ext,
         return node, params
     elif op_name in disable_requant_ops:
         return node, params
+    elif op_name in ['sigmoid', 'exp']:
+        lut_name = name + '_lut'
+        assert lut_name in params
+        lut_sym = mx.sym.var(lut_name, shape=params[lut_name].shape)
+        node = mx.sym.Custom(childs[0], lut_sym,
+                name=name, op_type='cvm_lut')
+        requant_scale = scale_helper[name]
     elif op_name == 'Convolution' and len(cscales[0].shape) > 1:
         # Rewrite conv op for depth-wise
         assert attr['kernel'] == "(1, 1)", "Assert failed: " + \
@@ -248,7 +276,8 @@ def _annotate_layer(sym, params, graph, inputs_ext,
         for idx, c in enumerate(childs):
             relative_scale = in_scale / cscales[idx]
             if relative_scale != 1:
-                c = _sim_requantize_op(c, relative_scale, params, graph)
+                c = _sim_requantize_op(c, relative_scale, params, graph,
+                        "%s_in%d"%(name, idx))
                 target_bits[c.attr('name')] = cbits[idx]
                 logger.debug("layer %-40s  adjust scale=%-16.8f orig=%-16.8f" + \
                         " for requant %-40s input scale %-16.8f",
@@ -362,7 +391,7 @@ def _realize_symbol(sym, params, graph, inputs_ext,
     params[B_name] = nd.clip(params[B_name],
             a_min=-B_range, a_max=B_range)
     attr = { 'precision': str(B_tb) }
-    graph[B_name] = B = mx.sym.var(B_name, shape=shape, attr={})
+    graph[B_name] = B = mx.sym.var(B_name, shape=shape, attr=attr)
     node = mx.sym.broadcast_mul(X, B)
     node = _realize_func(node, nd.array(Y_sb).reshape(shape), params, graph,
             nd.array(Y_tb).reshape(shape))
@@ -410,7 +439,7 @@ def sym_simulate(symbol, params, inputs_ext, calib_data, ctx):
             calib_mode='naive', ctx=ctx)
 
     scale_helper, target_bits = {}, {}
-    topo_visit(symbol, params, get_op=get_mxnet_op,
+    _, params = topo_visit(symbol, params, get_op=get_mxnet_op,
             logger=logger, inputs_ext=inputs_ext,
             callback=_collect_scale_helper, th_dict=th_dict,
             scale_shapes=scale_shapes, get_scale=sim.get_sim_scale,

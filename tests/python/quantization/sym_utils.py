@@ -350,6 +350,7 @@ mx_identity_ext = {
     },
     'Concat': {},
     'elemwise_add': {},
+    'elemwise_sub': {},
     'LeakyReLU': {
         'act_type': [True, 'leaky']
     },

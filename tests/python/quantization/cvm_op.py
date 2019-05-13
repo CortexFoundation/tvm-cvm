@@ -182,7 +182,7 @@ class RightShift(mx.operator.CustomOp):
         assert False
 
 class LUT(mx.operator.CustomOp):
-    def __init__(self, precision, **kwargs):
+    def __init__(self, precision=8, **kwargs):
         super(LUT, self).__init__(**kwargs)
 
     def forward(self, is_train, req, in_data, out_data, aux):
@@ -193,7 +193,6 @@ class LUT(mx.operator.CustomOp):
         xvars = vars_increment(None, X.shape)
         while xvars != list(X.shape):
             idx = int(round(X[xvars].asscalar()))
-            idx = max(min(idx, tsize-1), 0)
             Y[xvars] = T[idx]
             xvars = vars_increment(xvars, X.shape)
         self.assign(out_data[0], req[0], Y)

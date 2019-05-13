@@ -160,6 +160,26 @@ def test_sym_pass(batch_size=10, iter_num=10):
             return top_graph(*tmp)
         return validate_data(net, data, label, base_metric)
 
+    # quantize top graph
+    top_data = base_graph(data.as_in_context(base_ctx))
+    for idx, c in enumerate(base_graph(mx.sym.Group(base_inputs))):
+        top_inputs_ext[c.attr('name')]['data'] = top_data[idx]
+    qsym, qparams, precs, out_scales = calib.sym_simulate(top, top_params,
+            top_inputs_ext, None, ctx)
+    top_qgraph = mx.gluon.nn.SymbolBlock(qsym, top_inputs)
+    utils.load_parameters(top_qgraph, qparams, ctx=ctx)
+    top_qmetric = dataset.load_voc_metric()
+    top_qmetric.reset()
+    def top_quantize(data, label):
+        def net(data):
+            tmp = base_graph(data.as_in_context(base_ctx))
+            tmp = [t.as_in_context(ctx) for t in tmp]
+            out = top_qgraph(*tmp)
+            out = [t / out_scales[i] for i,t in enumerate(out)]
+            return out
+        return validate_data(net, data, label, top_qmetric)
+
+    # quantize base graph
     # qsym, qparams, precs, out_scales = calib.sym_simulate(base, base_params,
     #         base_inputs_ext, data, ctx)
     # dump_sym, dump_params, dump_ext = load_fname("_darknet53_voc", "simulate", True)
@@ -192,7 +212,7 @@ def test_sym_pass(batch_size=10, iter_num=10):
     #     return validate_data(net, data, label, qmetric)
 
 
-    utils.multi_validate(base_func, data_iter_func, # cvm_quantize,
+    utils.multi_validate(base_func, data_iter_func, top_quantize, # cvm_quantize,
             iter_num=iter_num, logger=logger)
 
 if __name__ == '__main__':

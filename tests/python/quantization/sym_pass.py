@@ -508,10 +508,14 @@ def _sym_rewrite(sym, params, graph, inputs_ext, infer_shapes):
     elif op_name == '_mul_scalar':
         X = childs[0]
         scalar = eval(attr['scalar'])
-        sname = name + '_scalar'
-        params[sname] = nd.array([scalar])
-        graph[sname] = scale = mx.sym.var(sname, shape=(1,))
-        node = mx.sym.broadcast_mul(X, scale, name=name)
+        if scalar == 0:
+            params[name] = nd.zeros(infer_shapes[name])
+            node = mx.sym.var(name, shape=infer_shapes[name])
+        else:
+            sname = name + '_scalar'
+            params[sname] = nd.array([scalar])
+            graph[sname] = scale = mx.sym.var(sname, shape=(1,))
+            node = mx.sym.broadcast_mul(X, scale, name=name)
     elif op_name == '_div_scalar':
         X = childs[0]
         scalar = eval(attr['scalar'])
@@ -565,7 +569,6 @@ def _fuse_bias(sym, params, graph, inputs_ext, infer_shapes):
 def _fuse_constant(sym, params, graph, inputs_ext):
     name, op_name = sym.attr('name'), sym.attr('op_name')
     childs, attr = sym_iter(sym.get_children()), sym.list_attr()
-
     node = sym
     if op_name == 'null':
         return node, params
@@ -574,9 +577,9 @@ def _fuse_constant(sym, params, graph, inputs_ext):
         params[name] = out
         node = mx.sym.var(name, shape=out.shape)
     else:
-        is_const = lambda c: (c.attr('op_name')=='null') and \
+        is_param = lambda c: (c.attr('op_name')=='null') and \
                         (c.attr('name') not in inputs_ext)
-        flag = all([is_const(c) for c in childs])
+        flag = all([is_param(c) for c in childs])
         if flag:
             in_params = [params[c.attr('name')] for c in childs]
             out = get_nd_op(op_name)(*in_params, **attr)
@@ -584,6 +587,40 @@ def _fuse_constant(sym, params, graph, inputs_ext):
             node = mx.sym.var(name, shape=out.shape)
     return node, params
 
+def _reduce_graph(sym, params, graph, inputs_ext):
+    name, op_name = sym.attr('name'), sym.attr('op_name')
+    childs, attr = sym_iter(sym.get_children()), sym.list_attr()
+    is_param = lambda c: (c.attr('op_name')=='null') and \
+                    (c.attr('name') not in inputs_ext)
+    # node param1
+    #   \   /            reduce      node op(param1, param2)
+    #  operator param1   =======>      \   /
+    #        \   /                    operator
+    #       operator
+    node = sym
+    struct = [
+        ['broadcast_mul'],
+        ['broadcast_add', 'broadcast_sub'],
+    ]
+    if op_name in ['broadcast_mul']:
+        A, B = childs[0], childs[1]
+        if A.attr('op_name') not in ['broadcast_mul']:
+            return node, params
+        if not is_param(B):
+            return node, params
+        A_A, A_B = sym_iter(A.get_children())
+        if not is_param(A_B):
+            return node, params
+        B_name, A_B_name = B.attr('name'), A_B.attr('name')
+        if params[B_name].shape != (1,) and params[A_B_name].shape != (1,):
+            return node, params
+        fuse_name = B_name.split("_")
+        fuse_name = "%s_%s"%("_".join(fuse_name),
+                "_".join([n for n in A_B_name.split("_") if n not in fuse_name]))
+        params[fuse_name] = get_nd_op(op_name)(params[B_name], params[A_B_name])
+        fuse_sym = mx.sym.var(fuse_name, shape=params[fuse_name].shape)
+        node = get_mxnet_op(op_name)(A_A, fuse_sym, **attr, name=name)
+    return node, params
 
 def sym_quant_prepare(symbol, params, inputs_ext):
     logger = logging.getLogger('log.sym.pass.prepare')
@@ -610,6 +647,10 @@ def sym_quant_prepare(symbol, params, inputs_ext):
     sym, params = topo_visit(sym, params, get_op=get_mxnet_op,
             logger=logger, inputs_ext=inputs_ext,
             callback=_fuse_constant)
+
+    # sym, params = topo_visit(sym, params, get_op=get_mxnet_op,
+    #         logger=logger, inputs_ext=inputs_ext,
+    #         callback=_reduce_graph)
 
     params = examine_parameters(sym, params, inputs_ext)
     return sym, params
@@ -690,7 +731,80 @@ def sym_dump_layer_outputs(symbol, params, inputs_ext,
     fin.close()
     fout.close()
 
+def broadcast_shape(shape1, shape2):
+    s1_size, s2_size = len(shape1), len(shape2)
+    min_size = min(s1_size, s2_size)
+    max_size = max(s1_size, s2_size)
+    expand_shape = [None] * max_size
+    for i in range(1, min_size+1):
+        if (shape1[s1_size - i] == shape2[s2_size - i]):
+            expand_shape[max_size-i] = shape1[s1_size-i]
+        elif (shape1[s1_size - i] == 1):
+            expand_shape[max_size-i] = shape2[s2_size-i]
+        elif (shape2[s2_size - i] == 1):
+            expand_shape[max_size-i] = shape1[s1_size-i]
+        else:
+            assert False
 
+    shape = shape1 if s1_size > s2_size else shape2
+    for i in range(min_size+1, max_size+1):
+        expand_shape[max_size-i] = shape[max_size-i]
+    return expand_shape
+def sym_calculate_ops(symbol, params, inputs_ext):
+    logger = logging.getLogger("log.calculate.ops")
+    ops = {}
+    infer_shapes = sym_infer_shape(symbol, params, inputs_ext)
+    def _cal_ops(sym, params, graph, inputs_ext):
+        name, op_name = sym.attr('name'), sym.attr('op_name')
+        childs, attr = sym_iter(sym.get_children()), sym.list_attr()
+        msg = "%-20s name=%-40s ops=%-15s oshape=%-20s ishape=%-50s attr=%s"
+        cshapes = [infer_shapes[c.attr('name')] for c in childs] if childs else []
+        if op_name == 'null':
+            return sym, params
+        base_ops, ext = 1, "{}"
+        if op_name in ['Convolution']:
+            W_shape = cshapes[1]
+            base_ops = np.product(W_shape[1:]) * 2
+            if eval(attr['no_bias']) == False:
+                base_ops += 1
+        elif op_name in ['FullyConnected']:
+            W_shape = cshapes[1]
+            base_ops = np.product(W_shape[1:])
+            if eval(attr['no_bias']) == False:
+                base_ops += 1
+        elif op_name in ['Activation']:
+            if attr['act_type'] == "relu":
+                pass
+            else:
+                assert False
+        elif op_name in ['Pooling']:
+            K1, K2 = eval(attr['kernel'])
+            base_ops = K1 * K2
+            ext = "{'kernel': %s}"%attr['kernel']
+        elif op_name in ['Custom']:
+            op_type = attr['op_type']
+            assert op_type in ['cvm_clip', 'cvm_left_shift', 'cvm_right_shift']
+        elif op_name in ['broadcast_mul', 'broadcast_add', 'broadcast_sub', 'Flatten',
+            'elemwise_add', 'elemwise_sub']:
+            pass
+        else:
+            logger.critical("%s(%s) has not been considered", op_name, name)
+        count = np.product(infer_shapes[name][1:]) * base_ops
+        ops[name] = count
+        logger.debug(msg, op_name, name, count,
+                infer_shapes[name], cshapes, ext)
+        return sym, params
+
+    topo_visit(symbol, params, get_op=get_mxnet_op,
+            logger=logger, inputs_ext=inputs_ext,
+            callback=_cal_ops)
+    sorted_ops = sorted(ops.items(), key=lambda item: item[1])
+    total_ops = 0
+    for k,v in ops.items():
+        total_ops += v
+    logger.info("Graph Total OPS: %s", total_ops)
+
+    return ops
 
 
 
