@@ -89,7 +89,7 @@ class FilterList(logging.Filter):
         return rv
 
 def log_init():
-    logging.basicConfig(level=logging.NOTSET)
+    logging.basicConfig(level=logging.INFO)
     formatter = ColoredFormatter(
             fmt="[ %(asctime)s %(name)s.%(levelname)s ] %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S")

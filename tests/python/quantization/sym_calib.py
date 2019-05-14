@@ -288,9 +288,6 @@ def _annotate_layer(sym, params, graph, inputs_ext,
         node = get_mxnet_op(op_name)(*new_childs, **attr, name=name)
     elif op_name in ['sum']:
         requant_scale = scale_helper[name] / cscales[0]
-        dshape = infer_shapes[childs[0].attr('name')]
-        axis = eval(attr['axis'])
-        times = np.product([dshape[i] for i in axis])
     else:
         logger.critical('Unrecognized op:%s(%s) . attrs(%s)', op_name, name, attr)
 

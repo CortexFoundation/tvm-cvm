@@ -731,25 +731,6 @@ def sym_dump_layer_outputs(symbol, params, inputs_ext,
     fin.close()
     fout.close()
 
-def broadcast_shape(shape1, shape2):
-    s1_size, s2_size = len(shape1), len(shape2)
-    min_size = min(s1_size, s2_size)
-    max_size = max(s1_size, s2_size)
-    expand_shape = [None] * max_size
-    for i in range(1, min_size+1):
-        if (shape1[s1_size - i] == shape2[s2_size - i]):
-            expand_shape[max_size-i] = shape1[s1_size-i]
-        elif (shape1[s1_size - i] == 1):
-            expand_shape[max_size-i] = shape2[s2_size-i]
-        elif (shape2[s2_size - i] == 1):
-            expand_shape[max_size-i] = shape1[s1_size-i]
-        else:
-            assert False
-
-    shape = shape1 if s1_size > s2_size else shape2
-    for i in range(min_size+1, max_size+1):
-        expand_shape[max_size-i] = shape[max_size-i]
-    return expand_shape
 def sym_calculate_ops(symbol, params, inputs_ext):
     logger = logging.getLogger("log.calculate.ops")
     ops = {}
@@ -762,31 +743,39 @@ def sym_calculate_ops(symbol, params, inputs_ext):
         if op_name == 'null':
             return sym, params
         base_ops, ext = 1, "{}"
-        if op_name in ['Convolution']:
+        if op_name in ['Convolution', 'FullyConnected']:
             W_shape = cshapes[1]
             base_ops = np.product(W_shape[1:]) * 2
             if eval(attr['no_bias']) == False:
                 base_ops += 1
-        elif op_name in ['FullyConnected']:
-            W_shape = cshapes[1]
-            base_ops = np.product(W_shape[1:])
-            if eval(attr['no_bias']) == False:
-                base_ops += 1
         elif op_name in ['Activation']:
-            if attr['act_type'] == "relu":
-                pass
-            else:
+            if attr['act_type'] != "relu":
                 assert False
         elif op_name in ['Pooling']:
-            K1, K2 = eval(attr['kernel'])
+            pool_type = attr['pool_type']
+            is_global = eval(attr["global_pool"])
+            if is_global:
+                _, _, K1, K2 = cshapes[0]
+            else:
+                K1, K2 = eval(attr['kernel'])
+            assert pool_type in ['avg', 'max']
             base_ops = K1 * K2
+            if pool_type == 'avg':
+                base_ops += 1
             ext = "{'kernel': %s}"%attr['kernel']
         elif op_name in ['Custom']:
             op_type = attr['op_type']
             assert op_type in ['cvm_clip', 'cvm_left_shift', 'cvm_right_shift']
         elif op_name in ['broadcast_mul', 'broadcast_add', 'broadcast_sub', 'Flatten',
-            'elemwise_add', 'elemwise_sub']:
+            'elemwise_add', 'elemwise_sub', 'relu', 'slice', 'clip', 'negative',
+            'slice_like', 'slice_axis', 'repeat', 'tile', 'expand_dims',
+            'Reshape', 'transpose', 'Flatten', 'Concat']:
+            # base op is 1, do nothing
             pass
+        elif op_name in ['sum']:
+            axis = eval(attr['axis'])
+            base_ops = np.product([cshapes[0][i] for i in axis])
+            ext = "{'axis': %s}"%attr['axis']
         else:
             logger.critical("%s(%s) has not been considered", op_name, name)
         count = np.product(infer_shapes[name][1:]) * base_ops
@@ -798,13 +787,18 @@ def sym_calculate_ops(symbol, params, inputs_ext):
     topo_visit(symbol, params, get_op=get_mxnet_op,
             logger=logger, inputs_ext=inputs_ext,
             callback=_cal_ops)
-    sorted_ops = sorted(ops.items(), key=lambda item: item[1])
     total_ops = 0
     for k,v in ops.items():
         total_ops += v
-    logger.info("Graph Total OPS: %s", total_ops)
-
-    return ops
+    logger.info("Graph Total OPs: %s", total_ops)
+    top_k = 5
+    logger.info("========== Top %d OPs ==========", top_k)
+    sorted_ops = sorted(ops.items(), key=lambda item: item[1], reverse=True)
+    for i in range(top_k):
+        k, v = sorted_ops[i]
+        logger.info("{:3d} | name={:40s} ops={:<15d} percent={:6.2%}".format(
+                i, k, v, v / total_ops))
+    return total_ops
 
 
 
