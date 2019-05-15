@@ -17,38 +17,24 @@ class OpExt():
         self.in_types = in_types
         self.out_types = out_types
 
-
-class GraphHelper(object):
-    def __init__(self, graph={}, gtype=_sym.Symbol):
-        self.graph = graph
-        self.gtype = gtype
-
-    def _get_name(self, name):
-        if isinstance(name, self.gtype):
-            name = name.attr('name')
-
-        assert isinstance(name, str)
-        return name
-
-    def get_node(self, sym, default=None):
-        name = self._get_name(sym)
-
-        if name not in self.graph:
-            if default is None:
-                assert False, "op:%s haven't been processed in graph"%name
-            else:
-                assert isinstance(default, self.gtype)
-                self.graph[name] = default
-
-        return self.graph[name]
-
-    def set_node(self, sym, default):
-        name = self._get_name(sym)
-
-        assert name not in self.graph
-
-        self.graph[name] = default
-        return default
+def combile_name(n1, n2):
+    t1, t2 = n1.split("_"), n2.split("_")
+    len1, len2 = len(t1), len(t2)
+    min_len = min(len1, len2)
+    begin, end = 0, 0
+    for i in range(min_len):
+        if t1[i] != t2[i]:
+            break
+        begin = i + 1
+    for i in range(min_len):
+        if t1[len1-1-i] != t2[len2-1-i]:
+            break
+        end = i + 1
+    res = t1[:begin]
+    res.extend([n for n in t1[begin:len1-end]])
+    res.extend([n for n in t2[begin:len2-end]])
+    res.extend(t1[len1-end:])
+    return "_".join(res)
 
 def get_nd_op(op_name):
     op = getattr(nd, op_name, None)

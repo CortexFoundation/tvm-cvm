@@ -20,6 +20,7 @@ from quant_utils import *
 import utils
 import sym_utils as sutils
 import sym_pass as spass
+import sym_annotate as anno
 import sym_calib as calib
 import sim_quant_helper as sim
 import gluon_zoo as zoo
@@ -35,10 +36,10 @@ def get_dump_fname(suffix="quant"):
         '%s.%s'%(resnet.PARAMS_FILE, suffix)
 
 identity = "50"
-def load_fname(version, suffix=None):
+def load_fname(version, suffix=None, with_ext=False):
     suffix = "."+suffix if suffix is not None else ""
-    return "./data/resnet%s_%s%s.json"%(identity, version, suffix), \
-        "./data/resnet%s_%s%s.params"%(identity, version, suffix)
+    fname = "./data/resnet%s_%s%s"%(identity, version, suffix)
+    return utils.extend_fname(fname, with_ext)
 
 def test_sym_nnvm(batch_size=10, iter_num=10):
     logger = logging.getLogger("log.test.nnvm")
@@ -108,7 +109,7 @@ def test_sym_nnvm(batch_size=10, iter_num=10):
     multi_eval_accuracy(graph_func, data_iter_func, # nnvm_real,
             iter_num=iter_num, logger=logger)
 
-def test_sym_pass(quant_flag, batch_size=10, iter_num=10):
+def test_sym_pass(batch_size=10, iter_num=10):
     logger = logging.getLogger("log.test.sym.pass")
 
     ctx = mx.gpu(2)
@@ -132,18 +133,23 @@ def test_sym_pass(quant_flag, batch_size=10, iter_num=10):
     def gluon_cv(data):
         return net2.forward(data.as_in_context(ctx))
 
-    # sym_fname, param_fname = load_fname("mxg")
-    # sym, params = mx.sym.load(sym_fname), nd.load(param_fname)
-    # sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
-    # qsym, qparams, precs = calib.sym_simulate(sym, params, inputs_ext, data, ctx)
-    # qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, precs, "cvm")
-    # dump_sym, dump_params = load_fname("mxg", "sym.quantize")
-    # sim.save_ins_ext(qparams, inputs_ext)
-    # nd.save(dump_params, qparams)
-    # open(dump_sym, "w").write(qsym.tojson())
+    sym_fname, param_fname = load_fname("mxg")
+    sym, params = mx.sym.load(sym_fname), nd.load(param_fname)
+    sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
+    anno.sym_annotate(sym, params, inputs_ext, in_bit=8)
+    qsym, qparams, precs, _ = calib.sym_simulate(sym, params, inputs_ext, data, ctx)
+    dump_sym, dump_params = load_fname("mxg", "sym.simulate")
+    nd.save(dump_params, qparams)
+    open(dump_sym, "w").write(qsym.tojson())
 
-    dump_sym, dump_params = load_fname("mxg", "sym.quantize")
-    sim.load_ins_ext(nd.load(dump_params), inputs_ext)
+    qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, precs, "cvm")
+    dump_sym, dump_params, dump_ext = load_fname("mxg", "sym.quantize", True)
+    sim.save_ext(dump_ext, inputs_ext)
+    nd.save(dump_params, qparams)
+    open(dump_sym, "w").write(qsym.tojson())
+
+    dump_sym, dump_params, dump_ext = load_fname("mxg", "sym.quantize", True)
+    (inputs_ext,) = sim.load_ext(dump_ext)
     net3 = utils.load_model(dump_sym, dump_params, inputs, ctx=ctx)
     def cvm_quantize(data):
         data = sim.load_real_data(data, 'data', inputs_ext)
@@ -218,19 +224,13 @@ def save_data():
 if __name__ == "__main__":
     utils.log_init()
 
-    quant_flag = QuantFlag(is_fuse_bn=True, calib_mode=CalibMode.NAIVE,
-            log_level=logging.DEBUG,
-            disabled_layers=["relu", "pool0", "activation"])
-
     # resnet.save_graph(mx.gpu())
     # zoo.save_model('resnet50_v1', 1000)
 
-    if False:
-        gluon_quant_resnet(quant_flag, batch_size=16, iter_num=10000, need_requant=False)
     # save_data()
 
     # test_nnvm_load(batch_size=16, iter_num=10)
-    test_sym_pass(quant_flag, batch_size=16, iter_num=10)
+    test_sym_pass(batch_size=16, iter_num=10)
     # test_sym_nnvm(batch_size=1, iter_num=1)
     # test_performance(16, 10)
 

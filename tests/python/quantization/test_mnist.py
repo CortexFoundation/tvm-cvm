@@ -11,6 +11,7 @@ from quant_utils import *
 import utils
 import sym_utils as sutils
 import sym_pass as spass
+import sym_infer_precs as ip
 import sym_calib as calib
 import sim_quant_helper as sim
 import gluon_zoo as zoo
@@ -175,21 +176,18 @@ def test_sym_pass(iter_num=10):
 
     sym_file, param_file = load_fname("")
     sym, params = mx.sym.load(sym_file), nd.load(param_file)
-    ops = spass.sym_calculate_ops(sym, params, inputs_ext)
-    print (ops)
-    # sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
-    # qsym, qparams, precs, _ = calib.sym_simulate(sym, params, inputs_ext, data, ctx)
-    # qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, precs, "cvm")
-    # dump_sym, dump_params, dump_ext = load_fname("", "sym.quantize", True)
-    # sim.save_ext(dump_ext, inputs_ext)
-    # nd.save(dump_params, qparams)
-    # open(dump_sym, "w").write(qsym.tojson())
+    # ops = spass.sym_calculate_ops(sym, params, inputs_ext)
+    sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
+    qsym, qparams, precs, _ = calib.sym_simulate(sym, params, inputs_ext, data, ctx)
+    qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, precs, "cvm")
+    dump_sym, dump_params, dump_ext = load_fname("", "sym.quantize", True)
+    sim.save_ext(dump_ext, inputs_ext)
+    nd.save(dump_params, qparams)
+    open(dump_sym, "w").write(qsym.tojson())
 
     dump_sym, dump_params, dump_ext = load_fname("", "sym.quantize", True)
     sym, params = mx.sym.load(dump_sym), nd.load(dump_params)
-    ops = spass.sym_calculate_ops(sym, params, inputs_ext)
-    print (ops)
-    exit()
+    # ops = spass.sym_calculate_ops(sym, params, inputs_ext)
     (inputs_ext,) = sim.load_ext(dump_ext)
     inputs = [mx.sym.var(n) for n in inputs_ext]
     net2 = utils.load_model(dump_sym, dump_params, inputs, ctx=ctx)
@@ -204,4 +202,4 @@ def test_sym_pass(iter_num=10):
 # train_mnist()
 utils.log_init()
 test_sym_pass(10)
-test_sym_nnvm(10000)
+# test_sym_nnvm(10000)

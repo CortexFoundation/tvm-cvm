@@ -15,11 +15,9 @@ from utils import *
 import sim_quant_helper as sim
 import cvm_op as cvm
 
-from scipy import stats
-
 max_bit = 32 # INT32
 input_target_bit = 8
-default_target_bit = 8 # INT8
+default_target_bit = 16 # INT8
 bias_target_bit = default_target_bit * 4 - 1
 disable_requant_ops = [
     'Activation', 'relu',
@@ -28,6 +26,7 @@ disable_requant_ops = [
     'clip', 'negative',
     'repeat', 'tile', 'expand_dims',
     'Reshape', 'transpose', 'Flatten',
+    '_contrib_box_nms',
 ]
 
 def _collect_symbol_ext(sym, params, graph, inputs_ext, scale_shapes):
@@ -172,20 +171,6 @@ def _realize_cvm_requant_op(sym, sb, params, graph, target_bit):
         return mx.sym.Custom(sym, shift_bit=sb, precision=tb,
                 cvm_name=requant_op,
                 name=requant_op, op_type='cvm_right_shift')
-def _realize_broadcast_op(sym, sb, params, graph, target_bits):
-    name = sym.attr('name')
-    requant_op = name + '_cvm_broadcast_shift'
-    assert requant_op not in graph
-    sb_name = name + '_cvm_sb'
-    assert sb_name not in graph
-    tb_name = name + '_cvm_tb'
-    assert tb_name not in graph
-    graph[sb_name] = sb_sym = mx.sym.var(sb_name, shape=sb.shape)
-    graph[tb_name] = tb_sym = mx.sym.var(tb_name, shape=target_bits.shape)
-    params[sb_name] = sb
-    params[tb_name] = target_bits
-    return mx.sym.Custom(sym, sb_sym, tb_sym, precision=8,
-            name=requant_op, op_type='cvm_broadcast_shift')
 
 def _collect_scale_helper(sym, params, graph, inputs_ext,
         th_dict, scale_shapes, get_scale, scale_helper, target_bits):
@@ -200,6 +185,8 @@ def _collect_scale_helper(sym, params, graph, inputs_ext,
         if name in inputs_ext:
             inputs_ext[name]['target_bit'] = input_target_bit
             target_bits[name] = input_target_bit
+            scale_helper[name] = get_scale(th_dict[name], input_target_bit)
+            scale_helper[name] = scale_helper[name].reshape(scale_shapes[name])
     elif op_name in ['Convolution', 'FullyConnected']:
         X_name, W_name = childs[0].attr('name'), childs[1].attr('name')
         if attr['no_bias'] == 'False':

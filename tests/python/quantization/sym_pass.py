@@ -735,19 +735,21 @@ def sym_calculate_ops(symbol, params, inputs_ext):
     logger = logging.getLogger("log.calculate.ops")
     ops = {}
     infer_shapes = sym_infer_shape(symbol, params, inputs_ext)
-    def _cal_ops(sym, params, graph, inputs_ext):
+    for sym in topo_sort(symbol):
         name, op_name = sym.attr('name'), sym.attr('op_name')
         childs, attr = sym_iter(sym.get_children()), sym.list_attr()
         msg = "%-20s name=%-40s ops=%-15s oshape=%-20s ishape=%-50s attr=%s"
         cshapes = [infer_shapes[c.attr('name')] for c in childs] if childs else []
         if op_name == 'null':
-            return sym, params
+            continue
         base_ops, ext = 1, "{}"
         if op_name in ['Convolution', 'FullyConnected']:
             W_shape = cshapes[1]
             base_ops = np.product(W_shape[1:]) * 2
             if eval(attr['no_bias']) == False:
                 base_ops += 1
+        elif op_name in ['BatchNorm']:
+            base_ops = 4
         elif op_name in ['Activation']:
             if attr['act_type'] != "relu":
                 assert False
@@ -772,6 +774,8 @@ def sym_calculate_ops(symbol, params, inputs_ext):
             'Reshape', 'transpose', 'Flatten', 'Concat']:
             # base op is 1, do nothing
             pass
+        elif op_name in ['Dropout']:
+            base_ops = 0
         elif op_name in ['sum']:
             axis = eval(attr['axis'])
             base_ops = np.product([cshapes[0][i] for i in axis])
@@ -782,15 +786,17 @@ def sym_calculate_ops(symbol, params, inputs_ext):
         ops[name] = count
         logger.debug(msg, op_name, name, count,
                 infer_shapes[name], cshapes, ext)
-        return sym, params
 
-    topo_visit(symbol, params, get_op=get_mxnet_op,
-            logger=logger, inputs_ext=inputs_ext,
-            callback=_cal_ops)
     total_ops = 0
     for k,v in ops.items():
         total_ops += v
-    logger.info("Graph Total OPs: %s", total_ops)
+    LEVELS = ['', 'K', 'M', 'G', 'T']
+    idx, red_ops = 0, total_ops
+    while red_ops > 1000:
+        red_ops /= 1000
+        idx += 1
+    logger.info("Graph Total OPs: {} eqs. {:5.2f}{}".format(total_ops,
+            red_ops, LEVELS[idx]))
     top_k = 5
     logger.info("========== Top %d OPs ==========", top_k)
     sorted_ops = sorted(ops.items(), key=lambda item: item[1], reverse=True)

@@ -192,13 +192,23 @@ class LUT(mx.operator.CustomOp):
         tsize = T.shape[0]
         xvars = vars_increment(None, X.shape)
         while xvars != list(X.shape):
-            idx = int(round(X[xvars].asscalar()))
+            idx = int(round(X[tuple(xvars)].asscalar()))
             Y[xvars] = T[idx]
             xvars = vars_increment(xvars, X.shape)
         self.assign(out_data[0], req[0], Y)
 
     def backward(self, req, out_grad, in_data, out_data, in_grad, aux):
         assert False
+
+class Annotate(mx.operator.CustomOp):
+    def __init__(self, in_prec, out_prec):
+        super(Annotate, self).__init__()
+        self.in_prec = int(in_prec)
+        self.out_prec = int(out_prec)
+
+    def forward(self, is_train, req, in_data, out_data, aux):
+        assert is_train == False
+        self.assign(out_data[0], req[0], in_data[0])
 
 @mx.operator.register("cvm_clip")
 class ClipProp(mx.operator.CustomOpProp):
@@ -303,6 +313,26 @@ class LUTProp(mx.operator.CustomOpProp):
         return [X_type, B_type], [X_type], []
     def create_operator(self, ctx, shapes, dtypes):
         return LUT()
+
+@mx.operator.register("cvm_annotate")
+class AnnotateProp(mx.operator.CustomOpProp):
+    def __init__(self, in_prec=8, out_prec=8):
+        self.in_prec = in_prec
+        self.out_prec = out_prec
+        super(AnnotateProp, self).__init__(need_top_grad=False)
+    def list_arguments(self):
+        return ['data']
+    def list_outputs(self):
+        return ['output']
+    def infer_shape(self, in_shape):
+        X_shape = in_shape[0]
+        out_shape = in_shape[0]
+        return [X_shape], [out_shape], []
+    def infer_type(self, in_type):
+        X_type = in_type[0]
+        return [X_type], [X_type], []
+    def create_operator(self, ctx, shapes, dtypes):
+        return Annotate(self.in_prec, self.out_prec)
 
 
 

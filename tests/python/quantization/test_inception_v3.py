@@ -10,6 +10,7 @@ import sym_calib as calib
 import utils
 import gluon_zoo as zoo
 import sym_pass as spass
+import sym_infer_precs as ip
 import sym_utils as sutils
 import sim_quant_helper as sim
 
@@ -233,7 +234,7 @@ if __name__ == '__main__':
     # zoo.save_inception_v3()
     # zoo.save_model('inceptionv3', 1000)
 
-    # test_sym_pass(16, 10)
-    test_sym_nnvm(1, 1)
+    test_sym_pass(16, 10)
+    # test_sym_nnvm(1, 1)
     # test_mxnet_sym(1)
     # test_mx_quantize(16, 10)

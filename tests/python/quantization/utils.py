@@ -89,7 +89,7 @@ class FilterList(logging.Filter):
         return rv
 
 def log_init():
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.NOTSET)
     formatter = ColoredFormatter(
             fmt="[ %(asctime)s %(name)s.%(levelname)s ] %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S")
@@ -100,6 +100,12 @@ def log_init():
     for handler in logging.root.handlers:
         handler.addFilter(log_filter)
         handler.setFormatter(formatter)
+
+def extend_fname(prefix, with_ext=False):
+    ret = ["%s.json"%prefix, "%s.params"%prefix]
+    if with_ext:
+        ret.append("%s.ext"%prefix)
+    return tuple(ret)
 
 def load_model(sym_fname, param_fname, inputs, ctx=mx.gpu()):
     sym, params = mx.sym.load(sym_fname), nd.load(param_fname)

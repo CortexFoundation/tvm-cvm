@@ -8,7 +8,6 @@ from tvm.contrib import graph_runtime
 import nnvm
 
 import sym_calib as calib
-import sym_quant as cvmq
 import utils
 import gluon_zoo as zoo
 import sym_pass as spass
@@ -142,7 +141,7 @@ def test_sym_pass(batch_size=10, iter_num=10):
     sim.save_ext(dump_ext, top_inputs_ext)
 
     top_inputs = [mx.sym.var(n) for n in top_inputs_ext]
-    top, top_params = cvmq.sym_simulate(top, top_params, top_inputs_ext, data)
+    # top, top_params = cvmq.sym_simulate(top, top_params, top_inputs_ext, data)
     top_graph = mx.gluon.nn.SymbolBlock(top, top_inputs)
     utils.load_parameters(top_graph, top_params, ctx=ctx)
 
