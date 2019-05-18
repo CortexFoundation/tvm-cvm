@@ -101,7 +101,7 @@ if __name__ == '__main__':
                 input_idx_from_broadcast(ovars, shape1),
                 input_idx_from_broadcast(ovars, shape2))
 
-cvm_log = open('/tmp/inception_v3/out/cvm_op1.txt', "w+")
+cvm_log = open('/tmp/mnist/out/cvm_op.txt', "w+")
 class Clip(mx.operator.CustomOp):
     def __init__(self, precision, cvm_name, **kwargs):
         super(Clip, self).__init__(**kwargs)
@@ -116,12 +116,12 @@ class Clip(mx.operator.CustomOp):
         a_min, a_max = self.min, self.max
         out = X.round()
         out = out.clip(a_min=a_min, a_max=a_max)
-        # X_max, X_min = X.max().asscalar(), X.min().asscalar()
-        # omax, omin = out.max().asscalar(), out.min().asscalar()
-        # cvm_log.write("%s:\n %d %d %d %d %s \n" % (self.cvm_name,
-        #             round(X_max), round(X_min),
-        #             round(omax), round(omin),
-        #             " ".join(str(int(round(d))) for d in X.asnumpy().flatten()[:10])))
+        X_max, X_min = X.max().asscalar(), X.min().asscalar()
+        omax, omin = out.max().asscalar(), out.min().asscalar()
+        cvm_log.write("cvm_clip %s: %d %d %d %d\n%s \n" % (self.cvm_name,
+                    round(X_max), round(X_min),
+                    round(omax), round(omin),
+                    " ".join(str(int(round(d))) for d in out.asnumpy().flatten()[-20:])))
         self.assign(out_data[0], req[0], out)
 
     def backward(self, req, out_grad, in_data, out_data, in_grad, aux):
@@ -170,12 +170,12 @@ class RightShift(mx.operator.CustomOp):
         out = out / 2
         out = out.floor()
         out = out.clip(a_min=a_min, a_max=a_max)
-        # X_max, X_min = X.max().asscalar(), X.min().asscalar()
-        # omax, omin = out.max().asscalar(), out.min().asscalar()
-        # cvm_log.write("%s:\n %d %d %d %d %s \n" % (self.cvm_name,
-        #             round(X_max), round(X_min),
-        #             round(omax), round(omin),
-        #             " ".join(str(int(round(d))) for d in X.asnumpy().flatten()[:10])))
+        X_max, X_min = X.max().asscalar(), X.min().asscalar()
+        omax, omin = out.max().asscalar(), out.min().asscalar()
+        cvm_log.write("cvm_right_shift %s: %d %d %d %d\n%s \n" % (self.cvm_name,
+                    round(X_max), round(X_min),
+                    round(omax), round(omin),
+                    " ".join(str(int(round(d))) for d in out.asnumpy().flatten()[-20:])))
         self.assign(out_data[0], req[0], out)
 
     def backward(self, req, out_grad, in_data, out_data, in_grad, aux):

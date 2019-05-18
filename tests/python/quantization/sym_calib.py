@@ -17,7 +17,7 @@ import cvm_op as cvm
 
 max_bit = 32 # INT32
 input_target_bit = 8
-default_target_bit = 16 # INT8
+default_target_bit = 8 # INT8
 bias_target_bit = default_target_bit * 4 - 1
 disable_requant_ops = [
     'Activation', 'relu',

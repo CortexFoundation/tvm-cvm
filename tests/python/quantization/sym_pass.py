@@ -341,7 +341,7 @@ def sym_infer_shape(symbol, params, inputs_ext):
                         params dict %s"%(name, out_shapes[0], params[name].shape)
             return sym, params
 
-        inputs_shape = {k:v['shape'] for k,v in inputs_ext.items() if k in args}
+        inputs_shape = {k:tuple(v['shape']) for k,v in inputs_ext.items() if k in args}
         _, out_shapes, _ = sym.infer_shape(**inputs_shape)
         assert len(out_shapes) == 1, 'Infer shape %s'%(name)
         if name in infer_shapes:
@@ -353,7 +353,7 @@ def sym_infer_shape(symbol, params, inputs_ext):
 
         return sym, params
 
-    inputs_shape = {k:v['shape'] for k, v in inputs_ext.items()}
+    inputs_shape = {k:tuple(v['shape']) for k, v in inputs_ext.items()}
     arg_shapes, _, aux_shapes = symbol.infer_shape(**inputs_shape)
     args, auxs = symbol.list_arguments(), symbol.list_auxiliary_states()
     infer_shapes = {args[i]:arg_shapes[i] for i in range(len(args))}
@@ -383,7 +383,7 @@ def _sym_check(sym, params, graph, inputs_ext):
             assert v[0], "%s(%s attr=%s) not contains attribute %s" \
                 % (name, op_name, attr, k)
 
-    if op_name == 'Pooling':
+    if op_name == 'Pooling' and attr['pool_type'] == 'avg':
         msg = "%s(%s attr=%s) not match attribute %s (%s vs. %s)"
         if 'pooling_convention' in attr:
             pooling_convention = attr['pooling_convention']
@@ -426,22 +426,23 @@ def _sym_rewrite(sym, params, graph, inputs_ext, infer_shapes):
             X = childs[0]
             X_shape = infer_shapes[X.attr('name')]
             in_channel = X_shape[1]
+            kernel = get_attr(attr, 'kernel')
+            if isinstance(kernel, int):
+                kernel = (kernel, kernel)
             conv_attr = {
                 'no_bias': 'True',
                 'dilate': '(1, 1)',
-                'kernel': attr['kernel'],
+                'kernel': kernel,
                 'stride': attr['stride'],
                 'pad': attr['pad'],
                 'layout': 'NCHW',
                 'num_filter': in_channel,
                 'num_group': in_channel,
             }
-            kernel = attr['kernel'][1:-1].split(',')
-            kernel = [int(s) for s in kernel]
-            conv_name = name.replace('_fwd', '') + '_conv'
+            conv_name = name.replace('pool', 'pool_conv')
             W_name = conv_name + '_weight'
             assert W_name not in graph
-            W_shape = (in_channel, 1, kernel[0], kernel[1])
+            W_shape = (in_channel, 1, *kernel)
             graph[W_name] = W = mx.sym.var(W_name, shape=W_shape)
             params[W_name] = nd.full(shape=W_shape, val=(1/np.product(kernel)))
             node = mx.sym.Convolution(X, W, **conv_attr, name=conv_name)
@@ -465,45 +466,72 @@ def _sym_rewrite(sym, params, graph, inputs_ext, infer_shapes):
     elif op_name == 'BatchNorm':
         # data, gamma, beta, data_mean, data_var
         assert len(childs) == 5
-        conv_sym = childs[0]
+        X = childs[0]
+        X_shape = infer_shapes[X.attr('name')]
+        in_channel = X_shape[1]
         gamma = params[childs[1].attr('name')]
         beta = params[childs[2].attr('name')]
         data_mean = params[childs[3].attr('name')]
         data_var = params[childs[4].attr('name')]
 
-        assert conv_sym.attr('op_name') == 'Convolution'
-        conv_attr = conv_sym.list_attr()
-        conv_childs = sym_iter(conv_sym.get_children())
+        fix_gamma = get_attr(attr, 'fix_gamma', True)
+        gamma = 1 if fix_gamma else gamma
+        axis = get_attr(attr, 'axis', 1)
+        assert axis == 1
 
         epsilon = float(attr['eps']) if 'eps' in attr else 1e-5
         scale = gamma / nd.sqrt(data_var + epsilon)
-
-        weight_name = conv_childs[1].attr('name')
-        weight = params[weight_name]
-        weight_scale = scale.repeat(np.product(
-                    weight.shape[1:])).reshape(weight.shape)
-        params[weight_name] = weight * weight_scale
-
-        bias_name = conv_sym.attr('name') + '_bias'
-        assert bias_name not in graph, "bias name %s has existed in graph %s" \
-            % (name, graph.keys())
         bias = beta - scale * data_mean
-        if conv_attr['no_bias'] == 'False':
-            bias += params[conv_childs[2].attr('name')]
-        params[bias_name] = bias
 
-        conv_name = conv_sym.attr('name')
-        suffix = [n for n in name.split("_") if n not in conv_name.split("_")]
-        conv_name = "%s_%s" % (conv_name, "_".join(suffix))
-        conv_attr['no_bias'] = 'False'
-        bias_sym = graph[bias_name] = mx.sym.var(bias_name, shape=bias.shape)
-        node = mx.sym.Convolution(conv_childs[0], conv_childs[1],
-                bias_sym, **conv_attr, name=conv_name)
+        if X.attr('op_name') == 'Convolution':
+            conv_attr = X.list_attr()
+            conv_childs = sym_iter(X.get_children())
 
-        logger.info("fuse Convolution=%-40s and batchnorm=%-40s",
-                conv_sym.attr('name'), name)
+            conv_name = combile_name(X.attr('name'), name)
+            W_name = conv_name + '_weight'
+            weight = params[conv_childs[1].attr('name')]
+            params[W_name] = weight * scale.reshape(*scale.shape, 1, 1, 1)
+            W = graph[W_name] = mx.sym.var(W_name, shape=params[W_name].shape)
+
+            B_name = conv_name + '_bias'
+            assert B_name not in graph, "bias name %s has existed in graph %s" \
+               % (B_name, graph.keys())
+            if not get_attr(conv_attr, 'no_bias', False):
+               bias += params[conv_childs[2].attr('name')]
+            params[B_name] = bias
+            B = graph[B_name] = mx.sym.var(B_name, shape=bias.shape)
+
+            conv_attr['no_bias'] = 'False'
+            node = mx.sym.Convolution(conv_childs[0], W,
+                   B, **conv_attr, name=conv_name)
+            logger.info("fuse Convolution=%-40s and batchnorm=%-40s",
+                   X.attr('name'), name)
+        else:
+            # TODO: use multiply and add
+            conv_attr = {
+                'no_bias': 'False',
+                'dilate': '(1, 1)',
+                'kernel': (1, 1),
+                'stride': (1, 1),
+                'pad': (0, 0),
+                'layout': 'NCHW',
+                'num_filter': in_channel,
+                'num_group': in_channel,
+            }
+            conv_name = name.replace('batchnorm', 'bn_conv')
+            W_name = conv_name + '_weight'
+            assert W_name not in graph
+            W_shape = (in_channel, 1, 1, 1)
+            graph[W_name] = W = mx.sym.var(W_name, shape=W_shape)
+            params[W_name] = scale.reshape(W_shape)
+            B_name = conv_name + '_bias'
+            assert B_name not in graph
+            params[B_name] = bias
+            graph[B_name] = B = mx.sym.var(B_name, shape=bias.shape)
+            node = mx.sym.Convolution(X, W, B, **conv_attr, name=conv_name)
+            logger.info("fuse BatchNorm=%-40s into depth-wise conv2d", name)
     elif op_name == 'Dropout':
-    # dropout is identity during testing
+        # dropout is identity during testing
         node = childs[0]
     elif op_name == '_mul_scalar':
         X = childs[0]
@@ -676,7 +704,9 @@ def sym_attach_attrs(symbol, params, inputs_ext, **kwargs):
             callback=_attach_attr, **kwargs)
 
 def sym_dump_layer_outputs(symbol, params, inputs_ext,
-        data, allows, datadir, dtype='float64', out_dtype='int32', ctx=mx.gpu()):
+        data, allows, datadir, batch_axis=0, max_num=20,
+        dtype='float64', out_dtype='int32', ctx=mx.gpu(),
+        dump_all=False):
     logger = logging.getLogger('log.sym.dump.internals')
     def _run_layer(sym, params, inputs_ext):
         args = sym.list_inputs()
@@ -684,9 +714,9 @@ def sym_dump_layer_outputs(symbol, params, inputs_ext,
         graph = SymbolBlock(sym, inputs)
         load_parameters(graph, params, ctx=ctx, dtype=dtype)
         return graph.forward(data.astype(dtype).as_in_context(ctx))
-    def _str_output(out, max_num=None):
+    def _str_output(out, start=None, max_num=None):
         out = out.asnumpy().flatten()
-        out = out[:max_num] if max_num else out
+        out = out[start:max_num] if max_num else out
         dump = ' '.join(str(d) for d in out)
         return dump
     def _str_feature(out):
@@ -698,35 +728,38 @@ def sym_dump_layer_outputs(symbol, params, inputs_ext,
     fin, fout = open(in_file, "w+"), open(out_file, "w+")
     for sym in topo_sort(symbol, logger):
         name, op_name = sym.attr('name'), sym.attr('op_name')
-        if op_name not in allows:
-            continue
-        if name != 'C2_conv2_fwd_C2_batchnorm2_fwd':
+        if op_name not in allows and name not in allows:
             continue
 
         logger.info("Dump layer %-40s output", name)
-        childs = sym_iter(sym.get_children())
         prefix = datadir + '/' + name
+        childs = sym_iter(sym.get_children())
+        childs = childs if childs else []
         for idx, c in enumerate(childs):
             if c.attr('name') in inputs_ext:
                 out = data.astype(out_dtype)
             elif c.attr('op_name') == 'null':
                 out = params[c.attr('name')].astype(out_dtype)
             else:
-                out = _run_layer(c, params, inputs_ext).astype(out_dtype)
+                out = _run_layer(c, params, inputs_ext).astype(out_dtype)[batch_axis]
+            if dump_all:
+                np.save(datadir+'/'+c.attr('name'), out.asnumpy())
             dump_str = name + '_' + op_name + '_in' + str(idx) + ':\n'
-            dump_str += _str_output(out, 100) + '\n'
+            dump_str += _str_output(out, max_num) + '\n'
             fin.write(dump_str)
 
-            if name == 'C2_conv2_fwd_C2_batchnorm2_fwd':
-                np.save(datadir+c.attr('name'), out.asnumpy().astype('int32'))
-
-        out = _run_layer(sym, params, inputs_ext).astype(out_dtype)
-        dump_str = name + '_' + op_name + '_out:' + _str_feature(out) + '\n'
-        dump_str += _str_output(out, 100) + ' ' + '\n'
+        if op_name == 'null':
+            if name in inputs_ext:
+                out = data[batch_axis].astype(out_dtype)
+            else:
+                out = params[name]
+        else:
+            out = _run_layer(sym, params, inputs_ext).astype(out_dtype)[batch_axis]
+        if dump_all:
+            np.save(datadir+'/'+name, out.asnumpy())
+        dump_str = name + '_' + op_name + ':' + _str_feature(out) + '\n'
+        dump_str += _str_output(out, max_num) + ' ' + '\n'
         fout.write(dump_str)
-
-        if name == 'C2_conv2_fwd_C2_batchnorm2_fwd':
-            np.save(datadir+name, out.asnumpy().astype('int32'))
 
     fin.close()
     fout.close()

@@ -12,6 +12,7 @@ import utils
 import gluon_zoo as zoo
 import sym_pass as spass
 import sym_utils as sutils
+import sym_annotate as anno
 import sim_quant_helper as sim
 import dataset
 
@@ -140,16 +141,16 @@ def test_sym_pass(batch_size=10, iter_num=10):
     nd.save(dump_params, top_params)
     sim.save_ext(dump_ext, top_inputs_ext)
 
-    top_inputs = [mx.sym.var(n) for n in top_inputs_ext]
-    # top, top_params = cvmq.sym_simulate(top, top_params, top_inputs_ext, data)
-    top_graph = mx.gluon.nn.SymbolBlock(top, top_inputs)
-    utils.load_parameters(top_graph, top_params, ctx=ctx)
-
     base_ctx = mx.gpu(3)
     base_inputs = [mx.sym.var(n) for n in base_inputs_ext]
     print ("op_name: ", sutils.sym_collect_attr(base))
     base_graph = mx.gluon.nn.SymbolBlock(base, base_inputs)
     utils.load_parameters(base_graph, base_params, ctx=base_ctx)
+
+    top_inputs = [mx.sym.var(n) for n in top_inputs_ext]
+    # top_graph = mx.gluon.nn.SymbolBlock(top, top_inputs)
+    # utils.load_parameters(top_graph, top_params, ctx=ctx)
+
     base_metric = dataset.load_voc_metric()
     base_metric.reset()
     def base_func(data, label):
@@ -163,6 +164,15 @@ def test_sym_pass(batch_size=10, iter_num=10):
     top_data = base_graph(data.as_in_context(base_ctx))
     for idx, c in enumerate(base_graph(mx.sym.Group(base_inputs))):
         top_inputs_ext[c.attr('name')]['data'] = top_data[idx]
+        print (c.attr('name'), top_data[idx].shape)
+    top, top_params, precs = anno.sym_annotate(top, top_params, top_inputs_ext)
+    dump_sym, dump_params, dump_ext = load_fname("_darknet53_voc", "top.anno", True)
+    open(dump_sym, "w").write(top.tojson())
+    top_ctx = [mx.gpu(int(i)) for i in "4,5,6,7".split(',') if i.strip()]
+    anno.sym_simulate(top, top_params, top_inputs_ext, precs, top_ctx)
+
+
+    exit()
     qsym, qparams, precs, out_scales = calib.sym_simulate(top, top_params,
             top_inputs_ext, None, ctx)
     top_qgraph = mx.gluon.nn.SymbolBlock(qsym, top_inputs)
@@ -177,6 +187,9 @@ def test_sym_pass(batch_size=10, iter_num=10):
             out = [t / out_scales[i] for i,t in enumerate(out)]
             return out
         return validate_data(net, data, label, top_qmetric)
+
+
+
 
     # quantize base graph
     # qsym, qparams, precs, out_scales = calib.sym_simulate(base, base_params,

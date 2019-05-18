@@ -5,14 +5,6 @@ import json
 import mxnet as mx
 from mxnet import ndarray as nd
 
-def get_zero_symmetric(threshold):
-    min_range, max_range = threshold
-
-    if max_range == min_range:
-        return 0
-    else:
-        return (max_range + min_range) / 2
-
 def save_ins_ext(params, inputs_ext):
     for name in inputs_ext:
         ext = inputs_ext[name]
@@ -46,15 +38,6 @@ def load_ext(fname):
     for line in fin:
         infos.append(json.loads(line))
     return tuple(infos)
-
-def save_data_scale(name, scale, params):
-    params[name+'_scale'] = scale
-
-def load_quant_data(data, name, params):
-    data_name = name + '_scale'
-    assert data_name in params, "data scale %s not in params dict %s" \
-            % (data_name, params.keys())
-    return data*params[data_name]
 
 def get_simple_sim_scale(threshold, target_bit):
     min_range, max_range = threshold

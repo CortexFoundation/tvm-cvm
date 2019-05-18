@@ -36,6 +36,13 @@ def combile_name(n1, n2):
     res.extend(t1[len1-end:])
     return "_".join(res)
 
+def get_attr(attr, name, default=None):
+    if name in attr:
+        return eval(attr[name])
+    if default is None:
+        assert False, "attr %s is not exists in %s" % (name, attr)
+    return default
+
 def get_nd_op(op_name):
     op = getattr(nd, op_name, None)
     if op is None:

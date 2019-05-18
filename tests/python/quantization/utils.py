@@ -144,16 +144,16 @@ def load_dataset(batch_size=10, input_size=224):
     return mx.io.ImageRecordIter(
         path_imgrec="./data/val_256_q90.rec",
         preprocess_threads=30,
+        shuffle=True,
         batch_size=batch_size,
 
         resize=resize,
         data_shape=(3, input_size, input_size),
-        label_name="softmax_label",
-        rand_crop=False,
-        rand_mirror=False,
-        shuffle=True,
-        shuffle_chunk_seed=3982304,
-        seed=48564309,
+        # label_name="softmax_label",
+        # rand_crop=False,
+        # rand_mirror=False,
+        # shuffle_chunk_seed=3982304,
+        # seed=48564309,
 
         **mean_args,
         **std_args,
@@ -161,9 +161,9 @@ def load_dataset(batch_size=10, input_size=224):
 
 def multi_validate(base_func, data_iter, *comp_funcs,
         iter_num=10, logger=logging):
-    log_str = "Iteration: {:3d} | Accuracy: {:5.2%} | "
+    log_str = "Iteration: {:3d} | " + base_func.__name__ + ": {} | "
     for func in comp_funcs:
-        log_str += func.__name__ + ": {:5.2%} | "
+        log_str += func.__name__ + ": {} | "
     log_str += "Total Sample: {:5d}"
 
     total = 0

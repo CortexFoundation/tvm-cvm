@@ -18,6 +18,7 @@ import os
 from quant_op import *
 from quant_utils import *
 import utils
+import dataset as ds
 import sym_utils as sutils
 import sym_pass as spass
 import sym_annotate as anno
@@ -35,10 +36,9 @@ def get_dump_fname(suffix="quant"):
     return '%s.%s'%(resnet.SYMBOL_FILE, suffix), \
         '%s.%s'%(resnet.PARAMS_FILE, suffix)
 
-identity = "50"
 def load_fname(version, suffix=None, with_ext=False):
     suffix = "."+suffix if suffix is not None else ""
-    fname = "./data/resnet%s_%s%s"%(identity, version, suffix)
+    fname = "./data/resnet%s%s"%(version, suffix)
     return utils.extend_fname(fname, with_ext)
 
 def test_sym_nnvm(batch_size=10, iter_num=10):
@@ -112,52 +112,76 @@ def test_sym_nnvm(batch_size=10, iter_num=10):
 def test_sym_pass(batch_size=10, iter_num=10):
     logger = logging.getLogger("log.test.sym.pass")
 
-    ctx = mx.gpu(2)
+    calib_ctx = mx.gpu(2)
+    ctx = [mx.gpu(int(i)) for i in "1,2,3,4,5,6,7".split(',') if i.strip()]
     inputs_ext = { 'data': {
             'shape': (batch_size, 3, 224, 224),
     } }
     inputs = [mx.sym.var(name) for name in inputs_ext]
 
     logger.info("load dataset, symbol and parameters")
-    data_iter = load_dataset(batch_size)
+    data_iter = ds.load_imagenet_rec(batch_size)
     def data_iter_func():
         data = data_iter.next()
         return data.data[0], data.label[0]
-    data, _ = data_iter_func()
+    for i in range(10):
+        if i == 3:
+            break
+        data, _ = data_iter_func()
+    data_iter.reset()
 
-    net1 = utils.load_model(*load_fname("mxg"), inputs, ctx=ctx)
-    def graph_func(data):
-        return net1.forward(data.as_in_context(ctx))
+    version = "18_v1"
+    net1 = utils.load_model(*load_fname(version), inputs, ctx=ctx)
+    acc_top1 = mx.metric.Accuracy()
+    acc_top5 = mx.metric.TopKAccuracy(5)
+    acc_top1.reset()
+    acc_top5.reset()
+    def resnet(data, label):
+        data = gluon.utils.split_and_load(data, ctx_list=ctx, batch_axis=0, even_split=False)
+        res = [net1.forward(d) for d in data]
+        res = nd.concatenate(res)
+        acc_top1.update(label, res)
+        _, top1 = acc_top1.get()
+        acc_top5.update(label, res)
+        _, top5 = acc_top5.get()
+        return "top1={:6.2%} top5={:6.2%}".format(top1, top5)
 
-    net2 = utils.load_model(*load_fname("v1"), inputs, ctx=ctx)
-    def gluon_cv(data):
-        return net2.forward(data.as_in_context(ctx))
+    # sym_fname, param_fname = load_fname(version)
+    # sym, params = mx.sym.load(sym_fname), nd.load(param_fname)
+    # sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
+    # qsym, qparams, precs, _ = calib.sym_simulate(sym, params, inputs_ext, data, calib_ctx)
+    # dump_sym, dump_params = load_fname(version, "sym.simulate")
+    # open(dump_sym, "w").write(qsym.tojson())
+    # qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, precs, "tvm")
+    # dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
+    # sim.save_ext(dump_ext, inputs_ext)
+    # nd.save(dump_params, qparams)
+    # open(dump_sym, "w").write(qsym.tojson())
 
-    sym_fname, param_fname = load_fname("mxg")
-    sym, params = mx.sym.load(sym_fname), nd.load(param_fname)
-    sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
-    anno.sym_annotate(sym, params, inputs_ext, in_bit=8)
-    qsym, qparams, precs, _ = calib.sym_simulate(sym, params, inputs_ext, data, ctx)
-    dump_sym, dump_params = load_fname("mxg", "sym.simulate")
-    nd.save(dump_params, qparams)
-    open(dump_sym, "w").write(qsym.tojson())
-
-    qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, precs, "cvm")
-    dump_sym, dump_params, dump_ext = load_fname("mxg", "sym.quantize", True)
-    sim.save_ext(dump_ext, inputs_ext)
-    nd.save(dump_params, qparams)
-    open(dump_sym, "w").write(qsym.tojson())
-
-    dump_sym, dump_params, dump_ext = load_fname("mxg", "sym.quantize", True)
+    dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
     (inputs_ext,) = sim.load_ext(dump_ext)
     net3 = utils.load_model(dump_sym, dump_params, inputs, ctx=ctx)
-    def cvm_quantize(data):
+    qacc_top1 = mx.metric.Accuracy()
+    qacc_top5 = mx.metric.TopKAccuracy(5)
+    qacc_top1.reset()
+    qacc_top5.reset()
+    def cvm_quantize(data, label):
         data = sim.load_real_data(data, 'data', inputs_ext)
-        return net3.forward(data.as_in_context(ctx))
+        data = gluon.utils.split_and_load(data, ctx_list=ctx, batch_axis=0, even_split=False)
+        res = [net3.forward(d) for d in data]
+        res = nd.concatenate(res)
+        qacc_top1.update(label, res)
+        _, top1 = qacc_top1.get()
+        qacc_top5.update(label, res)
+        _, top5 = qacc_top5.get()
+        return "top1={:6.2%} top5={:6.2%}".format(top1, top5)
 
-    multi_eval_accuracy(graph_func, data_iter_func,
-            gluon_cv, cvm_quantize,
+    utils.multi_validate(resnet, data_iter_func,
+            cvm_quantize,
             iter_num=iter_num, logger=logger)
+    # multi_eval_accuracy(graph_func, data_iter_func,
+    #         gluon_cv, cvm_quantize,
+    #         iter_num=iter_num, logger=logger)
 
 def test_performance(batch_size=10, iter_num=10):
     logger = logging.getLogger("log.test.tvm.performance")
@@ -226,11 +250,14 @@ if __name__ == "__main__":
 
     # resnet.save_graph(mx.gpu())
     # zoo.save_model('resnet50_v1', 1000)
+    # zoo.save_model('resnet18_v1')
+    # zoo.save_model('resnet50_v1d_0.86')
+    # zoo.save_model('resnet18_v1b_0.89')
 
     # save_data()
 
     # test_nnvm_load(batch_size=16, iter_num=10)
-    test_sym_pass(batch_size=16, iter_num=10)
+    test_sym_pass(batch_size=700, iter_num=10000)
     # test_sym_nnvm(batch_size=1, iter_num=1)
     # test_performance(16, 10)
 
