@@ -101,7 +101,7 @@ if __name__ == '__main__':
                 input_idx_from_broadcast(ovars, shape1),
                 input_idx_from_broadcast(ovars, shape2))
 
-cvm_log = open('/tmp/mnist/out/cvm_op.txt', "w+")
+cvm_log = open('cvm_op.txt', "w+")
 class Clip(mx.operator.CustomOp):
     def __init__(self, precision, cvm_name, **kwargs):
         super(Clip, self).__init__(**kwargs)
