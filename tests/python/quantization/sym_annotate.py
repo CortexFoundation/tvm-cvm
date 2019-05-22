@@ -20,7 +20,6 @@ disable_requant_ops = [
     'clip', 'negative',
     'repeat', 'tile', 'expand_dims',
     'Reshape', 'transpose', 'Flatten',
-    '_contrib_box_nms',
 ]
 class ANNO_TYPE():
     REQUANT = '_requant'
@@ -139,7 +138,7 @@ def _infer_parameter_precs(sym, params, graph, inputs_ext, precs, outputs_ext):
     if name in outputs_ext:
         ext = outputs_ext[name]
         if 'fixed' in ext and ext['fixed']:
-            alpha = params[name].abs().max()
+            alpha = params[name].abs().max().asscalar()
             precs[name][out_key] = math.ceil(math.log2(alpha)) + 1
     else:
         min_prec = min(list(param_prec.values()))
@@ -147,7 +146,7 @@ def _infer_parameter_precs(sym, params, graph, inputs_ext, precs, outputs_ext):
         assert out_key not in param_prec
         param_prec[out_key] = min_prec
     logger.debug("Fixed parameter %-40s out precision: %2d from %s",
-        name, min_prec, param_prec)
+        name, precs[name][out_key], param_prec)
     return sym, params
 
 def _annotate(sym, graph, precs, out_bit, out_tb, anno_type, logger):
@@ -258,6 +257,7 @@ def _sym_calibrate_th_dict(symbol, params, inputs_ext,
         if len(calib_sym) > calib_len:
             # remove duplicate
             calib_sym = {s.attr('name'):s for s in calib_sym if s.attr('name') not in graph}
+            calib_sym = list(calib_sym.values())
             if len(calib_sym) <= calib_len:
                 continue
             graph.extend([s.attr('name') for s in calib_sym])
@@ -265,7 +265,7 @@ def _sym_calibrate_th_dict(symbol, params, inputs_ext,
             calib_sym = []
     if len(calib_sym) > 0:
         calib_sym = {s.attr('name'):s for s in calib_sym if s.attr('name') not in graph}
-        _run_layer(calib_sym)
+        _run_layer(list(calib_sym.values()))
     return th_dict
 
 def _update_scale_and_precs(symbol, params, inputs_ext, th_dict, precs, scales):
@@ -285,10 +285,10 @@ def _update_scale_and_precs(symbol, params, inputs_ext, th_dict, precs, scales):
             prec = precs[name][out_key]
             amin, amax = th_dict[name]
             scales[name] = _get_scale(amin, amax, prec)
-            if name in ['yolov30_yolooutputv30_broadcast_add1',
-                        'yolov30_yolooutputv31_broadcast_add1',
-                        'yolov30_yolooutputv32_broadcast_add1']:
-                scales[name] = 1
+            # if name in ['yolov30_yolooutputv30_broadcast_add1',
+            #             'yolov30_yolooutputv31_broadcast_add1',
+            #             'yolov30_yolooutputv32_broadcast_add1']:
+            #     scales[name] = 1
         elif op_name in ['Convolution', 'FullyConnected']:
             if get_attr(attr, 'no_bias', False) == False:
                 B_name = childs[2].attr('name')
@@ -325,7 +325,6 @@ def _update_scale_and_precs(symbol, params, inputs_ext, th_dict, precs, scales):
             scales[name] = cscales[0]
         elif _is_annotate_op(sym):
             cname = childs[0].attr('name')
-            amin, amax = _get_ths(cname)
             amin, amax = th_dict[cname]
             alpha = max(abs(amin), abs(amax))
             int_alpha = alpha * scales[cname]
@@ -369,6 +368,11 @@ def _simulate(sym, scale, in_prec, out_prec, name):
     node = mx.sym.broadcast_mul(sym, scale_sym, name=requant_op_name)
     graph[requant_op_name] = node
     return node
+def _is_simulate_op(sym):
+    op_name, attr = sym.attr('op_name'), sym.list_attr()
+    if op_name == 'Custom' and attr['op_type'] == 'cvm_sim_quant':
+        return True
+    return False
 def _simulate_layer(sym, params, graph, inputs_ext, scales, precs):
     logger = logging.getLogger('log.calib.sym.sim.requant')
     name, op_name = sym.attr('name'), sym.attr('op_name')
@@ -385,7 +389,6 @@ def _simulate_layer(sym, params, graph, inputs_ext, scales, precs):
         out = out * scales[name]
         return out
     if _is_annotate_op(sym):
-        # TODO: if requant_scale < 1: should not do requantize
         X_name = childs[0].attr('name')
         requant_scale = scales[name] / scales[childs[0].attr('name')]
         in_prec, out_prec = precs[X_name][out_key], precs[name][out_key]
@@ -402,7 +405,7 @@ def _simulate_layer(sym, params, graph, inputs_ext, scales, precs):
             relative_scale = out_scale / cscales[idx]
             if relative_scale != 1:
                 cname = c.attr('name')
-                in_prec, out_prec = precs[cname][out_key], precs[name][out_key]
+                in_prec, out_prec = precs[cname][out_key], precs[cname][out_key]
                 c = _simulate(c, relative_scale, in_prec, out_prec,
                         "%s_in%d_squeeze"%(name, idx))
                 logger.debug("layer %-40s  adjust scale=%-16.8f orig=%-16.8f" + \
@@ -412,34 +415,25 @@ def _simulate_layer(sym, params, graph, inputs_ext, scales, precs):
             new_childs.append(c)
         node = get_mxnet_op(op_name)(*new_childs, **attr, name=name)
     elif op_name in ['sigmoid', 'exp']:
-        node = _restore()
+        # node = _restore()
 
-        # cname = childs[0].attr('name')
-        # in_prec = precs[cname][name]
-        # alpha = (2 ** (in_prec - 1)) - 1
-        # data = nd.arange(-alpha, alpha+1)
-        # out = get_nd_op(op_name)(data / cscales[0])
-        # weight = (out * scales[name]).round().reshape(2*alpha, 1)
-        # W_name = name + '_weight'
-        # assert W_name not in graph
-        # W = graph[W_name] = mx.sym.var(W_name, shape=weight.shape)
-        # params[W_name] = weight
-
-        # alpha_sym, alpha_name = op_const(alpha, graph, var=mx.sym.var)
-        # params[alpha_name] = nd.array([alpha])
-        # X = mx.sym.broadcast_add(childs[0], alpha_sym)
-        # node = mx.sym.Custom(X, W, in_dim=2*alpha,
-        #         name=name, op_type='cvm_lut')
-    elif op_name in ['_contrib_box_nms']:
-        node = _restore()
-        # scale = cscales[0]
-        # overlap_thresh = get_attr(attr, 'overlap_thresh', 0.5)
-        # valid_thresh = get_attr(attr, 'valid_thresh', 0)
-        # attr['overlap_thresh'] = overlap_thresh * scale
-        # attr['valid_thresh'] = valid_thresh * scale
-        # node = get_mxnet_op(op_name)(*childs, **attr, name=name)
-    # elif childs is not None:
-    #     node = _restore()
+        cname = childs[0].attr('name')
+        in_prec = precs[cname][name]
+        alpha = (2 ** (in_prec - 1)) - 1
+        data = nd.arange(-alpha, alpha+1)
+        out = get_nd_op(op_name)(data / cscales[0])
+        weight = (out * scales[name]).round().reshape(2*alpha, 1)
+        W_name = name + '_weight'
+        assert W_name not in graph
+        W = graph[W_name] = mx.sym.var(W_name, shape=weight.shape)
+        params[W_name] = weight
+        precs[W_name] = { out_key: precs[name][out_key] }
+        alpha_sym, alpha_name = op_const(alpha, graph, var=mx.sym.var)
+        precs[alpha_name] = { out_key: in_prec }
+        params[alpha_name] = nd.array([alpha])
+        X = mx.sym.broadcast_add(childs[0], alpha_sym)
+        node = mx.sym.Custom(X, W, in_dim=2*alpha,
+                name=name, op_type='cvm_lut')
     scales[node.attr('name')] = scales[name]
     precs[node.attr('name')] = precs[name]
     return node, params
@@ -453,6 +447,126 @@ def _simulate_parameters(sym, params, graph, inputs_ext, scales):
     elif name in scales:
         params[name] = params[name] * scales[name]
     return sym, params
+
+def _realize_tvm(sym, sb, params, graph, target_bit):
+    """Requantize Op:
+        out = round(sym >> sb)  if sb >  0
+        out = round(sym)        if sb == 0
+        out = round(sym << -sb) if sb <  0
+
+        round(sym >> sb) = int((int(sym >> (sb - 1)) + 1) >> 1)
+
+        out = clip_int(out)
+    """
+    out = mx.sym.round(sym) # avoid precision loss represented in float32
+    sb, tb = sb.asscalar(), target_bit.asscalar()
+    if sb < 0:
+        out = out * (2 ** -sb)
+        out = mx.sym.round(sym)
+    elif sb > 0:
+        if sb > 1:
+            out = out / (2 ** (sb - 1))
+            out = mx.sym.floor(out)
+        out = out + 1
+        out = out / 2
+        out = mx.sym.floor(out)
+    clip_range = 2 ** (tb - 1) - 1
+    out = mx.sym.clip(out, a_min=-clip_range, a_max=clip_range)
+    return out
+def _realize_cvm(sym, sb, prec, params, graph):
+    name = sym.attr('name')
+    requant_op = name + '_cvm_shift'
+    assert requant_op not in graph
+    if sb == 0:
+        return mx.sym.Custom(sym, precision=prec,
+                cvm_name=requant_op,
+                name=requant_op, op_type='cvm_clip')
+    elif sb < 0:
+        return mx.sym.Custom(sym, shift_bit=-sb, precision=prec,
+                name=requant_op, op_type='cvm_left_shift')
+    else:
+        return mx.sym.Custom(sym, shift_bit=sb, precision=prec,
+                cvm_name=requant_op,
+                name=requant_op, op_type='cvm_right_shift')
+
+def _realize_layer(sym, params, graph, inputs_ext, runtime):
+    logger = logging.getLogger('log.realize.layer')
+    name = sym.attr('name')
+    childs, attr = sym_iter(sym.get_children()), sym.list_attr()
+    if not _is_simulate_op(sym):
+        return sym, params
+    if name in [
+        'yolov30_yolooutputv31__minus0_in1_squeeze',
+        'yolov30_yolooutputv31__plus0_in1_squeeze',
+        'yolov30_yolooutputv32__minus0_in1_squeeze',
+        'yolov30_yolooutputv32__plus0_in1_squeeze',
+        'yolov30_yolooutputv30_expand_dims0_requant_16',
+        'yolov30_yolooutputv31_expand_dims0_requant_16',
+        'yolov30_yolooutputv32_expand_dims0_requant_16',
+    ]:
+        return sym, params
+
+    assert runtime in ['cvm', 'tvm']
+    _realize_func = _realize_cvm if runtime == 'cvm' else _realize_tvm
+
+    def cal_bit(A_bit, B_bit, sb):
+        max_bit = 32
+        total_bit = A_bit + B_bit
+        excess_bit = (total_bit - max_bit) // 2 if total_bit > max_bit else 0
+        A_target_bit = A_bit - excess_bit
+        B_target_bit = min(B_bit - excess_bit, 32 - A_target_bit)
+        A_sb, B_sb = A_bit - A_target_bit, B_bit - B_target_bit
+        Y_sb = (-sb) - A_sb - B_sb
+        return A_sb, A_target_bit, B_sb, B_target_bit, Y_sb
+
+    X, scale = childs[0], eval(attr['scale'])
+    in_prec, out_prec = eval(attr['in_prec']), eval(attr['out_prec'])
+    print (sym.attr('name'), scale, in_prec, out_prec)
+    if scale == 1:
+        node = _realize_func(X, 0, out_prec, params, graph)
+    else:
+        frac, sb = sim.extract_float(scale)
+        B_bit = math.ceil(math.log2(frac)) + 1
+        A_sb, A_tb, B_sb, B_tb, Y_sb = cal_bit(in_prec, B_bit, sb)
+
+        X = _realize_func(X, A_sb, A_tb, params, graph)
+        B_name = name + '_scale'
+        params[B_name] = nd.array([round(frac / (2 ** B_sb))])
+        B_range = 2 ** (B_tb - 1) - 1
+        params[B_name] = nd.clip(params[B_name],
+                a_min=-B_range, a_max=B_range)
+        attr = { 'precision': str(B_tb) }
+        B = graph[B_name] = mx.sym.var(B_name, shape=(1,), attr=attr)
+        node = mx.sym.broadcast_mul(X, B)
+        node = _realize_func(node, Y_sb, out_prec, params, graph)
+        logger.debug("layer %-40s Y(INT%s >> %s) X(%s >> %s) B(%s vs. %s %s >> %s)",
+                name, out_prec, Y_sb, in_prec, A_sb, scale, frac, sb, B_sb)
+    return node, params
+
+def _realize_parameters(sym, params, graph, inputs_ext, precs):
+    logger = logging.getLogger('log.realize.parameters')
+    name, op_name = sym.attr('name'), sym.attr('op_name')
+    attr = sym.list_attr()
+    if op_name != 'null' or name in inputs_ext:
+        return sym, params
+    prec = precs[name][out_key]
+    data = params[name]
+    params[name] = sim.int_realize(data, prec, logger=logger)
+    # calculate error
+    error = params[name].astype('float32') - data
+    if nd.sum(error).asscalar() == 0:
+        rate = 0
+    else:
+        rate = nd.norm(error / data).asscalar() / np.product(data.shape)
+    if rate > 0.001:
+        logger.warn("realize parameter %-60s avg error=%10.9f shape=%s",
+                name, rate, data.shape)
+    else:
+        logger.debug("realize parameter %-60s avg error=%10.9f shape=%s",
+                name, rate, data.shape)
+    attr['precision'] = str(prec)
+    node = mx.sym.var(name, attr=attr)
+    return node, params
 
 def _extract_symbol(symbol, params, outputs_ext):
     bases = []
@@ -548,27 +662,47 @@ def sym_simulate(symbol, params, inputs_ext, outputs_ext, precs, ctx):
             th_dict, precs, scales)
     print (th_dict, scales)
 
-    symbol, params = topo_visit(symbol, params, inputs_ext,
+    ssym, sparams = topo_visit(symbol, params, inputs_ext,
             get_op=get_mxnet_op, logger=logger,
             callback=_simulate_layer,
             scales=scales, precs=precs)
-    print ("Parameters: ", params.keys())
-    _, params = topo_visit(symbol, params, inputs_ext,
+    _, sparams = topo_visit(ssym, sparams, inputs_ext,
             get_op=get_mxnet_op, logger=logger,
             callback=_simulate_parameters, scales=scales)
 
-    out_scales = [scales[s.attr('name')] for s in symbol]
-
     for k, v in inputs_ext.items():
         del v['data']
-    return symbol, params, out_scales
+    sparams = examine_parameters(ssym, sparams, inputs_ext)
+    return ssym, sparams, scales
+
+def sym_realize(symbol, params, inputs_ext, precs, runtime="cvm"):
+    logger = logging.getLogger('log.realize')
+    qsym, qparams = topo_visit(symbol, params, inputs_ext,
+            get_op=get_mxnet_op,
+            callback=_realize_parameters, precs=precs)
+    qsym, qparams = topo_visit(qsym, qparams, inputs_ext,
+            get_op=get_mxnet_op,
+            callback=_realize_layer, runtime=runtime)
+
+    def _check_int_params(params, arg):
+       param = params[arg]
+       msg = "key:%s max_val:%s, min_val:%s %s"%(arg, param.max().asscalar(),
+               param.min().asscalar(), param)
+       flat = param.asnumpy().flatten()
+       assert all(flat >= INT32_MIN) and all(flat <= INT32_MAX), msg
+       assert all(flat.astype('int32').astype(flat.dtype) == flat), msg
+
+    qparams = examine_parameters(qsym, qparams, inputs_ext,
+          callback=_check_int_params)
+    return qsym, qparams
 
 def mixed_precision(symbol, params, inputs_ext,
-        in_bit=8, out_bit=8, outputs_ext=None, ctx=[mx.cpu()]):
-    if outputs_ext is None:
-        outputs_ext = {s.attr('name'):{} for s in symbol}
+        in_bit=8, out_bit=8, out_ext=None, runtime="cvm",
+        ctx=[mx.cpu()]):
+    if out_ext is None:
+        out_ext = {s.attr('name'):{ 'type': 'out' } for s in symbol}
     base, base_params, top, top_params = _extract_symbol(symbol, params,
-            outputs_ext)
+            out_ext)
     inputs = [mx.sym.var(n) for n in inputs_ext]
     net1 = nn.SymbolBlock(base, inputs)
     load_parameters(net1, base_params, ctx=ctx)
@@ -578,16 +712,42 @@ def mixed_precision(symbol, params, inputs_ext,
     out_name = [c.attr('name') for c in base]
     print (list(zip(out_name, out_range)))
 
-    base, base_params, precs = sym_annotate(base, base_params, inputs_ext,
-            outputs_ext, in_bit=in_bit, out_bit=out_bit)
-    exit()
-    qbase, qbase_params, out_scales = sym_simulate(base, base_params,
-            inputs_ext, outputs_ext, precs, ctx)
+    sbase, sbase_params, precs = sym_annotate(base, base_params, inputs_ext,
+            out_ext, in_bit=in_bit, out_bit=out_bit)
+    qbase, qbase_params, scales = sym_simulate(sbase, sbase_params,
+            inputs_ext, out_ext, precs, ctx)
 
-    maps = zip([c.attr('name') for c in base], [c.attr('name') for c in qbase])
-    maps = {k[0]:k[1] for k in maps}
+    maps = dict(zip([c.attr('name') for c in qbase], [c.attr('name') for c in base]))
+    ext = {maps[c.attr('name')]:scales[c.attr('name')] for c in qbase}
+    type_ext = {out_ext[k]['type']:v for k,v in ext.items() \
+        if 'type' in out_ext[k]}
+
+    qbase, qbase_params = sym_realize(qbase, qbase_params, inputs_ext, precs, runtime)
+    maps = dict(zip([c.attr('name') for c in qbase], [c.attr('name') for c in base]))
+
     qsym, qparams = _merge_symbol(qbase, qbase_params, top, top_params, maps)
-    return qsym, qparams, out_scales
+    qsym, qparams = post_quantize(qsym, qparams, inputs_ext, type_ext)
+    return qsym, qparams, type_ext
+
+def post_quantize(symbol, params, inputs_ext, extra_ext):
+    quantize_identity = ['_contrib_box_nms']
+    def _post_quantize(sym, params, graph, inputs_ext):
+        name, op_name = sym.attr('name'), sym.attr('op_name')
+        childs, attr = sym_iter(sym.get_children()), sym.list_attr()
+        node = sym
+        if op_name == '_contrib_box_nms':
+            score_scale = extra_ext['score']
+            bbox_scale = extra_ext['bbox']
+            valid_thresh = get_attr(attr, 'valid_thresh', 0)
+            attr['valid_thresh'] = valid_thresh * score_scale
+            node = get_mxnet_op(op_name)(*childs, **attr, name=name)
+        return node, params
+    qsym, qparams = topo_visit(symbol, params, inputs_ext,
+            get_op=get_mxnet_op,
+            callback=_post_quantize)
+    return qsym, qparams
+
+
 
 
 

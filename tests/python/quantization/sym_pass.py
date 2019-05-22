@@ -676,9 +676,9 @@ def sym_quant_prepare(symbol, params, inputs_ext):
             logger=logger, inputs_ext=inputs_ext,
             callback=_fuse_constant)
 
-    # sym, params = topo_visit(sym, params, get_op=get_mxnet_op,
-    #         logger=logger, inputs_ext=inputs_ext,
-    #         callback=_reduce_graph)
+    sym, params = topo_visit(sym, params, get_op=get_mxnet_op,
+           logger=logger, inputs_ext=inputs_ext,
+           callback=_reduce_graph)
 
     params = examine_parameters(sym, params, inputs_ext)
     return sym, params

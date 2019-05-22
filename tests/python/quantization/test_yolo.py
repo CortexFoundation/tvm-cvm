@@ -163,22 +163,22 @@ def test_sym_pass(batch_size=10, iter_num=10):
         print (n, top_data[idx].abs().max().asscalar())
     in_bit, out_bit = 8, 16
     outputs_ext = {
-        'yolov30_yolooutputv30_expand_dims0': { 'thresholds': (0, 1) },
-        'yolov30_yolooutputv31_expand_dims0': { 'thresholds': (0, 1) },
-        'yolov30_yolooutputv32_expand_dims0': { 'thresholds': (0, 1) },
-        'yolov30_yolooutputv30_tile0': { 'thresholds': (0, 416) },
-        'yolov30_yolooutputv31_tile0': { 'thresholds': (0, 416) },
-        'yolov30_yolooutputv32_tile0': { 'thresholds': (0, 416) },
-        'yolov30_yolooutputv30_broadcast_add1': { 'fixed': True },
-        'yolov30_yolooutputv31_broadcast_add1': { 'fixed': True },
-        'yolov30_yolooutputv32_broadcast_add1': { 'fixed': True },
+        'yolov30_yolooutputv30_expand_dims0': { 'thresholds': (0, 1), 'type': 'score' },
+        'yolov30_yolooutputv31_expand_dims0': { 'thresholds': (0, 1), 'type': 'score' },
+        'yolov30_yolooutputv32_expand_dims0': { 'thresholds': (0, 1), 'type': 'score' },
+        'yolov30_yolooutputv30_tile0': { 'thresholds': (0, 416), 'type': 'bbox' },
+        'yolov30_yolooutputv31_tile0': { 'thresholds': (0, 416), 'type': 'bbox' },
+        'yolov30_yolooutputv32_tile0': { 'thresholds': (0, 416), 'type': 'bbox' },
+        'yolov30_yolooutputv30_broadcast_add1': { 'fixed': True, 'type': 'ids' },
+        'yolov30_yolooutputv31_broadcast_add1': { 'fixed': True, 'type': 'ids' },
+        'yolov30_yolooutputv32_broadcast_add1': { 'fixed': True, 'type': 'ids' },
     }
-    qsym, qparams, out_scales = anno.mixed_precision(top, top_params,
+    qsym, qparams, type_ext = anno.mixed_precision(top, top_params,
             top_inputs_ext, in_bit=in_bit, out_bit=out_bit,
-            outputs_ext=outputs_ext, ctx=[mx.gpu(7)])
-    # top, top_params, precs = anno.sym_annotate(top, top_params, top_inputs_ext,
-    #         in_bit=in_bit, out_bit=out_bit)
-    # qsym, qparams, out_scales = anno.sym_simulate(top, top_params, top_inputs_ext, precs, top_ctx)
+            out_ext=outputs_ext, ctx=[mx.gpu(7)])
+    out_scales = [type_ext['ids'], type_ext['score'], type_ext['bbox']]
+    # out_scales = list(out_scales.values())
+    print (out_scales)
     dump_sym, dump_params = load_fname("_darknet53_voc", "top.simulate", False)
     open(dump_sym, "w").write(qsym.tojson())
 
