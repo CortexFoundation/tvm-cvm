@@ -44,12 +44,15 @@ def _infer_fixed_precs(sym, params, graph, inputs_ext, precs):
             cprecs[2][name] = PLACE_HOLDER-1
     elif op_name in ['broadcast_add', 'broadcast_sub', 'elemwise_add',
             'elemwise_sub']:
-        cprecs[0][name], cprecs[1][name] = PLACE_HOLDER-1, PLACE_HOLDER-1
+        # cprecs[0][name], cprecs[1][name] = PLACE_HOLDER-1, PLACE_HOLDER-1
+        cprecs[0][name], cprecs[1][name] = PLACE_HOLDER//2, PLACE_HOLDER//2
+        #  cprecs[0][name], cprecs[1][name] = 8, 8
     elif op_name in ['broadcast_mul']:
         cprecs[0][name], cprecs[1][name] = PLACE_HOLDER//2, PLACE_HOLDER//2
     elif op_name in ['Concat']:
         for prec in cprecs:
             prec[name] = PLACE_HOLDER
+            # prec[name] = 8
     elif op_name in ['sum']:
         cprecs[0][name] = 8
     else:
@@ -59,6 +62,7 @@ def _infer_fixed_precs(sym, params, graph, inputs_ext, precs):
 
 def _update_input_precs(precs, in_bit, inputs_ext):
     for k in inputs_ext:
+        inputs_ext[k]['target_bit'] = in_bit
         precs[k][out_key] = in_bit
         for n, v in precs[k].items():
             assert v >= in_bit, "input %s out of bit %s vs. %s" \
@@ -207,8 +211,7 @@ def _sym_annotate(sym, params, graph, inputs_ext, precs):
 
 def _get_thresholds(out):
     return (out.min().asscalar(), out.max().asscalar())
-def _sym_calibrate_th_dict(symbol, params, inputs_ext,
-        calib_len=8, ctx=[mx.cpu()]):
+def _sym_calibrate_th_dict(symbol, params, inputs_ext, calib_len, ctx):
     logger = logging.getLogger("log.sim.calibrate")
     th_dict = {}
     def _run_layer(calib_sym):
@@ -285,10 +288,6 @@ def _update_scale_and_precs(symbol, params, inputs_ext, th_dict, precs, scales):
             prec = precs[name][out_key]
             amin, amax = th_dict[name]
             scales[name] = _get_scale(amin, amax, prec)
-            # if name in ['yolov30_yolooutputv30_broadcast_add1',
-            #             'yolov30_yolooutputv31_broadcast_add1',
-            #             'yolov30_yolooutputv32_broadcast_add1']:
-            #     scales[name] = 1
         elif op_name in ['Convolution', 'FullyConnected']:
             if get_attr(attr, 'no_bias', False) == False:
                 B_name = childs[2].attr('name')
@@ -347,8 +346,11 @@ def _update_scale_and_precs(symbol, params, inputs_ext, th_dict, precs, scales):
             scales[name] = _get_scale(amin, amax, precs[name][out_key])
         else:
             logger.critical('Unrecognized op:%s(%s) . attrs(%s)', op_name, name, attr)
-        logger.debug("collect layer %-20s name=%-40s scales: out_scale=%-15.5f in_scales=%s",
-                op_name, name, scales[name], cscales)
+        logger.debug("collect layer %-20s name=%-40s infos: out_scale=%-15.5f " +
+                "out_prec=%-2s in_scales=%s in_prec=%s",
+                op_name, name, scales[name], precs[name][out_key],
+                cscales,
+                [precs[c.attr('name')][out_key] for c in childs] if childs else [])
 
 def _simulate(sym, scale, in_prec, out_prec, name):
     node = mx.sym.Custom(sym, in_prec=in_prec, out_prec=out_prec,
@@ -415,8 +417,6 @@ def _simulate_layer(sym, params, graph, inputs_ext, scales, precs):
             new_childs.append(c)
         node = get_mxnet_op(op_name)(*new_childs, **attr, name=name)
     elif op_name in ['sigmoid', 'exp']:
-        # node = _restore()
-
         cname = childs[0].attr('name')
         in_prec = precs[cname][name]
         alpha = (2 ** (in_prec - 1)) - 1
@@ -495,21 +495,59 @@ def _realize_layer(sym, params, graph, inputs_ext, runtime):
     childs, attr = sym_iter(sym.get_children()), sym.list_attr()
     if not _is_simulate_op(sym):
         return sym, params
+
+    X, scale = childs[0], eval(attr['scale'])
+    in_prec, out_prec = eval(attr['in_prec']), eval(attr['out_prec'])
+    frac, sb = sim.extract_float(scale)
     if name in [
-        'yolov30_yolooutputv31__minus0_in1_squeeze',
-        'yolov30_yolooutputv31__plus0_in1_squeeze',
-        'yolov30_yolooutputv32__minus0_in1_squeeze',
-        'yolov30_yolooutputv32__plus0_in1_squeeze',
-        'yolov30_yolooutputv30_expand_dims0_requant_16',
-        'yolov30_yolooutputv31_expand_dims0_requant_16',
-        'yolov30_yolooutputv32_expand_dims0_requant_16',
+        # 'resnetv10_pool0_fwd_requant_8',
+        # 'resnetv10_stage1__plus0_in0_squeeze',
+        # 'resnetv10_stage1_relu0_fwd_requant_8',
+        # 'resnetv10_stage1_activation0_requant_8',
+        # 'resnetv10_stage1_relu1_fwd_requant_8',
+        # 'resnetv10_stage1__plus1_in1_squeeze',
+        # 'resnetv10_stage1_activation1_requant_8',
+        # 'resnetv10_stage2_relu0_fwd_requant_8',
+        # 'resnetv10_stage2__plus0_in1_squeeze',
+        # 'resnetv10_stage2_activation0_requant_8',
+        # 'resnetv10_stage2_relu1_fwd_requant_8',
+        # 'resnetv10_stage2__plus1_in1_squeeze',
+        # 'resnetv10_stage2_activation1_requant_8',
+        # 'resnetv10_stage3__plus0_in0_squeeze',
+        # 'resnetv10_stage3_relu0_fwd_requant_8',
+        # 'resnetv10_stage3_activation0_requant_8',
+        # 'resnetv10_stage3_relu1_fwd_requant_8',
+        # 'resnetv10_stage3__plus1_in1_squeeze',
+        # 'resnetv10_stage3_activation1_requant_8',
+        # 'resnetv10_stage4_relu0_fwd_requant_8',
+        # 'resnetv10_stage4__plus0_in1_squeeze',
+        # 'resnetv10_stage4_activation0_requant_8',
+        # 'resnetv10_stage4__plus1_in0_squeeze',
+        # 'resnetv10_stage4_relu1_fwd_requant_8',
+        # 'resnetv10_stage4_activation1_requant_8',
+        # 'broadcast_mul0_requant_8',
+        # 'resnetv10_dense0_fwd_requant_8',
     ]:
+        print (name, scale, in_prec, out_prec, frac, sb)
         return sym, params
 
     assert runtime in ['cvm', 'tvm']
     _realize_func = _realize_cvm if runtime == 'cvm' else _realize_tvm
 
     def cal_bit(A_bit, B_bit, sb):
+        #  A_target_bit, B_target_bit = 16, 16
+        #  A_target_bit = min(A_bit, A_target_bit)
+        #  B_target_bit = min(B_bit, B_target_bit)
+        #  A_target_bit = 32 - B_target_bit if B_target_bit < 16 else A_target_bit
+        #  B_target_bit = 32 - A_target_bit if A_target_bit < 16 else B_target_bit
+        #  A_target_bit = min(A_bit, A_target_bit)
+        #  B_target_bit = min(B_bit, B_target_bit)
+        A_target_bit = A_bit
+        B_target_bit = PLACE_HOLDER - A_target_bit
+        A_sb, B_sb = A_bit - A_target_bit, B_bit - B_target_bit
+        Y_sb = (-sb) - A_sb - B_sb
+        return A_sb, A_target_bit, B_sb, B_target_bit, Y_sb
+
         max_bit = 32
         total_bit = A_bit + B_bit
         excess_bit = (total_bit - max_bit) // 2 if total_bit > max_bit else 0
@@ -519,13 +557,14 @@ def _realize_layer(sym, params, graph, inputs_ext, runtime):
         Y_sb = (-sb) - A_sb - B_sb
         return A_sb, A_target_bit, B_sb, B_target_bit, Y_sb
 
-    X, scale = childs[0], eval(attr['scale'])
-    in_prec, out_prec = eval(attr['in_prec']), eval(attr['out_prec'])
-    print (sym.attr('name'), scale, in_prec, out_prec)
     if scale == 1:
         node = _realize_func(X, 0, out_prec, params, graph)
+        logger.debug("layer %-40s X prec=%s", name, out_prec)
+    elif frac == 1:
+        node =_realize_func(X, sb, out_prec, params, graph)
+        logger.debug("layer %-40s X(%s >> %s) prec=%s",
+                name, in_prec, sb, out_prec)
     else:
-        frac, sb = sim.extract_float(scale)
         B_bit = math.ceil(math.log2(frac)) + 1
         A_sb, A_tb, B_sb, B_tb, Y_sb = cal_bit(in_prec, B_bit, sb)
 
@@ -598,7 +637,6 @@ def _merge_symbol(base, base_params, top, top_params, maps):
             childs = [graph[c.attr('name')] for c in childs]
             node = get_mxnet_op(op_name)(*childs, **attr, name=name)
         if name in graph:
-            print ("Replace top symbol %-40s with base" % (name))
             node = graph[name]
         graph[name] = node
     symbols = [graph[s.attr('name')] for s in top]
@@ -644,13 +682,14 @@ def sym_annotate(symbol, params, inputs_ext, outputs_ext, in_bit=8, out_bit=8):
                 [precs[c.attr('name')][name] for c in childs])
     return symbol, params, precs
 
-def sym_simulate(symbol, params, inputs_ext, outputs_ext, precs, ctx):
+def sym_simulate(symbol, params, inputs_ext, outputs_ext, precs, ctx, calib_len):
     logger = logging.getLogger('log.simulate')
     for k, v in inputs_ext.items():
         assert 'data' in v, "inputs %s has not supply attribute data: %s"%(k, v)
 
     infer_shapes = spass.sym_infer_shape(symbol, params, inputs_ext)
-    th_dict = _sym_calibrate_th_dict(symbol, params, inputs_ext, ctx=ctx)
+    th_dict = _sym_calibrate_th_dict(symbol, params, inputs_ext,
+            calib_len=calib_len, ctx=ctx)
     scales = {}
     for k, v in outputs_ext.items():
         if 'thresholds' in v:
@@ -660,7 +699,6 @@ def sym_simulate(symbol, params, inputs_ext, outputs_ext, precs, ctx):
             scales[k] = 1
     _update_scale_and_precs(symbol, params, inputs_ext,
             th_dict, precs, scales)
-    print (th_dict, scales)
 
     ssym, sparams = topo_visit(symbol, params, inputs_ext,
             get_op=get_mxnet_op, logger=logger,
@@ -696,39 +734,6 @@ def sym_realize(symbol, params, inputs_ext, precs, runtime="cvm"):
           callback=_check_int_params)
     return qsym, qparams
 
-def mixed_precision(symbol, params, inputs_ext,
-        in_bit=8, out_bit=8, out_ext=None, runtime="cvm",
-        ctx=[mx.cpu()]):
-    if out_ext is None:
-        out_ext = {s.attr('name'):{ 'type': 'out' } for s in symbol}
-    base, base_params, top, top_params = _extract_symbol(symbol, params,
-            out_ext)
-    inputs = [mx.sym.var(n) for n in inputs_ext]
-    net1 = nn.SymbolBlock(base, inputs)
-    load_parameters(net1, base_params, ctx=ctx)
-    data = [inputs_ext[n]['data'].as_in_context(ctx[0]) for n in inputs_ext]
-    out = net1(*data)
-    out_range = [o.abs().max().asscalar() for o in out]
-    out_name = [c.attr('name') for c in base]
-    print (list(zip(out_name, out_range)))
-
-    sbase, sbase_params, precs = sym_annotate(base, base_params, inputs_ext,
-            out_ext, in_bit=in_bit, out_bit=out_bit)
-    qbase, qbase_params, scales = sym_simulate(sbase, sbase_params,
-            inputs_ext, out_ext, precs, ctx)
-
-    maps = dict(zip([c.attr('name') for c in qbase], [c.attr('name') for c in base]))
-    ext = {maps[c.attr('name')]:scales[c.attr('name')] for c in qbase}
-    type_ext = {out_ext[k]['type']:v for k,v in ext.items() \
-        if 'type' in out_ext[k]}
-
-    qbase, qbase_params = sym_realize(qbase, qbase_params, inputs_ext, precs, runtime)
-    maps = dict(zip([c.attr('name') for c in qbase], [c.attr('name') for c in base]))
-
-    qsym, qparams = _merge_symbol(qbase, qbase_params, top, top_params, maps)
-    qsym, qparams = post_quantize(qsym, qparams, inputs_ext, type_ext)
-    return qsym, qparams, type_ext
-
 def post_quantize(symbol, params, inputs_ext, extra_ext):
     quantize_identity = ['_contrib_box_nms']
     def _post_quantize(sym, params, graph, inputs_ext):
@@ -739,13 +744,38 @@ def post_quantize(symbol, params, inputs_ext, extra_ext):
             score_scale = extra_ext['score']
             bbox_scale = extra_ext['bbox']
             valid_thresh = get_attr(attr, 'valid_thresh', 0)
-            attr['valid_thresh'] = valid_thresh * score_scale
+            attr['valid_thresh'] = int(valid_thresh * score_scale)
             node = get_mxnet_op(op_name)(*childs, **attr, name=name)
         return node, params
     qsym, qparams = topo_visit(symbol, params, inputs_ext,
             get_op=get_mxnet_op,
             callback=_post_quantize)
     return qsym, qparams
+
+def mixed_precision(symbol, params, inputs_ext,
+        in_bit=8, out_bit=8, out_ext=None, runtime="cvm",
+        calib_group=8, ctx=[mx.cpu()]):
+    if out_ext is None:
+        out_ext = {s.attr('name'):{ 'type': s.attr('name') } for s in symbol}
+    base, base_params, top, top_params = _extract_symbol(symbol, params,
+            out_ext)
+
+    sbase, sbase_params, precs = sym_annotate(base, base_params, inputs_ext,
+            out_ext, in_bit=in_bit, out_bit=out_bit)
+    qbase, qbase_params, scales = sym_simulate(sbase, sbase_params,
+            inputs_ext, out_ext, precs, ctx, calib_len=calib_group)
+
+    # update type_ext
+    maps = dict(zip([c.attr('name') for c in qbase], [c.attr('name') for c in base]))
+    ext = {maps[c.attr('name')]:scales[c.attr('name')] for c in qbase}
+    type_ext = {out_ext[k]['type']:v for k,v in ext.items() \
+        if 'type' in out_ext[k]}
+
+    qsym, qparams = _merge_symbol(qbase, qbase_params, top, top_params, maps)
+    qsym, qparams = sym_realize(qsym, qparams, inputs_ext, precs, runtime)
+    qsym, qparams = post_quantize(qsym, qparams, inputs_ext, type_ext)
+    return qsym, qparams, type_ext
+
 
 
 

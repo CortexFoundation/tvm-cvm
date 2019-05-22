@@ -146,17 +146,21 @@ def test_sym_pass(batch_size=10, iter_num=10):
         _, top5 = acc_top5.get()
         return "top1={:6.2%} top5={:6.2%}".format(top1, top5)
 
-    # sym_fname, param_fname = load_fname(version)
-    # sym, params = mx.sym.load(sym_fname), nd.load(param_fname)
-    # sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
+    sym_fname, param_fname = load_fname(version)
+    sym, params = mx.sym.load(sym_fname), nd.load(param_fname)
+    sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
+    inputs_ext['data']['data'] = data
+    in_bit, out_bit = 8, 8
+    qsym, qparams, _ = anno.mixed_precision(sym, params, inputs_ext,
+            in_bit=in_bit, out_bit=out_bit, ctx=[calib_ctx])
     # qsym, qparams, precs, _ = calib.sym_simulate(sym, params, inputs_ext, data, calib_ctx)
     # dump_sym, dump_params = load_fname(version, "sym.simulate")
     # open(dump_sym, "w").write(qsym.tojson())
     # qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, precs, "tvm")
-    # dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
-    # sim.save_ext(dump_ext, inputs_ext)
-    # nd.save(dump_params, qparams)
-    # open(dump_sym, "w").write(qsym.tojson())
+    dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
+    sim.save_ext(dump_ext, inputs_ext)
+    nd.save(dump_params, qparams)
+    open(dump_sym, "w").write(qsym.tojson())
 
     dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
     (inputs_ext,) = sim.load_ext(dump_ext)
@@ -257,7 +261,7 @@ if __name__ == "__main__":
     # save_data()
 
     # test_nnvm_load(batch_size=16, iter_num=10)
-    test_sym_pass(batch_size=700, iter_num=10000)
+    test_sym_pass(batch_size=16, iter_num=10)
     # test_sym_nnvm(batch_size=1, iter_num=1)
     # test_performance(16, 10)
 

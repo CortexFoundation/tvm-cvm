@@ -162,13 +162,15 @@ def test_sym_pass(iter_num=10):
     sym, params = mx.sym.load(sym_file), nd.load(param_file)
     print (sutils.sym_collect_attr(sym))
     sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
-    qsym, qparams, precs = anno.sym_annotate(sym, params, inputs_ext)
     inputs_ext['data']['data'] = data
-    qsym, qparams, _ = anno.sym_simulate(qsym, qparams, inputs_ext, precs, ctx=[ctx])
+    qsym, qparams, _ = anno.mixed_precision(sym, params, inputs_ext,
+            ctx=[mx.gpu(7)])
+    # qsym, qparams, precs = anno.sym_annotate(sym, params, inputs_ext)
+    # qsym, qparams, _ = anno.sym_simulate(qsym, qparams, inputs_ext, precs, ctx=[ctx])
     net3 = nn.SymbolBlock(qsym, inputs)
     utils.load_parameters(net3, qparams, ctx=ctx)
     def mixed_precision(data):
-        data = sim.load_sim_data(data, 'data', inputs_ext)
+        data = sim.load_real_data(data, 'data', inputs_ext)
         return net3.forward(data.as_in_context(ctx))
 
     utils.multi_eval_accuracy(graph_func, data_iter_func,
