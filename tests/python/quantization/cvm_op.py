@@ -182,33 +182,43 @@ class RightShift(mx.operator.CustomOp):
         assert False
 
 class LUT(mx.operator.CustomOp):
-    def __init__(self, precision=8, **kwargs):
+    def __init__(self, in_dim, **kwargs):
         super(LUT, self).__init__(**kwargs)
+        self.in_dim = int(in_dim)
 
     def forward(self, is_train, req, in_data, out_data, aux):
         assert is_train == False
         X, T = in_data[0], in_data[1]
-        Y = out_data[0]
-        tsize = T.shape[0]
-        xvars = vars_increment(None, X.shape)
-        while xvars != list(X.shape):
-            idx = int(round(X[tuple(xvars)].asscalar()))
-            Y[xvars] = T[idx]
-            xvars = vars_increment(xvars, X.shape)
+        Y = nd.Embedding(X, T, self.in_dim, 1)
+        Y = Y.squeeze(axis=-1)
         self.assign(out_data[0], req[0], Y)
 
     def backward(self, req, out_grad, in_data, out_data, in_grad, aux):
         assert False
 
 class Annotate(mx.operator.CustomOp):
-    def __init__(self, in_prec, out_prec):
+    def __init__(self, in_prec, out_prec, anno_type):
         super(Annotate, self).__init__()
         self.in_prec = int(in_prec)
         self.out_prec = int(out_prec)
+        self.anno_type = anno_type
 
     def forward(self, is_train, req, in_data, out_data, aux):
         assert is_train == False
         self.assign(out_data[0], req[0], in_data[0])
+
+class SimQuant(mx.operator.CustomOp):
+    def __init__(self, in_prec, out_prec, scale):
+        super(SimQuant, self).__init__()
+        self.in_prec = int(in_prec)
+        self.out_prec = int(out_prec)
+        self.scale = float(scale)
+
+    def forward(self, is_train, req, in_data, out_data, aux):
+        assert is_train == False
+        X = in_data[0]
+        Y = X * self.scale
+        self.assign(out_data[0], req[0], Y)
 
 @mx.operator.register("cvm_clip")
 class ClipProp(mx.operator.CustomOpProp):
@@ -296,7 +306,8 @@ class BroadcastShiftProp(mx.operator.CustomOpProp):
 
 @mx.operator.register("cvm_lut")
 class LUTProp(mx.operator.CustomOpProp):
-    def __init__(self):
+    def __init__(self, in_dim):
+        self.in_dim = in_dim
         super(LUTProp, self).__init__(need_top_grad=False)
     def list_arguments(self):
         return ['data', 'table']
@@ -312,13 +323,14 @@ class LUTProp(mx.operator.CustomOpProp):
         B_type = X_type
         return [X_type, B_type], [X_type], []
     def create_operator(self, ctx, shapes, dtypes):
-        return LUT()
+        return LUT(self.in_dim)
 
 @mx.operator.register("cvm_annotate")
 class AnnotateProp(mx.operator.CustomOpProp):
-    def __init__(self, in_prec=8, out_prec=8):
+    def __init__(self, in_prec, out_prec, anno_type):
         self.in_prec = in_prec
         self.out_prec = out_prec
+        self.anno_type = anno_type
         super(AnnotateProp, self).__init__(need_top_grad=False)
     def list_arguments(self):
         return ['data']
@@ -332,8 +344,28 @@ class AnnotateProp(mx.operator.CustomOpProp):
         X_type = in_type[0]
         return [X_type], [X_type], []
     def create_operator(self, ctx, shapes, dtypes):
-        return Annotate(self.in_prec, self.out_prec)
+        return Annotate(self.in_prec, self.out_prec, self.anno_type)
 
+@mx.operator.register("cvm_sim_quant")
+class SimQuantProp(mx.operator.CustomOpProp):
+    def __init__(self, in_prec, out_prec, scale):
+        self.in_prec = in_prec
+        self.out_prec = out_prec
+        self.scale = scale
+        super(SimQuantProp, self).__init__(need_top_grad=False)
+    def list_arguments(self):
+        return ['data']
+    def list_outputs(self):
+        return ['output']
+    def infer_shape(self, in_shape):
+        X_shape = in_shape[0]
+        out_shape = in_shape[0]
+        return [X_shape], [out_shape], []
+    def infer_type(self, in_type):
+        X_type = in_type[0]
+        return [X_type], [X_type], []
+    def create_operator(self, ctx, shapes, dtypes):
+        return SimQuant(self.in_prec, self.out_prec, self.scale)
 
 
 

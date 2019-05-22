@@ -9,6 +9,7 @@ from tvm.contrib import graph_runtime
 from quant_op import *
 from quant_utils import *
 import utils
+import sym_annotate as anno
 import sym_utils as sutils
 import sym_pass as spass
 import sym_calib as calib
@@ -38,7 +39,7 @@ batch_size = 128
 train_loader = mx.gluon.data.DataLoader(train_data, shuffle=True, batch_size=batch_size)
 val_loader = mx.gluon.data.DataLoader(val_data, shuffle=False, batch_size=batch_size)
 
-version = 'alexnet'
+version = ''
 ctx = mx.gpu(2)
 def train_mnist():
     # Select a fixed random seed for reproducibility
@@ -138,27 +139,40 @@ def test_sym_pass(iter_num=10):
     def graph_func(data):
         return net1.forward(data.as_in_context(ctx))
 
+    # sym_file, param_file = load_fname(version)
+    # sym, params = mx.sym.load(sym_file), nd.load(param_file)
+    # sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
+    # qsym, qparams, precs, _ = calib.sym_simulate(sym, params, inputs_ext, data, ctx)
+    # qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, precs, "cvm")
+    # dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
+    # sim.save_ext(dump_ext, inputs_ext)
+    # nd.save(dump_params, qparams)
+    # open(dump_sym, "w").write(qsym.tojson())
+
+    # dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
+    # sym, params = mx.sym.load(dump_sym), nd.load(dump_params)
+    # (inputs_ext,) = sim.load_ext(dump_ext)
+    # inputs = [mx.sym.var(n) for n in inputs_ext]
+    # net2 = utils.load_model(dump_sym, dump_params, inputs, ctx=ctx)
+    # def cvm_quantize(data):
+    #     data = sim.load_real_data(data, 'data', inputs_ext)
+    #     return net2.forward(data.as_in_context(ctx))
+
     sym_file, param_file = load_fname(version)
     sym, params = mx.sym.load(sym_file), nd.load(param_file)
+    print (sutils.sym_collect_attr(sym))
     sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
-    qsym, qparams, precs, _ = calib.sym_simulate(sym, params, inputs_ext, data, ctx)
-    qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, precs, "cvm")
-    dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
-    sim.save_ext(dump_ext, inputs_ext)
-    nd.save(dump_params, qparams)
-    open(dump_sym, "w").write(qsym.tojson())
-
-    dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
-    sym, params = mx.sym.load(dump_sym), nd.load(dump_params)
-    (inputs_ext,) = sim.load_ext(dump_ext)
-    inputs = [mx.sym.var(n) for n in inputs_ext]
-    net2 = utils.load_model(dump_sym, dump_params, inputs, ctx=ctx)
-    def cvm_quantize(data):
-        data = sim.load_real_data(data, 'data', inputs_ext)
-        return net2.forward(data.as_in_context(ctx))
+    qsym, qparams, precs = anno.sym_annotate(sym, params, inputs_ext)
+    inputs_ext['data']['data'] = data
+    qsym, qparams, _ = anno.sym_simulate(qsym, qparams, inputs_ext, precs, ctx=[ctx])
+    net3 = nn.SymbolBlock(qsym, inputs)
+    utils.load_parameters(net3, qparams, ctx=ctx)
+    def mixed_precision(data):
+        data = sim.load_sim_data(data, 'data', inputs_ext)
+        return net3.forward(data.as_in_context(ctx))
 
     utils.multi_eval_accuracy(graph_func, data_iter_func,
-            cvm_quantize,
+            mixed_precision, # cvm_quantize,
             iter_num=iter_num)
 
 def test_nnvm_pass(iter_num=10):
@@ -211,7 +225,7 @@ def test_nnvm_pass(iter_num=10):
        fout.write(param_bytes)
 
 print ("Test mnist", version )
-train_mnist()
+# train_mnist()
 utils.log_init()
 test_sym_pass(10000)
 # test_nnvm_pass(10)

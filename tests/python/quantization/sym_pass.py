@@ -330,9 +330,7 @@ def sym_infer_shape(symbol, params, inputs_ext):
 
     def _infer_shape(sym, params, graph, inputs_ext, infer_shapes):
         logger = logging.getLogger('log.symbol.infer_shape')
-        name = sym.attr('name')
-        op_name = sym.attr('op_name')
-        args = sym.list_inputs()
+        name, op_name = sym.attr('name'), sym.attr('op_name')
 
         if op_name == 'null':
             if name in params:
@@ -341,6 +339,7 @@ def sym_infer_shape(symbol, params, inputs_ext):
                         params dict %s"%(name, out_shapes[0], params[name].shape)
             return sym, params
 
+        args = sym.list_inputs()
         inputs_shape = {k:tuple(v['shape']) for k,v in inputs_ext.items() if k in args}
         _, out_shapes, _ = sym.infer_shape(**inputs_shape)
         assert len(out_shapes) == 1, 'Infer shape %s'%(name)
@@ -353,9 +352,10 @@ def sym_infer_shape(symbol, params, inputs_ext):
 
         return sym, params
 
-    inputs_shape = {k:tuple(v['shape']) for k, v in inputs_ext.items()}
-    arg_shapes, _, aux_shapes = symbol.infer_shape(**inputs_shape)
+    inputs = symbol.list_inputs()
     args, auxs = symbol.list_arguments(), symbol.list_auxiliary_states()
+    inputs_shape = {k:tuple(v['shape']) for k, v in inputs_ext.items() if k in inputs}
+    arg_shapes, _, aux_shapes = symbol.infer_shape(**inputs_shape)
     infer_shapes = {args[i]:arg_shapes[i] for i in range(len(args))}
     infer_shapes.update({auxs[i]:aux_shapes[i] for i in range(len(auxs))})
 

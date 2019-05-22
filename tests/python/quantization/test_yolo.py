@@ -21,13 +21,8 @@ import numpy as np
 
 def load_fname(version, suffix=None, with_ext=False):
     suffix = "."+suffix if suffix is not None else ""
-    if with_ext:
-        return "./data/yolo3%s%s.json"%(version, suffix), \
-            "./data/yolo3%s%s.params"%(version, suffix), \
-            "./data/yolo3%s%s.ext"%(version, suffix)
-    else:
-        return "./data/yolo3%s%s.json"%(version, suffix), \
-            "./data/yolo3%s%s.params"%(version, suffix)
+    prefix = "./data/yolo3%s%s"%(version, suffix)
+    return utils.extend_fname(prefix, with_ext)
 
 def validate(net, val_data, eval_metric, iter_num, logger=logging):
     """Test on validation dataset."""
@@ -64,16 +59,8 @@ def validate_data(net, data, label, eval_metric):
     acc = {k:v for k,v in zip(map_name, mean_ap)}['mAP']
     return acc
 
-def split_model(symbol, params, inputs_ext, logger=logging):
+def split_model(symbol, params, inputs_ext, keys, logger=logging):
     infer_shapes = spass.sym_infer_shape(symbol, params, inputs_ext)
-    keys = [
-        # 'yolov30_yolodetectionblockv30_leakyrelu5_fwd',
-        # 'yolov30_yolodetectionblockv31_leakyrelu5_fwd',
-        # 'yolov30_yolodetectionblockv32_leakyrelu5_fwd',
-        'yolov30_yolooutputv30_conv0_fwd',
-        'yolov30_yolooutputv31_conv0_fwd',
-        'yolov30_yolooutputv32_conv0_fwd',
-    ]
     bases = [s for s in sutils.topo_sort(symbol) if s.attr('name') in keys]
     base = mx.sym.Group(bases)
     base_params = {k:params[k] for k in base.list_inputs() if k in params}
@@ -102,7 +89,8 @@ def split_model(symbol, params, inputs_ext, logger=logging):
 def test_sym_pass(batch_size=10, iter_num=10):
     logger = logging.getLogger("log.test.sym.pass")
 
-    ctx = mx.gpu(2)
+    base_ctx = mx.gpu(7)
+    ctx = mx.gpu(7)
     input_size = 416
     h, w = input_size, input_size
     inputs_ext = {
@@ -130,10 +118,14 @@ def test_sym_pass(batch_size=10, iter_num=10):
     # def net(data):
     #    return graph(data.as_in_context(ctx))
     # validate(net, val_data, dataset.load_voc_metric(), iter_num)
-    # exit()
 
+    keys = [
+        'yolov30_yolooutputv30_conv0_fwd',
+        'yolov30_yolooutputv31_conv0_fwd',
+        'yolov30_yolooutputv32_conv0_fwd',
+    ]
     base, base_params, base_inputs_ext, top, top_params, top_inputs_ext \
-            = split_model(sym, params, inputs_ext, logger)
+            = split_model(sym, params, inputs_ext, keys, logger)
     dump_sym, dump_params = load_fname("_darknet53_voc", "base")
     open(dump_sym, "w").write(base.tojson())
     dump_sym, dump_params, dump_ext = load_fname("_darknet53_voc", "top", True)
@@ -141,40 +133,55 @@ def test_sym_pass(batch_size=10, iter_num=10):
     nd.save(dump_params, top_params)
     sim.save_ext(dump_ext, top_inputs_ext)
 
-    base_ctx = mx.gpu(3)
     base_inputs = [mx.sym.var(n) for n in base_inputs_ext]
     print ("op_name: ", sutils.sym_collect_attr(base))
     base_graph = mx.gluon.nn.SymbolBlock(base, base_inputs)
     utils.load_parameters(base_graph, base_params, ctx=base_ctx)
 
+    infer_shapes = spass.sym_infer_shape(top, top_params, top_inputs_ext)
+    print (infer_shapes)
     top_inputs = [mx.sym.var(n) for n in top_inputs_ext]
-    # top_graph = mx.gluon.nn.SymbolBlock(top, top_inputs)
-    # utils.load_parameters(top_graph, top_params, ctx=ctx)
+    top_graph = mx.gluon.nn.SymbolBlock(top, top_inputs)
+    utils.load_parameters(top_graph, top_params, ctx=ctx)
 
     base_metric = dataset.load_voc_metric()
     base_metric.reset()
-    def base_func(data, label):
+    def yolov3(data, label):
         def net(data):
             tmp = base_graph(data.as_in_context(base_ctx))
             tmp = [t.as_in_context(ctx) for t in tmp]
             return top_graph(*tmp)
-        return validate_data(net, data, label, base_metric)
+        acc = validate_data(net, data, label, base_metric)
+        return "{:6.2%}".format(acc)
 
     # quantize top graph
     top_data = base_graph(data.as_in_context(base_ctx))
-    for idx, c in enumerate(base_graph(mx.sym.Group(base_inputs))):
-        top_inputs_ext[c.attr('name')]['data'] = top_data[idx]
-        print (c.attr('name'), top_data[idx].shape)
-    top, top_params, precs = anno.sym_annotate(top, top_params, top_inputs_ext)
-    dump_sym, dump_params, dump_ext = load_fname("_darknet53_voc", "top.anno", True)
-    open(dump_sym, "w").write(top.tojson())
-    top_ctx = [mx.gpu(int(i)) for i in "4,5,6,7".split(',') if i.strip()]
-    anno.sym_simulate(top, top_params, top_inputs_ext, precs, top_ctx)
+    top_sym = base_graph(mx.sym.Group(base_inputs))
+    top_names = [c.attr('name') for c in top_sym]
+    for idx, n in enumerate(top_names):
+        top_inputs_ext[n]['data'] = top_data[idx]
+        print (n, top_data[idx].abs().max().asscalar())
+    in_bit, out_bit = 8, 16
+    outputs_ext = {
+        'yolov30_yolooutputv30_expand_dims0': { 'thresholds': (0, 1) },
+        'yolov30_yolooutputv31_expand_dims0': { 'thresholds': (0, 1) },
+        'yolov30_yolooutputv32_expand_dims0': { 'thresholds': (0, 1) },
+        'yolov30_yolooutputv30_tile0': { 'thresholds': (0, 416) },
+        'yolov30_yolooutputv31_tile0': { 'thresholds': (0, 416) },
+        'yolov30_yolooutputv32_tile0': { 'thresholds': (0, 416) },
+        'yolov30_yolooutputv30_broadcast_add1': { 'fixed': True },
+        'yolov30_yolooutputv31_broadcast_add1': { 'fixed': True },
+        'yolov30_yolooutputv32_broadcast_add1': { 'fixed': True },
+    }
+    qsym, qparams, out_scales = anno.mixed_precision(top, top_params,
+            top_inputs_ext, in_bit=in_bit, out_bit=out_bit,
+            outputs_ext=outputs_ext, ctx=[mx.gpu(7)])
+    # top, top_params, precs = anno.sym_annotate(top, top_params, top_inputs_ext,
+    #         in_bit=in_bit, out_bit=out_bit)
+    # qsym, qparams, out_scales = anno.sym_simulate(top, top_params, top_inputs_ext, precs, top_ctx)
+    dump_sym, dump_params = load_fname("_darknet53_voc", "top.simulate", False)
+    open(dump_sym, "w").write(qsym.tojson())
 
-
-    exit()
-    qsym, qparams, precs, out_scales = calib.sym_simulate(top, top_params,
-            top_inputs_ext, None, ctx)
     top_qgraph = mx.gluon.nn.SymbolBlock(qsym, top_inputs)
     utils.load_parameters(top_qgraph, qparams, ctx=ctx)
     top_qmetric = dataset.load_voc_metric()
@@ -183,13 +190,12 @@ def test_sym_pass(batch_size=10, iter_num=10):
         def net(data):
             tmp = base_graph(data.as_in_context(base_ctx))
             tmp = [t.as_in_context(ctx) for t in tmp]
+            tmp = [sim.load_sim_data(tmp[i], n, top_inputs_ext) for i,n in enumerate(top_names)]
             out = top_qgraph(*tmp)
-            out = [t / out_scales[i] for i,t in enumerate(out)]
+            out = [(t / out_scales[i]) for i,t in enumerate(out)]
             return out
-        return validate_data(net, data, label, top_qmetric)
-
-
-
+        acc = validate_data(net, data, label, top_qmetric)
+        return "{:6.2%}".format(acc)
 
     # quantize base graph
     # qsym, qparams, precs, out_scales = calib.sym_simulate(base, base_params,
@@ -224,7 +230,7 @@ def test_sym_pass(batch_size=10, iter_num=10):
     #     return validate_data(net, data, label, qmetric)
 
 
-    utils.multi_validate(base_func, data_iter_func, top_quantize, # cvm_quantize,
+    utils.multi_validate(yolov3, data_iter_func, top_quantize, # cvm_quantize,
             iter_num=iter_num, logger=logger)
 
 if __name__ == '__main__':
