@@ -176,14 +176,14 @@ def _custom(inputs, attrs):
     new_attrs = {}
     if op_type == 'cvm_clip':
         new_attrs['precision'] = required_attr(attrs, 'precision', op_type)
-        sym = _get_nnvm_op(op_type)(*inputs, **new_attrs)
+        sym = get_nnvm_op(op_type)(*inputs, **new_attrs)
     elif op_type == 'cvm_lut':
         new_attrs['in_dim'] = required_attr(attrs, 'in_dim', op_type)
-        sym = _get_nnvm_op(op_type)(*inputs, **new_attrs)
+        sym = get_nnvm_op(op_type)(*inputs, **new_attrs)
     else:
         new_attrs['precision'] = required_attr(attrs, 'precision', op_type)
         new_attrs['shift_bit'] = required_attr(attrs, 'shift_bit', op_type)
-        sym = _get_nnvm_op(op_type)(*inputs, **new_attrs)
+        sym = get_nnvm_op(op_type)(*inputs, **new_attrs)
 
     return sym
 
