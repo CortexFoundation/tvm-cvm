@@ -187,31 +187,31 @@ def test_sym_pass(batch_size=10, iter_num=10):
         return "{:6.2%}".format(acc)
 
     # quantize top graph
-    # top_data = base_graph(data.as_in_context(base_ctx))
-    # top_sym = base_graph(mx.sym.Group(base_inputs))
-    # top_names = [c.attr('name') for c in top_sym]
-    # for idx, n in enumerate(top_names):
-    #     top_inputs_ext[n]['data'] = top_data[idx]
-    #     print (n, top_data[idx].abs().max().asscalar())
-    # in_bit, out_bit = 8, 30
-    # outputs_ext = {
-    #     'yolov30_yolooutputv30_expand_dims0': { 'thresholds': (0, 1), 'type': 'score' },
-    #     'yolov30_yolooutputv31_expand_dims0': { 'thresholds': (0, 1), 'type': 'score' },
-    #     'yolov30_yolooutputv32_expand_dims0': { 'thresholds': (0, 1), 'type': 'score' },
-    #     'yolov30_yolooutputv30_tile0': { 'thresholds': (0, 416), 'type': 'bbox' },
-    #     'yolov30_yolooutputv31_tile0': { 'thresholds': (0, 416), 'type': 'bbox' },
-    #     'yolov30_yolooutputv32_tile0': { 'thresholds': (0, 416), 'type': 'bbox' },
-    #     'yolov30_yolooutputv30_broadcast_add1': { 'fixed': True, 'type': 'ids' },
-    #     'yolov30_yolooutputv31_broadcast_add1': { 'fixed': True, 'type': 'ids' },
-    #     'yolov30_yolooutputv32_broadcast_add1': { 'fixed': True, 'type': 'ids' },
-    # }
-    # qsym, qparams, type_ext = anno.mixed_precision(top, top_params,
-    #         top_inputs_ext, in_bit=in_bit, out_bit=out_bit,
-    #         out_ext=outputs_ext, calib_group=12, ctx=[mx.gpu(7)])
-    # dump_sym, dump_params, dump_ext = load_fname("_darknet53_voc", "top.quantize", True)
-    # open(dump_sym, "w").write(qsym.tojson())
-    # sim.save_ext(dump_ext, top_inputs_ext, type_ext)
-    # nd.save(dump_params, qparams)
+    top_data = base_graph(data.as_in_context(base_ctx))
+    top_sym = base_graph(mx.sym.Group(base_inputs))
+    top_names = [c.attr('name') for c in top_sym]
+    for idx, n in enumerate(top_names):
+        top_inputs_ext[n]['data'] = top_data[idx]
+        print (n, top_data[idx].abs().max().asscalar())
+    in_bit, out_bit = 8, 30
+    outputs_ext = {
+        'yolov30_yolooutputv30_expand_dims0': { 'thresholds': (0, 1), 'type': 'score' },
+        'yolov30_yolooutputv31_expand_dims0': { 'thresholds': (0, 1), 'type': 'score' },
+        'yolov30_yolooutputv32_expand_dims0': { 'thresholds': (0, 1), 'type': 'score' },
+        'yolov30_yolooutputv30_tile0': { 'thresholds': (0, 416), 'type': 'bbox' },
+        'yolov30_yolooutputv31_tile0': { 'thresholds': (0, 416), 'type': 'bbox' },
+        'yolov30_yolooutputv32_tile0': { 'thresholds': (0, 416), 'type': 'bbox' },
+        'yolov30_yolooutputv30_broadcast_add1': { 'fixed': True, 'type': 'ids' },
+        'yolov30_yolooutputv31_broadcast_add1': { 'fixed': True, 'type': 'ids' },
+        'yolov30_yolooutputv32_broadcast_add1': { 'fixed': True, 'type': 'ids' },
+    }
+    qsym, qparams, type_ext = anno.mixed_precision(top, top_params,
+            top_inputs_ext, in_bit=in_bit, out_bit=out_bit,
+            out_ext=outputs_ext, calib_group=12, ctx=[mx.gpu(7)])
+    dump_sym, dump_params, dump_ext = load_fname("_darknet53_voc", "top.quantize", True)
+    open(dump_sym, "w").write(qsym.tojson())
+    sim.save_ext(dump_ext, top_inputs_ext, type_ext)
+    nd.save(dump_params, qparams)
 
     sym_file, param_file, ext_file = load_fname("_darknet53_voc", "top.quantize", True)
     net3_inputs_ext, type_ext = sim.load_ext(ext_file)
@@ -238,14 +238,54 @@ def test_sym_pass(batch_size=10, iter_num=10):
         acc = validate_data(net, data, label, top_qmetric)
         return "{:6.2%}".format(acc)
 
-
-
-    utils.multi_validate(yolov3, data_iter_func, base_quantize, # cvm_quantize,
+    utils.multi_validate(yolov3, data_iter_func,
+			top_quantize, # base_quantize,
             iter_num=iter_num, logger=logger)
+
+def test_sym_nnvm(batch_size, iter_num):
+    logger = logging.getLogger("log.test.nnvm")
+    logger.info("=== Log Test NNVM ===")
+
+    target = "cuda"
+    tvm_ctx = tvm.context(target, 1)
+    mx_ctx = mx.gpu(2)
+
+    sym_file, param_file, ext_file = load_fname("_darknet53_voc", "top.quantize", True)
+    sym, params = mx.sym.load(sym_file), nd.load(param_file)
+    inputs_ext, _ = sim.load_ext(ext_file)
+    #  for k,v in inputs_ext.items():
+        #  v['shape'] = (batch_size, *v['shape'][1:])
+    inputs = [mx.sym.var(name) for name in inputs_ext]
+    inputs_shape = {k:v['shape'] for k,v in inputs_ext.items()}
+
+    sym, params = spass.from_mxnet_prepare(sym, params, inputs_ext)
+    nnvm_sym, _ = nnvm.frontend.from_mxnet(sym)
+    nnvm_sym, real_params = spass.nnvm_realize(nnvm_sym, params, inputs_ext)
+
+    nnvm_graph = nnvm.graph.create(nnvm_sym)
+
+    use_dtype = "int32"
+    for key, value in list(real_params.items()):
+       real_params[key] = tvm.nd.array(value.asnumpy().astype(use_dtype), tvm_ctx)
+
+    with nnvm.compiler.build_config(opt_level=0, runtime="cvm"):
+       deploy_graph, lib, real_params = nnvm.compiler.build(
+           nnvm_sym, target=target, shape=inputs_shape,
+           params=real_params, dtype=use_dtype)
+
+    real_params = spass.tvm_params_reduce(nnvm_sym, real_params, inputs_ext, tvm_ctx)
+
+    dump_sym, dump_params = load_fname("_darknet53_voc", "nnvm.compile", False)
+    with open(dump_sym, "w") as fout:
+       fout.write(deploy_graph.json())
+    with open(dump_params, "wb") as fout:
+       param_bytes = nnvm.compiler.save_param_dict(real_params)
+       fout.write(param_bytes)
 
 if __name__ == '__main__':
     utils.log_init()
 
     # zoo.save_model('yolo3_darknet53_voc')
 
-    test_sym_pass(16, 10)
+    # test_sym_pass(16, 10)
+    test_sym_nnvm(1, 0)

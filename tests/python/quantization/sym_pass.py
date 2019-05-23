@@ -156,6 +156,32 @@ def yxnet_realize(symbol, params, inputs_ext):
             ret_params[key] = tvm.nd.array(value.astype('int32').asnumpy())
     return ret_sym, ret_params
 
+def from_mxnet_prepare(symbol, params, inputs_ext):
+    print (inputs_ext)
+    infer_shapes = sym_infer_shape(symbol, params, inputs_ext)
+    def _mx_prepare(sym, params, graph, inputs_ext):
+        name, op_name = sym.attr('name'), sym.attr('op_name')
+        childs, attr = sym_iter(sym.get_children()), sym.list_attr()
+        node = sym
+        if op_name in ['slice_axis']:
+            X = childs[0]
+            cshape = infer_shapes[X.attr('name')]
+            axis = get_attr(attr, 'axis')
+            axis_begin = get_attr(attr, 'begin')
+            axis_end = get_attr(attr, 'end')
+            if axis_end is None:
+                axis_end = cshape[axis]
+            begin = [0 for s in cshape]
+            end = [s for s in cshape]
+            begin[axis], end[axis] = axis_begin, axis_end
+            print (axis, begin, end, axis_begin, axis_end)
+            node = get_mxnet_op('slice')(X, begin=begin, end=end, name=name)
+        return node, params
+    psym, pparams = topo_visit(symbol, params, inputs_ext,
+            get_op=get_mxnet_op,
+            callback=_mx_prepare)
+    return psym, pparams
+
 def nnvm_realize(symbol, params, inputs_ext):
     """Transform Sim-Quant(Float32 Simulate Int8) to Int8-Inference Graph
         Works:
@@ -179,19 +205,23 @@ def nnvm_realize(symbol, params, inputs_ext):
     """
     logger = logging.getLogger("log.quant.nnvm.realize")
 
+
+
     def _realize(sym, params, graph, inputs_ext):
         name, op_name = sym.attr('name'), sym.attr('op_name')
         attr, childs = sym.list_attr(), sym_iter(sym.get_children())
         node = sym
+
         if 'scalar' in attr:
             scalar = float(attr['scalar'])
-
             msg = "name:%s, op_name:%s, scalar:%s"%(name, op_name, attr)
             assert scalar >= INT32_MIN and scalar <= INT32_MAX, msg
             assert float(int(scalar)) == scalar, msg
-
             attr['scalar'] = int(scalar)
-            node = get_nnvm_op(op_name)(*childs, **attr)
+        if 'overlap_thresh' in attr:
+            thresh = float(attr['overlap_thresh']) * 100
+            attr['overlap_thresh'] = int(thresh)
+        node = get_nnvm_op(op_name)(*childs, **attr)
 
         if op_name in ['floor', 'ceil', 'round']:
             node = childs[0]

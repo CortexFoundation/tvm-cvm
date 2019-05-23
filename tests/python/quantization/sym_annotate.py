@@ -44,9 +44,9 @@ def _infer_fixed_precs(sym, params, graph, inputs_ext, precs):
             cprecs[2][name] = PLACE_HOLDER-1
     elif op_name in ['broadcast_add', 'broadcast_sub', 'elemwise_add',
             'elemwise_sub']:
-        # cprecs[0][name], cprecs[1][name] = PLACE_HOLDER-1, PLACE_HOLDER-1
-        cprecs[0][name], cprecs[1][name] = PLACE_HOLDER//2, PLACE_HOLDER//2
-        #  cprecs[0][name], cprecs[1][name] = 8, 8
+        cprecs[0][name], cprecs[1][name] = PLACE_HOLDER-1, PLACE_HOLDER-1
+        # cprecs[0][name], cprecs[1][name] = PLACE_HOLDER//2, PLACE_HOLDER//2
+        # cprecs[0][name], cprecs[1][name] = 8, 8
     elif op_name in ['broadcast_mul']:
         cprecs[0][name], cprecs[1][name] = PLACE_HOLDER//2, PLACE_HOLDER//2
     elif op_name in ['Concat']:
@@ -535,18 +535,18 @@ def _realize_layer(sym, params, graph, inputs_ext, runtime):
     _realize_func = _realize_cvm if runtime == 'cvm' else _realize_tvm
 
     def cal_bit(A_bit, B_bit, sb):
-        #  A_target_bit, B_target_bit = 16, 16
-        #  A_target_bit = min(A_bit, A_target_bit)
-        #  B_target_bit = min(B_bit, B_target_bit)
-        #  A_target_bit = 32 - B_target_bit if B_target_bit < 16 else A_target_bit
-        #  B_target_bit = 32 - A_target_bit if A_target_bit < 16 else B_target_bit
-        #  A_target_bit = min(A_bit, A_target_bit)
-        #  B_target_bit = min(B_bit, B_target_bit)
-        A_target_bit = A_bit
-        B_target_bit = PLACE_HOLDER - A_target_bit
-        A_sb, B_sb = A_bit - A_target_bit, B_bit - B_target_bit
-        Y_sb = (-sb) - A_sb - B_sb
-        return A_sb, A_target_bit, B_sb, B_target_bit, Y_sb
+        # A_target_bit, B_target_bit = 16, 16
+        # A_target_bit = min(A_bit, A_target_bit)
+        # B_target_bit = min(B_bit, B_target_bit)
+        # A_target_bit = 32 - B_target_bit if B_target_bit < 16 else A_target_bit
+        # B_target_bit = 32 - A_target_bit if A_target_bit < 16 else B_target_bit
+        # A_target_bit = min(A_bit, A_target_bit)
+        # B_target_bit = min(B_bit, B_target_bit)
+        # A_target_bit = A_bit
+        # B_target_bit = PLACE_HOLDER - A_target_bit
+        # A_sb, B_sb = A_bit - A_target_bit, B_bit - B_target_bit
+        # Y_sb = (-sb) - A_sb - B_sb
+        # return A_sb, A_target_bit, B_sb, B_target_bit, Y_sb
 
         max_bit = 32
         total_bit = A_bit + B_bit

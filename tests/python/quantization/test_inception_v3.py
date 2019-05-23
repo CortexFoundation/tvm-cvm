@@ -72,15 +72,15 @@ def test_sym_nnvm(batch_size=10, iter_num=10):
     for key, value in list(real_params.items()):
        real_params[key] = tvm.nd.array(value.asnumpy().astype(use_dtype), tvm_ctx)
 
-    with nnvm.compiler.build_config(opt_level=0): #, add_pass=["PrecomputePrune"]):
+    with nnvm.compiler.build_config(opt_level=0, runtime="cvm"): #, add_pass=["PrecomputePrune"]):
        deploy_graph, lib, real_params = nnvm.compiler.build(
            nnvm_sym, target=target, shape=inputs_shape,
            params=real_params, dtype=use_dtype)
 
     real_params = spass.tvm_params_reduce(nnvm_sym, real_params, inputs_ext, tvm_ctx)
 
-    dump_symbol, dump_params = '/tmp/inception_v3/symbol.json', '/tmp/inception_v3/params'
-    with open(dump_symbol, "w") as fout:
+    dump_sym, dump_params = load_fname("", "nnvm.compile", False)
+    with open(dump_sym, "w") as fout:
        fout.write(deploy_graph.json())
     with open(dump_params, "wb") as fout:
        param_bytes = nnvm.compiler.save_param_dict(real_params)
@@ -276,7 +276,7 @@ if __name__ == '__main__':
     # zoo.save_inception_v3()
     # zoo.save_model('inceptionv3', 1000)
 
-    test_sym_pass(600, 100000)
-    # test_sym_nnvm(1, 1)
+    # test_sym_pass(600, 100000)
+    test_sym_nnvm(1, 0)
     # test_mxnet_sym(1)
     # validate(700, 100000)

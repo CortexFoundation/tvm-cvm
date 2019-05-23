@@ -13,6 +13,14 @@
 namespace nnvm {
 namespace top {
 
+struct CVMLUTParam : public dmlc::Parameter<CVMLUTParam> {
+	int in_dim;
+  DMLC_DECLARE_PARAMETER(CVMLUTParam) {
+    DMLC_DECLARE_FIELD(in_dim)
+      .describe("In dimension indicates the inputs value range.");
+  }
+};
+
 struct CVMClipParam : public dmlc::Parameter<CVMClipParam> {
 	int precision;
 	bool is_sign;
