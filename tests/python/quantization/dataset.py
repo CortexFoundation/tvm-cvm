@@ -93,3 +93,131 @@ def load_quickdraw10(batch_size, num_workers=4):
             yield data, label
     return data_iter()
 
+def load_sa_trec(batch_size, num_workers=4):
+    import re
+    import time
+
+    import gluonnlp as nlp
+    from mxnet import nd, gluon
+
+
+    def _load_file(data_name):
+        if data_name == 'MR':
+            train_dataset = nlp.data.MR(root='data/mr')
+            output_size = 2
+            return train_dataset, output_size
+        elif data_name == 'SST-1':
+            train_dataset, test_dataset = [nlp.data.SST_1(root='data/sst-1', segment=segment)
+                                           for segment in ('train', 'test')]
+            output_size = 5
+            return train_dataset, test_dataset, output_size
+        elif data_name == 'SST-2':
+            train_dataset, test_dataset = [nlp.data.SST_2(root='data/sst-2', segment=segment)
+                                           for segment in ('train', 'test')]
+            output_size = 2
+            return train_dataset, test_dataset, output_size
+        elif data_name == 'Subj':
+            train_dataset = nlp.data.SUBJ(root='data/Subj')
+            output_size = 2
+            return train_dataset, output_size
+        else:
+            train_dataset, test_dataset = [nlp.data.TREC(root='data/trec', segment=segment)
+                                           for segment in ('train', 'test')]
+            output_size = 6
+            return train_dataset, test_dataset, output_size
+
+
+    def _clean_str(string, data_name):
+        if data_name == 'SST-1' or data_name == 'SST-2':
+            string = re.sub(r'[^A-Za-z0-9(),!?\'\`]', ' ', string)
+            string = re.sub(r'\s{2,}', ' ', string)
+            return string.strip().lower()
+        else:
+            string = re.sub(r'[^A-Za-z0-9(),!?\'\`]', ' ', string)
+            string = re.sub(r'\'s', ' \'s', string)
+            string = re.sub(r'\'ve', ' \'ve', string)
+            string = re.sub(r'n\'t', ' n\'t', string)
+            string = re.sub(r'\'re', ' \'re', string)
+            string = re.sub(r'\'d', ' \'d', string)
+            string = re.sub(r'\'ll', ' \'ll', string)
+            string = re.sub(r',', ' , ', string)
+            string = re.sub(r'!', ' ! ', string)
+            string = re.sub(r'\(', ' ( ', string)
+            string = re.sub(r'\)', ' ) ', string)
+            string = re.sub(r'\?', ' ? ', string)
+            string = re.sub(r'\s{2,}', ' ', string)
+            return string.strip() if data_name == 'TREC' else string.strip().lower()
+
+
+    def _build_vocab(data_name, train_dataset, test_dataset):
+        all_token = []
+        max_len = 0
+        for i, line in enumerate(train_dataset):
+            train_dataset[i][0] = _clean_str(line[0], data_name)
+            line = train_dataset[i][0].split()
+            max_len = max_len if max_len > len(line) else len(line)
+            all_token.extend(line)
+        for i, line in enumerate(test_dataset):
+            test_dataset[i][0] = _clean_str(line[0], data_name)
+            line = test_dataset[i][0].split()
+            max_len = max_len if max_len > len(line) else len(line)
+            all_token.extend(line)
+        vocab = nlp.Vocab(nlp.data.count_tokens(all_token))
+        # embedding = nlp.embedding.create('fasttext', source='wiki.simple')
+        emdedding = nlp.embedding.create('Word2Vec', source='GoogleNews-vectors-negative300')
+        vocab.set_embedding()
+        for word in vocab.embedding._idx_to_token:
+            if (vocab.embedding[word] == nd.zeros(300)).sum() == 300:
+                vocab.embedding[word] = nd.random.normal(-1.0, 1.0, 300)
+        vocab.embedding['<unk>'] = nd.zeros(300)
+        vocab.embedding['<pad>'] = nd.zeros(300)
+        vocab.embedding['<bos>'] = nd.zeros(300)
+        vocab.embedding['<eos>'] = nd.zeros(300)
+        print('maximum length (in tokens): ', max_len)
+        return vocab, max_len
+
+
+    # Dataset preprocessing.
+    def _preprocess(x, vocab, max_len):
+        data, label = x
+        data = vocab[data.split()]
+        data = data[:max_len] + [0] * (max_len - len(data[:max_len]))
+        return data, label
+
+
+    def _preprocess_dataset(dataset, vocab, max_len):
+        start = time.time()
+        dataset = [_preprocess(d, vocab=vocab, max_len=max_len) for d in dataset]
+        lengths = gluon.data.SimpleDataset([len(d[0]) for d in dataset])
+        end = time.time()
+        print('Done! Tokenizing Time={:.2f}s, #Sentences={}'.format(end - start, len(dataset)))
+        return dataset, lengths
+
+
+    def load_dataset(data_name):
+        """Load sentiment dataset."""
+        if data_name == 'MR' or data_name == 'Subj':
+            train_dataset, output_size = _load_file(data_name)
+            vocab, max_len = _build_vocab(data_name, train_dataset, [])
+            train_dataset, train_data_lengths = _preprocess_dataset(train_dataset, vocab, max_len)
+            return vocab, max_len, output_size, train_dataset, train_data_lengths
+        else:
+            train_dataset, test_dataset, output_size = _load_file(data_name)
+            vocab, max_len = _build_vocab(data_name, train_dataset, test_dataset)
+            train_dataset, train_data_lengths = _preprocess_dataset(train_dataset, vocab, max_len)
+            test_dataset, test_data_lengths = _preprocess_dataset(test_dataset, vocab, max_len)
+            return vocab, max_len, output_size, train_dataset, train_data_lengths, test_dataset, \
+                   test_data_lengths
+    vocab, max_len, output_size, train_dataset, train_data_lengths, \
+    test_dataset, test_data_lengths = load_dataset('TREC')
+    val_data = gluon.data.DataLoader(dataset=test_dataset,
+                                batch_size=batch_size,
+                                shuffle=False)
+    def data_iter():
+        for i, batch in enumerate(val_data):
+            data = gluon.utils.split_and_load(batch[0], ctx_list=[mx.cpu()], batch_axis=0)
+            label = gluon.utils.split_and_load(batch[1], ctx_list=[mx.cpu()], batch_axis=0)
+            print (data[0].shape)
+            yield data[0], label[0]
+    return data_iter()
+

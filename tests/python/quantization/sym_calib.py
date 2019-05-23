@@ -193,6 +193,9 @@ def _collect_scale_helper(sym, params, graph, inputs_ext,
             B_name = childs[2].attr('name')
             scale_helper[B_name] = (scale_helper[X_name] * scale_helper[W_name]).min()
             target_bits[B_name] = bias_target_bit
+    elif op_name in ['Embedding']:
+        X_name, W_name = childs[0].attr('name'), childs[1].attr('name')
+        scale_helper[name] = scale_helper[W_name]
     elif op_name in ['sigmoid', 'exp']:
         X_name = childs[0].attr('name')
         X_bit = target_bits[X_name]
@@ -275,6 +278,8 @@ def _annotate_layer(sym, params, graph, inputs_ext,
         node = get_mxnet_op(op_name)(*new_childs, **attr, name=name)
     elif op_name in ['sum']:
         requant_scale = scale_helper[name] / cscales[0]
+    elif op_name in ['Embedding']:
+        requant_scale = 1
     else:
         logger.critical('Unrecognized op:%s(%s) . attrs(%s)', op_name, name, attr)
 
