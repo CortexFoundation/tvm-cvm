@@ -232,8 +232,6 @@ def nnvm_realize(symbol, params, inputs_ext):
     """
     logger = logging.getLogger("log.quant.nnvm.realize")
 
-
-
     def _realize(sym, params, graph, inputs_ext):
         name, op_name = sym.attr('name'), sym.attr('op_name')
         attr, childs = sym.list_attr(), sym_iter(sym.get_children())
