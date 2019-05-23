@@ -173,12 +173,16 @@ def _leaky_relu(inputs, attrs):
 
 def _custom(inputs, attrs):
     op_type = _required_attr(attrs, 'op_type')
-    assert op_type in ['cvm_clip', 'cvm_left_shift', 'cvm_right_shift']
+    assert op_type in ['cvm_clip', 'cvm_left_shift', 'cvm_right_shift', 'cvm_lut']
     new_attrs = {}
-    new_attrs['precision'] = _required_attr(attrs, 'precision')
     if op_type == 'cvm_clip':
+        new_attrs['precision'] = _required_attr(attrs, 'precision')
+        sym = _get_nnvm_op(op_type)(*inputs, **new_attrs)
+    elif op_type == 'cvm_lut':
+        new_attrs['in_dim'] = _required_attr(attrs, 'in_dim')
         sym = _get_nnvm_op(op_type)(*inputs, **new_attrs)
     else:
+        new_attrs['precision'] = _required_attr(attrs, 'precision')
         new_attrs['shift_bit'] = _required_attr(attrs, 'shift_bit')
         sym = _get_nnvm_op(op_type)(*inputs, **new_attrs)
 

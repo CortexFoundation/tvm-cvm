@@ -13,17 +13,84 @@
 #include "../op_common.h"
 #include "../elemwise_op_common.h"
 #include "topi/broadcast.h"
+#include "topi/transform.h"
 
 namespace nnvm {
 namespace top {
 
 using namespace tvm;
 using namespace nnvm::compiler;
-
-DMLC_REGISTER_PARAMETER(CVMClipParam);
-
 #define INT_PREC 32
 
+inline bool LUTInferShape(const NodeAttrs& attrs,
+						  std::vector<TShape>* in_shape,
+						  std::vector<TShape>* out_shape) {
+  CHECK_EQ(in_shape->size(), 2U);
+  CHECK_EQ(out_shape->size(), 1U);
+  const TShape& dshape = (*in_shape)[0];
+  const TShape& lutshape = (*in_shape)[1];
+  if (dshape.ndim() == 0) return false;
+  if (lutshape.ndim() == 0) return false;
+  TShape oshape(dshape.ndim());
+	for (size_t j = 0; j < dshape.ndim(); ++j) {
+	  oshape[j] = dshape[j];
+	}
+	return true;
+}
+
+inline bool LUTInferType(const NodeAttrs& attrs,
+                          std::vector<int>* in_attrs,
+                          std::vector<int>* out_attrs) {
+  CHECK_EQ(in_attrs->size(), 2U);
+  CHECK_EQ(out_attrs->size(), 1U);
+  CHECK_EQ((*in_attrs)[0], kInt32);
+  NNVM_ASSIGN_INPUT_TYPE(attrs, *in_attrs, 0, static_cast<int>(kInt32));
+  NNVM_ASSIGN_INPUT_TYPE(attrs, *in_attrs, 1, (*in_attrs)[1]);
+  NNVM_ASSIGN_OUTPUT_TYPE(attrs, *out_attrs, 0, (*in_attrs)[1]);
+  return true;
+}
+
+inline bool LUTCorrectLayout(const NodeAttrs& attrs,
+                              std::vector<Layout> *ilayouts,
+                              const std::vector<Layout> *last_ilayouts,
+                              std::vector<Layout> *olayouts) {
+  CHECK_EQ(ilayouts->size(), last_ilayouts->size());
+  CHECK_EQ(olayouts->size(), 1U);
+
+  for (size_t i = 0; i < ilayouts->size(); ++i) {
+    const Layout& input = last_ilayouts->at(i).defined() ?
+                          last_ilayouts->at(i) : ilayouts->at(i);
+    NNVM_ASSIGN_LAYOUT(*ilayouts, i, input);
+  }
+
+  return true;
+}
+
+DMLC_REGISTER_PARAMETER(CVMLUTParam);
+NNVM_REGISTER_OP(cvm_lut)
+.describe(R"doc(CVMLUT look up input with table.
+)doc" NNVM_ADD_FILELINE)
+.set_num_inputs(2)
+.set_num_outputs(1)
+.set_attr_parser(ParamParser<CVMLUTParam>)
+.set_attr<FGetAttrDict>("FGetAttrDict", ParamGetAttrDict<CVMLUTParam>)
+.set_attr<nnvm::FInferShape>("FInferShape", LUTInferShape)
+.set_attr<nnvm::FInferType>("FInferType", LUTInferType)
+.set_attr<nnvm::FCorrectLayout>("FCorrectLayout", LUTCorrectLayout)
+.set_attr<FTVMCompute>(
+  "FTVMCompute", [](const NodeAttrs& attrs,
+                    const Array<Tensor>& inputs,
+                    const Array<Tensor>& out_info) {
+    // const CVMLUTParam params = get<CVMLUTParam>(attrs.parsed);
+    return Array<Tensor>{
+      topi::take(inputs[1], inputs[0]) };
+  }, 11)
+.add_argument("data", "Tensor", "input")
+.add_argument("table", "Tensor", "The table to lookup")
+.add_arguments(CVMLUTParam::__FIELDS__())
+.set_support_level(4);
+
+DMLC_REGISTER_PARAMETER(CVMClipParam);
 NNVM_REGISTER_OP(cvm_clip)
 .describe(R"doc(CVM clip input with precision.
 
@@ -72,7 +139,6 @@ Example::
 .set_support_level(4);
 
 DMLC_REGISTER_PARAMETER(CVMLeftShiftParam);
-
 NNVM_REGISTER_OP(cvm_left_shift)
 .describe(R"code(CVM left shift with precision-aware clip.
 
@@ -112,7 +178,6 @@ NNVM_REGISTER_OP(cvm_left_shift)
 .set_support_level(4);
 
 DMLC_REGISTER_PARAMETER(CVMRightShiftParam);
-
 NNVM_REGISTER_OP(cvm_right_shift)
 .describe(R"code(CVM right shift with precision-aware clip.
 

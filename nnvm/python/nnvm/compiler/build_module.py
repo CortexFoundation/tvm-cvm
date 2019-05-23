@@ -301,7 +301,7 @@ def build(graph, target=None, shape=None, dtype="float32",
         else:
             graph._set_json_attr("opt_level", 0, "int")
         graph = graph.apply("InferShape").apply("InferType")
-        graph = graph.apply("InferPrecision")
+        # graph = graph.apply("InferPrecision")
         graph = graph.apply("GraphFindFusibleGroups")
         graph = graph.apply("GraphFuse")
         with target:

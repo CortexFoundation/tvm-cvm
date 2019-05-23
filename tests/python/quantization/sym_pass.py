@@ -156,6 +156,32 @@ def yxnet_realize(symbol, params, inputs_ext):
             ret_params[key] = tvm.nd.array(value.astype('int32').asnumpy())
     return ret_sym, ret_params
 
+def from_mxnet_prepare(symbol, params, inputs_ext):
+    print (inputs_ext)
+    infer_shapes = sym_infer_shape(symbol, params, inputs_ext)
+    def _mx_prepare(sym, params, graph, inputs_ext):
+        name, op_name = sym.attr('name'), sym.attr('op_name')
+        childs, attr = sym_iter(sym.get_children()), sym.list_attr()
+        node = sym
+        if op_name in ['slice_axis']:
+            X = childs[0]
+            cshape = infer_shapes[X.attr('name')]
+            axis = get_attr(attr, 'axis')
+            axis_begin = get_attr(attr, 'begin')
+            axis_end = get_attr(attr, 'end')
+            if axis_end is None:
+                axis_end = cshape[axis]
+            begin = [0 for s in cshape]
+            end = [s for s in cshape]
+            begin[axis], end[axis] = axis_begin, axis_end
+            print (axis, begin, end, axis_begin, axis_end)
+            node = get_mxnet_op('slice')(X, begin=begin, end=end, name=name)
+        return node, params
+    psym, pparams = topo_visit(symbol, params, inputs_ext,
+            get_op=get_mxnet_op,
+            callback=_mx_prepare)
+    return psym, pparams
+
 def nnvm_realize(symbol, params, inputs_ext):
     """Transform Sim-Quant(Float32 Simulate Int8) to Int8-Inference Graph
         Works:
@@ -179,19 +205,23 @@ def nnvm_realize(symbol, params, inputs_ext):
     """
     logger = logging.getLogger("log.quant.nnvm.realize")
 
+
+
     def _realize(sym, params, graph, inputs_ext):
         name, op_name = sym.attr('name'), sym.attr('op_name')
         attr, childs = sym.list_attr(), sym_iter(sym.get_children())
         node = sym
+
         if 'scalar' in attr:
             scalar = float(attr['scalar'])
-
             msg = "name:%s, op_name:%s, scalar:%s"%(name, op_name, attr)
             assert scalar >= INT32_MIN and scalar <= INT32_MAX, msg
             assert float(int(scalar)) == scalar, msg
-
             attr['scalar'] = int(scalar)
-            node = get_nnvm_op(op_name)(*childs, **attr)
+        if 'overlap_thresh' in attr:
+            thresh = float(attr['overlap_thresh']) * 100
+            attr['overlap_thresh'] = int(thresh)
+        node = get_nnvm_op(op_name)(*childs, **attr)
 
         if op_name in ['floor', 'ceil', 'round']:
             node = childs[0]
@@ -330,9 +360,7 @@ def sym_infer_shape(symbol, params, inputs_ext):
 
     def _infer_shape(sym, params, graph, inputs_ext, infer_shapes):
         logger = logging.getLogger('log.symbol.infer_shape')
-        name = sym.attr('name')
-        op_name = sym.attr('op_name')
-        args = sym.list_inputs()
+        name, op_name = sym.attr('name'), sym.attr('op_name')
 
         if op_name == 'null':
             if name in params:
@@ -341,6 +369,7 @@ def sym_infer_shape(symbol, params, inputs_ext):
                         params dict %s"%(name, out_shapes[0], params[name].shape)
             return sym, params
 
+        args = sym.list_inputs()
         inputs_shape = {k:tuple(v['shape']) for k,v in inputs_ext.items() if k in args}
         _, out_shapes, _ = sym.infer_shape(**inputs_shape)
         assert len(out_shapes) == 1, 'Infer shape %s'%(name)
@@ -353,9 +382,10 @@ def sym_infer_shape(symbol, params, inputs_ext):
 
         return sym, params
 
-    inputs_shape = {k:tuple(v['shape']) for k, v in inputs_ext.items()}
-    arg_shapes, _, aux_shapes = symbol.infer_shape(**inputs_shape)
+    inputs = symbol.list_inputs()
     args, auxs = symbol.list_arguments(), symbol.list_auxiliary_states()
+    inputs_shape = {k:tuple(v['shape']) for k, v in inputs_ext.items() if k in inputs}
+    arg_shapes, _, aux_shapes = symbol.infer_shape(**inputs_shape)
     infer_shapes = {args[i]:arg_shapes[i] for i in range(len(args))}
     infer_shapes.update({auxs[i]:aux_shapes[i] for i in range(len(auxs))})
 
@@ -676,9 +706,9 @@ def sym_quant_prepare(symbol, params, inputs_ext):
             logger=logger, inputs_ext=inputs_ext,
             callback=_fuse_constant)
 
-    # sym, params = topo_visit(sym, params, get_op=get_mxnet_op,
-    #         logger=logger, inputs_ext=inputs_ext,
-    #         callback=_reduce_graph)
+    sym, params = topo_visit(sym, params, get_op=get_mxnet_op,
+           logger=logger, inputs_ext=inputs_ext,
+           callback=_reduce_graph)
 
     params = examine_parameters(sym, params, inputs_ext)
     return sym, params

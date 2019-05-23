@@ -104,7 +104,7 @@ def op_const(number, graph, var=mx.sym.var):
         graph[name] = var(name, shape=(1,))
     return graph[name], name
 
-def topo_sort(symbol, logger=logging):
+def topo_sort(symbol, logger=logging, with_deps=False):
     """Sort all symbols in the mxnet graph in topological order.
 
     Parameters
@@ -163,7 +163,10 @@ def topo_sort(symbol, logger=logging):
                 reduce_flag = True
         for name in remove:
             del dep_cnts[name]
-    return order
+    if with_deps:
+        return order, deps
+    else:
+        return order
 
 def sym_collect_attr(symbol, attr_name='op_name'):
     return {sym.attr(attr_name) for sym in topo_sort(symbol)}
@@ -178,7 +181,7 @@ def topo_visit(symbol, params, inputs_ext={}, get_op=get_mxnet_op,
         logger=logging, callback=None, **kwargs):
     graph = {}
     params = {k:v[:] for k,v in params.items()}
-    for sym in topo_sort(symbol, logger):
+    for sym in topo_sort(symbol, logger=logger):
         name = sym.attr('name')
         op_name = sym.attr('op_name')
         childs = sym_iter(sym.get_children())
