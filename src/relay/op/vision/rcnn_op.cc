@@ -1,3 +1,22 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ * 
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ * 
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 /*!
  *  Copyright (c) 2019 by Contributors
  * \file rcnn_op.cc
@@ -43,9 +62,7 @@ Expr MakeROIAlign(Expr data, Expr rois, Array<IndexExpr> pooled_size, double spa
 }
 
 TVM_REGISTER_API("relay.op.vision._make.roi_align")
-.set_body([](const TVMArgs& args, TVMRetValue* rv) {
-    runtime::detail::unpack_call<Expr, 6>(MakeROIAlign, args, rv);
-  });
+.set_body_typed(MakeROIAlign);
 
 RELAY_REGISTER_OP("vision.roi_align")
     .describe(R"doc(ROI Align operator.
@@ -95,9 +112,7 @@ Expr MakeROIPool(Expr data, Expr rois, Array<IndexExpr> pooled_size, double spat
 }
 
 TVM_REGISTER_API("relay.op.vision._make.roi_pool")
-.set_body([](const TVMArgs& args, TVMRetValue* rv) {
-    runtime::detail::unpack_call<Expr, 5>(MakeROIPool, args, rv);
-  });
+.set_body_typed(MakeROIPool);
 
 RELAY_REGISTER_OP("vision.roi_pool")
     .describe(R"doc(ROI Pool operator.
@@ -163,9 +178,7 @@ Expr MakeProposal(Expr cls_prob, Expr bbox_pred, Expr im_info, Array<IndexExpr> 
 }
 
 TVM_REGISTER_API("relay.op.vision._make.proposal")
-.set_body([](const TVMArgs& args, TVMRetValue* rv) {
-    runtime::detail::unpack_call<Expr, 11>(MakeProposal, args, rv);
-  });
+.set_body_typed(MakeProposal);
 
 RELAY_REGISTER_OP("vision.proposal")
     .describe(R"code(Generate region proposals via RPN.

@@ -1,4 +1,21 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 """Unit tests for MAC counter."""
+import numpy as np
 import tvm
 from tvm import relay
 
@@ -83,7 +100,35 @@ def test_simple_network():
     expect_count = 231411712
     assert compute_count == expect_count
 
+def test_depthwise_conv2d():
+    batch_size = 1
+    dshape = (batch_size, 64, 56, 56)
+    weight_conv = relay.var("weight_depthwiseconv", shape=(64, 1, 3, 3))
+    data1 = relay.var("data1", shape=dshape)
+    data2 = relay.var("data2", shape=dshape)
+    depthwise_conv2d_1 = relay.nn.conv2d(
+        data1,
+        weight_conv,
+        kernel_size=(3, 3),
+        padding=(1, 1),
+        groups=64)
+    depthwise_conv2d_2 = relay.nn.conv2d(
+        data2,
+        weight_conv,
+        kernel_size=(3, 3),
+        padding=(1, 1),
+        groups=64)
+    add = relay.add(depthwise_conv2d_1, depthwise_conv2d_2)
+    func = relay.Function([data1, data2, weight_conv],
+                            relay.Tuple(tvm.convert([depthwise_conv2d_1,
+                                                    depthwise_conv2d_2,
+                                                    add])))
+    func = relay.ir_pass.infer_type(func)
+    compute_count = relay.ir_pass.get_total_mac_number(func)
+    assert compute_count == 2 * np.prod(dshape) * 3*3
+
 if __name__ == "__main__":
     test_conv()
     test_gemm()
     test_simple_network()
+    test_depthwise_conv2d()

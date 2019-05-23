@@ -1,3 +1,19 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 """Basic tensor operations."""
 # pylint: disable=redefined-builtin
 from __future__ import absolute_import as _abs
@@ -61,6 +77,26 @@ def sqrt(data):
         The computed result.
     """
     return _make.sqrt(data)
+
+
+def rsqrt(data):
+    """Compute elementwise rsqrt of data.
+
+    .. math::
+
+      1/sqrt(x)
+
+    Parameters
+    ----------
+    data : relay.Expr
+        The input data
+
+    Returns
+    -------
+    result : relay.Expr
+        The computed result.
+    """
+    return _make.rsqrt(data)
 
 
 def sigmoid(data):
@@ -672,6 +708,30 @@ def concatenate(data, axis):
     if not isinstance(axis, int):
         raise ValueError("For now, we only support integer axis")
     return _make.concatenate(Tuple(data), axis)
+
+
+def stack(data, axis):
+    """Join a sequence of arrays along a new axis.
+
+    Parameters
+    ----------
+    data : Union(List[relay.Expr], Tuple(relay.Expr))
+        A list of tensors.
+
+    axis : int
+        The axis in the result array along which the input arrays are stacked.
+
+    Returns
+    -------
+    ret : relay.Expr
+        The stacked tensor.
+    """
+    data = list(data)
+    if not data:
+        raise ValueError("relay.stack requires data to be non-empty.")
+    if not isinstance(axis, int):
+        raise ValueError("For now, we only support integer axis")
+    return _make.stack(Tuple(data), axis)
 
 
 def copy(data):

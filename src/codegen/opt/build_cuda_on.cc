@@ -1,3 +1,22 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ * 
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ * 
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 /*!
  *  Copyright (c) 2017 by Contributors
  *  Build cuda modules from source.
@@ -65,12 +84,13 @@ std::string NVRTCCompile(const std::string& code, bool include_path = false) {
   std::vector<std::string> compile_params;
   std::vector<const char*> param_cstrings{};
   nvrtcProgram prog;
-  cudaDeviceProp device_prop;
   std::string cc = "30";
-  cudaError_t e = cudaGetDeviceProperties(&device_prop, 0);
+  int major, minor;
+  cudaError_t e1 = cudaDeviceGetAttribute(&major, cudaDevAttrComputeCapabilityMajor, 0);
+  cudaError_t e2 = cudaDeviceGetAttribute(&minor, cudaDevAttrComputeCapabilityMinor, 0);
 
-  if (e == cudaSuccess) {
-    cc = std::to_string(device_prop.major) + std::to_string(device_prop.minor);
+  if (e1 == cudaSuccess && e2 == cudaSuccess) {
+    cc = std::to_string(major) + std::to_string(minor);
   } else {
     LOG(WARNING) << "cannot detect compute capability from your device, "
                  << "fall back to compute_30.";
@@ -136,8 +156,6 @@ runtime::Module BuildCUDA(Array<LoweredFunc> funcs) {
 }
 
 TVM_REGISTER_API("codegen.build_cuda")
-.set_body([](TVMArgs args, TVMRetValue* rv) {
-    *rv = BuildCUDA(args[0]);
-  });
+.set_body_typed(BuildCUDA);
 }  // namespace codegen
 }  // namespace tvm

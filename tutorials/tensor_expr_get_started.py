@@ -1,3 +1,19 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 """
 Get Started with Tensor Expression
 ==================================
@@ -127,10 +143,10 @@ fadd = tvm.build(s, [A, B, C], tgt, target_host=tgt_host, name="myadd")
 # We provide an minimum array API in python to aid quick testing and prototyping.
 # The array API is based on `DLPack <https://github.com/dmlc/dlpack>`_ standard.
 #
-# - We first create a gpu context.
-# - Then tvm.nd.array copies the data to gpu.
+# - We first create a GPU context.
+# - Then tvm.nd.array copies the data to GPU.
 # - fadd runs the actual computation.
-# - asnumpy() copies the gpu array back to cpu and we can use this to verify correctness
+# - asnumpy() copies the GPU array back to CPU and we can use this to verify correctness
 #
 ctx = tvm.context(tgt, 0)
 
@@ -145,7 +161,7 @@ tvm.testing.assert_allclose(c.asnumpy(), a.asnumpy() + b.asnumpy())
 # Inspect the Generated Code
 # --------------------------
 # You can inspect the generated code in TVM. The result of tvm.build
-# is a tvm Module. fadd is the host module that contains the host wrapper,
+# is a TVM Module. fadd is the host module that contains the host wrapper,
 # it also contains a device module for the CUDA (GPU) function.
 #
 # The following code fetches the device module and prints the content code.

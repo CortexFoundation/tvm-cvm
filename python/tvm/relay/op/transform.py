@@ -1,3 +1,19 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 """Transform operators."""
 
 from . import _make
@@ -186,7 +202,7 @@ def reshape_like(data, shape_like):
     return _make.reshape_like(data, shape_like)
 
 
-def take(data, indices, axis=None):
+def take(data, indices, axis=None, mode="clip"):
     """Take elements from an array along an axis.
 
     Parameters
@@ -201,12 +217,17 @@ def take(data, indices, axis=None):
         The axis over which to select values. By default,
         the flattened input array is used.
 
+    mode : str, optional
+        Specifies how out-of-bound indices will behave.
+        clip - clip to the range (default)
+        wrap - wrap around the indices
+
     Returns
     -------
     ret : relay.Expr
         The computed result.
     """
-    return _make.take(data, indices, axis)
+    return _make.take(data, indices, axis, mode)
 
 
 def full(fill_value, shape=(), dtype=""):
@@ -292,28 +313,6 @@ def arange(start, stop=None, step=1, dtype="float32"):
         stop = start
         start = 0
     return _make.arange(start, stop, step, dtype)
-
-
-def stack(data, axis):
-    """Join a sequence of arrays along a new axis.
-
-    Parameters
-    ----------
-    data : relay.Expr
-        The input data to the operator.
-
-    axis : int
-        The axis in the result array along which the input arrays are stacked.
-
-    .. note::
-        Each array in the input array sequence must have the same shape.
-
-    Returns
-    -------
-    ret : relay.Expr
-        The computed result.
-    """
-    return _make.stack(data, axis)
 
 
 def repeat(data, repeats, axis):
@@ -646,3 +645,35 @@ def reverse_reshape(data, newshape):
     if isinstance(newshape, int):
         newshape = [newshape]
     return _make._contrib_reverse_reshape(data, list(newshape))
+
+
+def gather_nd(data, indices):
+    """Gather elements or slices from data and store to a tensor whose shape is
+    defined by indices.
+
+    Parameters
+    ----------
+    data : relay.Expr
+        The input data to the operator.
+
+    indices : relay.Expr
+        The shape of output tensor.
+
+    Returns
+    -------
+    ret : relay.Expr
+        The computed result.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        data = [[0, 1], [2, 3]]
+        indices = [[1, 1, 0], [0, 1, 0]]
+        relay.gather_nd(data, indices) = [2, 3, 0]
+
+        data = [[[1, 2], [3, 4]], [[5, 6], [7, 8]]]
+        indices = [[0, 1], [1, 0]]
+        relay.gather_nd(data, indices) = [[3, 4], [5, 6]]
+    """
+    return _make.gather_nd(data, indices)

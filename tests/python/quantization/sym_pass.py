@@ -10,6 +10,7 @@ import tvm
 
 from sym_utils import *
 from utils import *
+import sim_quant_helper as sim
 
 def fold_cond_op(symbol, params, graph, quant_flag):
     logger = logging.getLogger("log.quant.fold.condition")
@@ -182,6 +183,32 @@ def from_mxnet_prepare(symbol, params, inputs_ext):
             callback=_mx_prepare)
     return psym, pparams
 
+def to_nnvm(sym_file, param_file, ext_file, dump_sym, dump_params,
+        runtime="cvm", target="cuda"):
+    tvm_ctx = tvm.context(target, 1)
+
+    (inputs_ext,) = sim.load_ext(ext_file)
+    inputs = [mx.sym.var(name) for name in inputs_ext]
+    inputs_shape = {k:v['shape'] for k,v in inputs_ext.items()}
+
+    sym, params = mx.sym.load(sym_file), nd.load(param_file)
+    nnvm_sym, _ = nnvm.frontend.from_mxnet(sym)
+    nnvm_sym, real_params = nnvm_realize(nnvm_sym, params, inputs_ext)
+
+    use_dtype = "int32"
+    for key, value in list(real_params.items()):
+        real_params[key] = tvm.nd.array(value.asnumpy().astype(use_dtype), tvm_ctx)
+
+    with nnvm.compiler.build_config(opt_level=0, runtime=runtime):
+        deploy_graph, lib, real_params = nnvm.compiler.build(
+            nnvm_sym, target=target, shape=inputs_shape,
+            params=real_params, dtype=use_dtype)
+
+    real_params = tvm_params_reduce(nnvm_sym, real_params, inputs_ext, tvm_ctx)
+    open(dump_sym, "w").write(deploy_graph.json())
+    param_bytes = nnvm.compiler.save_param_dict(real_params)
+    open(dump_params, "wb").write(param_bytes)
+
 def nnvm_realize(symbol, params, inputs_ext):
     """Transform Sim-Quant(Float32 Simulate Int8) to Int8-Inference Graph
         Works:
@@ -211,6 +238,8 @@ def nnvm_realize(symbol, params, inputs_ext):
         name, op_name = sym.attr('name'), sym.attr('op_name')
         attr, childs = sym.list_attr(), sym_iter(sym.get_children())
         node = sym
+        if op_name == 'null':
+            return node, params
 
         if 'scalar' in attr:
             scalar = float(attr['scalar'])
@@ -230,7 +259,6 @@ def nnvm_realize(symbol, params, inputs_ext):
             sb = math.log2(scalar)
             assert int(sb) == sb, "op(%s name=%s) scalar (%s vs. %s)" \
                 % (op_name, name, scalar, sb)
-
             X = childs[0]
             sb_sym, sb_name = op_const(int(sb), graph, var=nnvm.sym.Variable)
             params[sb_name] = nd.array([int(sb)])
@@ -239,7 +267,6 @@ def nnvm_realize(symbol, params, inputs_ext):
             logger.critical(
                 "Unsupported op:%s(name=%s, attr=%s) in INT8 Inference network",
                 op_name, name, attr)
-
         return node, params
 
     print (sym_collect_attr(symbol))
@@ -263,6 +290,7 @@ def tvm_params_reduce(symbol, params, inputs_ext, ctx):
     for sym in topo_sort(symbol):
         name, attr = sym.attr('name'), sym.list_attr()
         if sym.attr('op_name') == 'null' and name not in inputs_ext:
+            print (name, attr)
             precision = eval(attr['precision'])
             val = params[name]
             if precision > 8:

@@ -1,3 +1,22 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 /*!
  *  Copyright (c) 2019 by Contributors
  * \file rewrite_simplify.cc
@@ -7,8 +26,10 @@
 #include <tvm/arithmetic.h>
 #include <tvm/expr_operator.h>
 #include <tvm/ir_mutator.h>
+#include <algorithm>
 #include "const_fold.h"
 #include "pattern_match.h"
+#include "rewrite_simplify.h"
 
 namespace tvm {
 namespace arith {
@@ -39,126 +60,55 @@ using namespace ir;
     return RecursiveRewrite((ResExpr).Eval());                    \
   }
 
-
 // NOTE for developers:
 //
 // We mainly focus on index expression simplification.
 // Besides the RewriteSimplifier, some cases can be better
 // handled by CanonicalSimplifier.
 //
-class RewriteSimplifier::Impl : public IRMutator {
- public:
-  explicit Impl(Analyzer* parent)
-      : parent_(parent) {}
 
-  void Update(const Var& var,
-              const Expr& info,
-              bool override) {
-    if (!override) {
-      CHECK(!var_map_.count(var));
-    }
-    var_map_[var] = info;
-  }
-
-  // Run simplification in post order
-  Expr PostOrderSimplify(Expr expr, int max_iter = 2) {
-    for (int i = 0; i < max_iter; ++i) {
-      Expr new_expr = this->Mutate(expr);
-      if (new_expr.same_as(expr)) return expr;
-      expr = new_expr;
-    }
-    return expr;
-  }
-
-  Expr Mutate_(const Add* op, const Expr& self) final;
-  Expr Mutate_(const Sub* op, const Expr& self) final;
-  Expr Mutate_(const Mul* op, const Expr& self) final;
-  Expr Mutate_(const Div* op, const Expr& self) final;
-  Expr Mutate_(const Mod* op, const Expr& self) final;
-  Expr Mutate_(const Min* op, const Expr& self) final;
-  Expr Mutate_(const Max* op, const Expr& self) final;
-  Expr Mutate_(const EQ* op, const Expr& self) final;
-  Expr Mutate_(const NE* op, const Expr& self) final;
-  Expr Mutate_(const LT* op, const Expr& self) final;
-  Expr Mutate_(const LE* op, const Expr& self) final;
-  Expr Mutate_(const GT* op, const Expr& self) final;
-  Expr Mutate_(const GE* op, const Expr& self) final;
-  Expr Mutate_(const And* op, const Expr& self) final;
-  Expr Mutate_(const Or* op, const Expr& self) final;
-  Expr Mutate_(const Not* op, const Expr& self) final;
-  Expr Mutate_(const Select* op, const Expr& self) final;
-  Expr Mutate_(const Ramp* op, const Expr& self) final;
-
- private:
-  /*! \brief internal structure for comparison. */
-  enum CompareResult {
-    kUnknown,
-    kEQ,
-    kGT,
-    kLT,
-    kNE
-  };
-  // reference to the main analyzer
-  Analyzer* parent_;
-  // counter to record recursive rewrite depth.
-  int recur_depth_{0};
-  // internal variable map
-  std::unordered_map<Var, Expr, ExprHash, ExprEqual> var_map_;
-  // maximum number of recursion allowed during a single pass.
-  static const constexpr int kMaxRecurDepth = 5;
-  // Whether x >= val
-  bool CanProveGreaterEqual(const Expr& x, int64_t val) {
-    return parent_->CanProveGreaterEqual(x, val);
-  }
-  // Whether x == val
-  bool CanProveEqual(const Expr& x, int64_t val) {
-    // TODO(tqchen) refer back to super-analyzer.
-    return TryCompare(x, val) == kEQ;
-  }
-  // try to prove x equals val
-  CompareResult TryCompare(const Expr& x, int64_t val) {
-    Expr diff = Mutate(x);
-    if (const auto* ptr = diff.as<IntImm>()) {
-      if (ptr->value == val) {
-        return kEQ;
-      } else if (ptr->value > val) {
-        return kGT;
-      } else if (ptr->value < val) {
-        return kLT;
-      }
-    }
-    if (val == 0) {
-      ModularSet dmod = parent_->modular_set(diff);
-      if (dmod->base != 0) {
-        return kNE;
-      }
-    }
-    ConstIntBound dbound = parent_->const_int_bound(diff);
-    if (dbound->min_value > val) {
+// try to prove x equals val
+RewriteSimplifier::Impl::CompareResult RewriteSimplifier::Impl::
+TryCompare(const Expr& x, int64_t val) {
+  Expr diff = Mutate(x);
+  if (const auto* ptr = diff.as<IntImm>()) {
+    if (ptr->value == val) {
+      return kEQ;
+    } else if (ptr->value > val) {
       return kGT;
-    }
-    if (dbound->max_value < val) {
+    } else if (ptr->value < val) {
       return kLT;
     }
-    return kUnknown;
   }
+  if (val == 0) {
+    ModularSet dmod = parent_->modular_set(diff);
+    if (dmod->base != 0) {
+      return kNE;
+    }
+  }
+  ConstIntBound dbound = parent_->const_int_bound(diff);
+  if (dbound->min_value > val) {
+    return kGT;
+  }
+  if (dbound->max_value < val) {
+    return kLT;
+  }
+  if (dbound->min_value >= val) {
+    return kGE;
+  }
+  if (dbound->max_value <= val) {
+    return kLE;
+  }
+  return kUnknown;
+}
 
-  // Recursive rewrite x
-  // we limit maximum depth of recursive rewrite allowed to
-  // avoid infinite loop
-  Expr RecursiveRewrite(const Expr& x) {
-    if (recur_depth_ >= kMaxRecurDepth) return x;
-    ++recur_depth_;
-    Expr res = Mutate(x);
-    --recur_depth_;
-    return res;
+void RewriteSimplifier::Impl::
+Update(const Var& var, const Expr& info, bool override) {
+  if (!override) {
+    CHECK(!var_map_.count(var));
   }
-
-  template<typename TA>
-  PConstWithTypeLike<TA> ZeroWithTypeLike(const Pattern<TA>& pattern) {
-    return PConstWithTypeLike<TA>(pattern.derived(), 0);
-  }
-};
+  var_map_[var] = info;
+}
 
 Expr RewriteSimplifier::Impl::
 Mutate_(const Add* op, const Expr& self) {
@@ -994,12 +944,10 @@ Mutate_(const EQ* op, const Expr& self) {
 
   if (IsIndexType(op->a.type())) {
     CompareResult result = TryCompare(op->a - op->b, 0);
-    if (result != kUnknown) {
-      if (result == kEQ) {
-        return make_const(op->type, true);
-      } else {
-        return make_const(op->type, false);
-      }
+    if (result == kEQ) {
+      return make_const(op->type, true);
+    } else if (result == kNE || result == kGT || result == kLT) {
+      return make_const(op->type, false);
     }
     TVM_TRY_REWRITE(x - c1 == 0, x == c1);
     TVM_TRY_REWRITE(c1 - x == 0, x == c1);
@@ -1055,7 +1003,7 @@ Mutate_(const LT* op, const Expr& self) {
     if (result == kLT) {
       return make_const(op->type, true);
     }
-    if (result == kEQ || result == kGT) {
+    if (result == kEQ || result == kGT || result == kGE) {
       return make_const(op->type, false);
     }
 
@@ -1221,7 +1169,7 @@ Mutate_(const Or* op, const Expr& self) {
   TVM_TRY_REWRITE(x != y || x == y, ctrue);
   TVM_TRY_REWRITE(x || !x, ctrue);
   TVM_TRY_REWRITE(x <= y || y < x, ctrue);
-  TVM_TRY_REWRITE(y < x || y <= x, ctrue);
+  TVM_TRY_REWRITE(y < x || x <= y, ctrue);
 
   TVM_TRY_REWRITE_IF(x < c1 || c2 < x, ctrue,
                      c2.Eval()->value < c1.Eval()->value);
@@ -1248,34 +1196,89 @@ Mutate_(const Or* op, const Expr& self) {
 }
 
 Expr RewriteSimplifier::Impl::
-Mutate_(const Ramp* op, const Expr& self) {
-  Expr ret = IRMutator::Mutate_(op, self);
-  op = ret.as<Ramp>();
-  if (is_zero(op->stride)) {
-    return Broadcast::make(op->base, op->lanes);
-  }
-  return ret;
-}
-
-Expr RewriteSimplifier::Impl::
 Mutate_(const Select* op, const Expr& self) {
-  Expr ret = IRMutator::Mutate_(op, self);
+  Expr cond = Mutate(op->condition);
+  Expr true_value, false_value;
+  {
+    ConstraintContext constraint(parent_, cond);
+    true_value = Mutate(op->true_value);
+  }
+  {
+    ConstraintContext constraint(parent_, Mutate(Not::make(cond)));
+    false_value = Mutate(op->false_value);
+  }
+  if (is_zero(cond)) {
+    return false_value;
+  }
+  if (is_one(cond)) {
+    return true_value;
+  }
+  // normal path
+  Expr ret;
+  if (cond.same_as(op->condition) &&
+      true_value.same_as(op->true_value) &&
+      false_value.same_as(op->false_value)) {
+    ret = self;
+  } else {
+    ret = Select::make(cond, true_value, false_value);
+  }
   op = ret.as<Select>();
-  if (is_zero(op->condition)) {
-    return op->false_value;
-  }
-  if (is_one(op->condition)) {
-    return op->true_value;
-  }
   // Pattern var to match any expression
   PVar<Expr> x, y;
-
   TVM_TRY_REWRITE(select(x, y, y), y);
   return ret;
 }
 
+Expr RewriteSimplifier::Impl::
+Mutate_(const Call* op, const Expr& self) {
+  // add condition context to if_then_else
+  Expr ret;
+  if (op->is_intrinsic(ir::intrinsic::tvm_if_then_else)) {
+    Expr cond = Mutate(op->args[0]);
+    Expr true_value, false_value;
+    {
+      ConstraintContext constraint(parent_, cond);
+      true_value = Mutate(op->args[1]);
+    }
+    {
+      ConstraintContext constraint(parent_, Mutate(Not::make(cond)));
+      false_value = Mutate(op->args[2]);
+    }
+    if (is_zero(cond)) {
+      return false_value;
+    }
+    if (is_one(cond)) {
+      return true_value;
+    }
+    if (cond.same_as(op->args[0]) &&
+        true_value.same_as(op->args[1]) &&
+        false_value.same_as(op->args[2])) {
+      ret = self;
+    } else {
+      ret = Call::make(op->type, op->name,
+                        {cond, true_value, false_value},
+                        op->call_type);
+    }
+  } else {
+    ret = IRMutator::Mutate_(op, self);
+  }
+  op = ret.as<Call>();
+  if (op->is_intrinsic(Call::likely) && is_const(op->args[0])) {
+    return op->args[0];
+  }
+  return ret;
+}
+
 Expr RewriteSimplifier::operator()(const Expr& expr) {
-  return impl_->PostOrderSimplify(expr);
+  // Run simplification in post order
+  Expr res = expr;
+  int max_iter = 2;
+  for (int i = 0; i < max_iter; ++i) {
+    Expr new_expr = impl_->Mutate(res);
+    if (new_expr.same_as(res)) return res;
+    res = new_expr;
+  }
+  return res;
 }
 
 void RewriteSimplifier::Update(const Var& var,
@@ -1283,7 +1286,6 @@ void RewriteSimplifier::Update(const Var& var,
                                bool override) {
   impl_->Update(var, info, override);
 }
-
 
 RewriteSimplifier::RewriteSimplifier(Analyzer* parent)
     : impl_(new Impl(parent)) {

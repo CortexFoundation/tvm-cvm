@@ -1,3 +1,19 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 """
 Compile ONNX Models
 ===================
@@ -18,21 +34,9 @@ https://github.com/onnx/onnx
 """
 import nnvm
 import tvm
+from tvm.contrib.download import download_testdata
 import onnx
 import numpy as np
-
-def download(url, path, overwrite=False):
-    import os
-    if os.path.isfile(path) and not overwrite:
-        print('File {} existed, skip.'.format(path))
-        return
-    print('Downloading from url {} to {}'.format(url, path))
-    try:
-        import urllib.request
-        urllib.request.urlretrieve(url, path)
-    except:
-        import urllib
-        urllib.urlretrieve(url, path)
 
 ######################################################################
 # Load pretrained ONNX model
@@ -44,9 +48,9 @@ model_url = ''.join(['https://gist.github.com/zhreshold/',
                      'bcda4716699ac97ea44f791c24310193/raw/',
                      '93672b029103648953c4e5ad3ac3aadf346a4cdc/',
                      'super_resolution_0.2.onnx'])
-download(model_url, 'super_resolution.onnx', True)
+model_path = download_testdata(model_url, 'super_resolution.onnx', module='onnx')
 # now you have super_resolution.onnx on disk
-onnx_model = onnx.load_model('super_resolution.onnx')
+onnx_model = onnx.load_model(model_path)
 # we can load the graph as NNVM compatible model
 sym, params = nnvm.frontend.from_onnx(onnx_model)
 
@@ -56,8 +60,8 @@ sym, params = nnvm.frontend.from_onnx(onnx_model)
 # A single cat dominates the examples!
 from PIL import Image
 img_url = 'https://github.com/dmlc/mxnet.js/blob/master/data/cat.png?raw=true'
-download(img_url, 'cat.png')
-img = Image.open('cat.png').resize((224, 224))
+img_path = download_testdata(img_url, 'cat.png', module='data')
+img = Image.open(img_path).resize((224, 224))
 img_ycbcr = img.convert("YCbCr")  # convert to YCbCr
 img_y, img_cb, img_cr = img_ycbcr.split()
 x = np.array(img_y)[np.newaxis, np.newaxis, :, :]

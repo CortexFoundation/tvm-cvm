@@ -1,3 +1,19 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 """ Support level5 operator test cases.
 """
 import math
@@ -161,12 +177,13 @@ def test_get_valid_counts():
         assert "score_threshold" in z.astext()
         func = relay.Function([x], z.astuple())
         func = relay.ir_pass.infer_type(func)
-        ctx_list = [("llvm", tvm.cpu(0))]
-        for target, ctx in ctx_list:
+        for target, ctx in ctx_list():
+            if target == 'cuda':
+                return
             intrp = relay.create_executor("debug", ctx=ctx, target=target)
             out = intrp.evaluate(func)(np_data)
-            tvm.testing.assert_allclose(out[0].asnumpy(), np_out1, rtol=1e-3)
-            tvm.testing.assert_allclose(out[1].asnumpy(), np_out2, rtol=1e-3)
+            tvm.testing.assert_allclose(out[0].asnumpy(), np_out1, rtol=1e-3, atol=1e-04)
+            tvm.testing.assert_allclose(out[1].asnumpy(), np_out2, rtol=1e-3, atol=1e-04)
 
     verify_get_valid_counts((1, 2500, 6), 0)
     verify_get_valid_counts((1, 2500, 6), -1)
@@ -179,9 +196,13 @@ def test_non_max_suppression():
                    iou_threshold=0.5, force_suppress=False, top_k=-1,
                    check_type_only=False):
         x0 = relay.var("x0", relay.ty.TensorType(dshape, "float32"))
-        x1 = relay.var("x1", relay.ty.TensorType((dshape[0],), "int"))
-        z = relay.vision.non_max_suppression(x0, x1, -1, iou_threshold, force_suppress, top_k, return_indices=False)
-        z_indices = relay.vision.non_max_suppression(x0, x1, -1, iou_threshold, force_suppress, top_k)
+        x1 = relay.var("x1", relay.ty.TensorType((dshape[0],), "int32"))
+        z = relay.vision.non_max_suppression(x0, x1, max_output_size = -1, \
+            iou_threshold = iou_threshold, force_suppress = force_suppress, \
+            top_k = top_k, return_indices=False)
+        z_indices = relay.vision.non_max_suppression(x0, x1, max_output_size = -1, \
+                    iou_threshold = iou_threshold, force_suppress = force_suppress, \
+                    top_k = top_k)
         assert "iou_threshold" in z.astext()
         assert "iou_threshold" in z_indices.astext()
         zz = relay.ir_pass.infer_type(z)
@@ -196,8 +217,7 @@ def test_non_max_suppression():
         func = relay.ir_pass.infer_type(func)
         func_indices = relay.Function([x0, x1], z_indices)
         func_indices = relay.ir_pass.infer_type(func_indices)
-        ctx_list = [("llvm", tvm.cpu(0))]
-        for target, ctx in ctx_list:
+        for target, ctx in ctx_list():
             intrp1 = relay.create_executor("graph", ctx=ctx, target=target)
             op_res1 = intrp1.evaluate(func)(x0_data, x1_data)
             op_indices_res1 = intrp1.evaluate(func_indices)(x0_data, x1_data)
@@ -280,8 +300,7 @@ def test_multibox_transform_loc():
         nms = relay.vision.non_max_suppression(mtl[0], mtl[1], return_indices=False)
         func = relay.Function([cls_prob, loc_pred, anchors], nms)
         func = relay.ir_pass.infer_type(func)
-        ctx_list = [("llvm", tvm.cpu(0))]
-        for target, ctx in ctx_list:
+        for target, ctx in ctx_list():
             intrp1 = relay.create_executor("graph", ctx=ctx, target=target)
             op_res1 = intrp1.evaluate(func)(np_cls_prob, np_loc_preds,
                                             np_anchors)
@@ -489,6 +508,66 @@ def test_yolo_reorg():
     verify_yolo_reorg((1, 100, 20, 20), 10)
     verify_yolo_reorg((1, 4, 6, 6), 2)
 
+
+def test_deformable_conv2d():
+    def test_infer_type(batch, in_channel, size, out_channel, deformable_groups, groups):
+        data_shape = (batch, in_channel, size, size)
+        data = relay.var("data", shape=data_shape)
+        offset = relay.var("offset")
+        kernel = relay.var("kernel")
+        kernel_size = (3, 3)
+        y = relay.nn.deformable_conv2d(data, offset, kernel,
+            strides=(1, 1),
+            padding=(1, 1),
+            dilation=(1, 1),
+            kernel_size=kernel_size,
+            deformable_groups=deformable_groups,
+            groups=groups,
+            channels=out_channel)
+        weight_shape = (out_channel, in_channel // groups, kernel_size[0], kernel_size[1])
+        out_shape = (batch, out_channel, size, size)
+        offset_shape = (batch, 2 * kernel_size[0] * kernel_size[1] * deformable_groups, out_shape[2], out_shape[3])
+        yy = relay.ir_pass.infer_type(y)
+        assert yy.checked_type == relay.TensorType(out_shape)
+        assert yy.args[1].checked_type == relay.TensorType(offset_shape), yy.args[1].checked_type
+        assert yy.args[2].checked_type == relay.TensorType(weight_shape)
+
+    test_infer_type(1, 4, 16, 4, 4, 1)
+    test_infer_type(2, 4, 16, 4, 1, 2)
+
+
+    def test_run(batch, in_channel, size, out_channel, deformable_groups, groups):
+        kernel_size = (3, 3)
+        data_shape = (batch, in_channel, size, size)
+        offset_shape = (batch, 2 * kernel_size[0] * kernel_size[1] * deformable_groups, size, size)
+        kernel_shape = (out_channel, in_channel // groups, kernel_size[0], kernel_size[1])
+        dtype = 'float32'
+        data = relay.var("data", shape=data_shape, dtype=dtype)
+        offset = relay.var("offset")
+        kernel = relay.var("kernel")
+        y = relay.nn.deformable_conv2d(data, offset, kernel,
+            strides=(1, 1),
+            padding=(1, 1),
+            dilation=(1, 1),
+            kernel_size=kernel_size,
+            deformable_groups=deformable_groups,
+            groups=groups,
+            channels=out_channel)
+        func = relay.Function([data, offset, kernel], y)
+        data = np.random.uniform(size=data_shape).astype(dtype)
+        offset = np.random.uniform(size=offset_shape).astype(dtype)
+        kernel = np.random.uniform(size=kernel_shape).astype(dtype)
+        ref_res = topi.testing.deformable_conv2d_nchw_python(data, offset, kernel, stride=(1, 1), padding=(1, 1), dilation=(1, 1), deformable_groups=deformable_groups, groups=groups)
+
+        for target, ctx in ctx_list():
+            for kind in ["graph", "debug"]:
+                intrp1 = relay.create_executor(kind, ctx=ctx, target=target)
+                op_res1 = intrp1.evaluate(func)(data, offset, kernel)
+                tvm.testing.assert_allclose(op_res1.asnumpy(), ref_res, rtol=1e-5, atol=1e-5)
+    test_run(1, 4, 16, 4, 1, 1)
+    test_run(2, 4, 16, 4, 4, 1)
+
+
 if __name__ == "__main__":
     test_resize_infer_type()
     test_resize()
@@ -501,3 +580,4 @@ if __name__ == "__main__":
     test_yolo_reorg_infer_shape()
     test_yolo_reorg()
     test_non_max_suppression()
+    test_deformable_conv2d()

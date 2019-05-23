@@ -1,3 +1,19 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 import numpy as np
 import operator
 
@@ -153,6 +169,14 @@ def test_forward_pooling():
 
     mx_sym = mx.sym.Pooling(data, kernel=(3, 3), pad=(1, 1), pool_type='max')
     verify_mxnet_frontend_impl(mx_sym, (1, 20, 8, 8), (1, 20, 8, 8))
+
+def test_forward_adaptive_pooling():
+    data = mx.sym.var('data')
+    mx_sym = mx.sym.contrib.AdaptiveAvgPooling2D(data, output_size=(1,))
+    verify_mxnet_frontend_impl(mx_sym, (1, 20, 8, 8), (1, 20, 1, 1))
+
+    mx_sym = mx.sym.contrib.AdaptiveAvgPooling2D(data, output_size=(3, 3))
+    verify_mxnet_frontend_impl(mx_sym, (1, 20, 8, 8), (1, 20, 3, 3))
 
 def test_forward_lrn():
     data = mx.sym.var('data')
@@ -464,6 +488,102 @@ def test_forward_embedding():
     verify((2, 2), (4, 5))
     verify((2, 3, 4), (4, 5))
 
+def test_forward_smooth_l1():
+    data = mx.sym.var('data')
+    mx_sym = mx.sym.smooth_l1(data)
+    verify_mxnet_frontend_impl(mx_sym, (3, 4), (3, 4))
+    mx_sym = mx.sym.smooth_l1(data, scalar=1.0)
+    verify_mxnet_frontend_impl(mx_sym, (3, 4), (3, 4))
+
+def test_forward_take():
+    def verify(shape, indices_src, axis, mode="clip"):
+        x_np = np.random.uniform(size=shape).astype("float32")
+        indices_np = np.array(indices_src, dtype="float32")
+        ref_res = mx.nd.take(mx.nd.array(x_np), mx.nd.array(indices_np), axis, mode)
+        mx_sym = mx.sym.take(mx.sym.var("x"), mx.sym.var("y"), axis, mode)
+        new_sym, _ = relay.frontend.from_mxnet(mx_sym, {"x": shape, "y": indices_np.shape})
+        for target, ctx in ctx_list():
+            for kind in ["graph", "debug"]:
+                intrp = relay.create_executor(kind, ctx=ctx, target=target)
+                op_res = intrp.evaluate(new_sym)(x_np, indices_np)
+                tvm.testing.assert_allclose(op_res.asnumpy(), ref_res.asnumpy())
+    verify((2,2), [[[1,0],[0,1]]], 0)
+    verify((2,2), [[[1,0],[0,1]]], 1)
+    verify((4,3,5,6), [[2,1,0,0]], -2)
+    verify((3,4), [-1, 5], 0)
+    verify((3,4), [-1, 5], 0, mode="wrap")
+    verify((3,4), [-1, 5], 1)
+    verify((3,4), [-1, 5], 1, mode="wrap")
+
+def test_forward_gather_nd():
+    def verify(xshape, yshape, y_data):
+        x_data = np.random.uniform(size=xshape).astype("float32")
+        ref_res = mx.nd.gather_nd(mx.nd.array(x_data), mx.nd.array(y_data))
+        mx_sym = mx.sym.gather_nd(mx.sym.var("x_data"), mx.sym.var("y_data"))
+        new_sym, _ = relay.frontend.from_mxnet(mx_sym, {"x_data": xshape, "y_data": yshape}, {"x_data": "float32", "y_data": "int32"})
+        for target, ctx in ctx_list():
+            for kind in ["graph", "debug"]:
+                intrp = relay.create_executor(kind, ctx=ctx, target=target)
+                op_res = intrp.evaluate(new_sym)(x_data, y_data)
+                tvm.testing.assert_allclose(op_res.asnumpy(), ref_res.asnumpy())
+    verify((2, 2), (2, 3), [[1, 1, 0], [0, 1, 0]])
+    verify((2, 2, 2), (2, 2), [[0, 1], [1, 0]])
+
+def test_forward_bilinear_resize():
+    # add tests including scale_height and scale_width when mxnet is updated to version 1.5
+    data = mx.sym.var('data')
+    mx_sym = mx.sym.contrib.BilinearResize2D(data, height=5, width=10)
+    verify_mxnet_frontend_impl(mx_sym, (1, 2, 3, 4), (1, 2, 5, 10))
+
+def test_forward_rnn_layer():
+    def verify(mode, input_size, seq_len, hidden_size, num_layers, batch=1):
+        if mode == "rnn":
+            layer = gluon.rnn.RNN(hidden_size, num_layers)
+        elif mode == "gru":
+            layer = gluon.rnn.GRU(hidden_size, num_layers)
+        else: # mode == "lstm"
+            layer = gluon.rnn.LSTM(hidden_size, num_layers)
+        num_states = 2 if mode == "lstm" else 1
+        layer.initialize()
+
+        dtype = "float32"
+        data_np = np.random.uniform(size=(seq_len, batch, input_size)).astype(dtype)
+        states_np = []
+        states_mx = []
+        shape_dict = {'data0': data_np.shape}
+        inputs = {'data0': data_np}
+        for i in range(num_states):
+            s = np.random.uniform(size=(num_layers, batch, hidden_size)).astype(dtype)
+            states_np.append(s)
+            states_mx.append(mx.nd.array(s))
+            shape_dict['data%s' % (i+1)] = s.shape
+            inputs['data%s' % (i+1)] = s
+
+        layer.hybridize()
+        mx_out, mx_states = layer(mx.nd.array(data_np), states_mx)
+        mx_res = [mx_out] + mx_states
+        mx_sym = layer._cached_graph[1]
+        mx_params = {}
+        for name, param in layer.collect_params().items():
+            mx_params[name] = param._reduce()
+
+        new_sym, params = relay.frontend.from_mxnet(
+            mx_sym, shape=shape_dict, arg_params=mx_params)
+        for target, ctx in ctx_list():
+            # only test graph runtime because debug runtime is too slow
+            for kind in ["graph"]:
+                intrp = relay.create_executor(kind, ctx=ctx, target=target)
+                op_res = intrp.evaluate(new_sym)(**inputs, **params)
+                assert len(op_res) == len(mx_res)
+                for i, val in enumerate(op_res):
+                    tvm.testing.assert_allclose(val.asnumpy(), mx_res[i].asnumpy(), rtol=1e-3)
+
+    for mode in ["rnn", "gru", "lstm"]:
+        verify(mode, 64, 10, 64, 1)
+        verify(mode, 64, 10, 64, 2)
+        verify(mode, 64, 10, 32, 2)
+
+
 if __name__ == '__main__':
     test_forward_mlp()
     test_forward_vgg()
@@ -478,6 +598,7 @@ if __name__ == '__main__':
     test_forward_split_squeeze()
     test_forward_expand_dims()
     test_forward_pooling()
+    test_forward_adaptive_pooling()
     test_forward_lrn()
     test_forward_ones()
     test_forward_zeros()
@@ -498,3 +619,8 @@ if __name__ == '__main__':
     test_forward_broadcast_axis()
     test_forward_full()
     test_forward_embedding()
+    test_forward_smooth_l1()
+    test_forward_take()
+    test_forward_gather_nd()
+    test_forward_bilinear_resize()
+    test_forward_rnn_layer()
