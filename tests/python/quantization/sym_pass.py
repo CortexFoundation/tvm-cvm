@@ -10,7 +10,6 @@ import tvm
 
 from sym_utils import *
 from utils import *
-import sim_quant_helper as sim
 
 def fold_cond_op(symbol, params, graph, quant_flag):
     logger = logging.getLogger("log.quant.fold.condition")
@@ -183,11 +182,9 @@ def from_mxnet_prepare(symbol, params, inputs_ext):
             callback=_mx_prepare)
     return psym, pparams
 
-def to_nnvm(sym_file, param_file, ext_file, dump_sym, dump_params,
+def to_nnvm(sym_file, param_file, dump_sym, dump_params, inputs_ext,
         runtime="cvm", target="cuda"):
     tvm_ctx = tvm.context(target, 1)
-
-    (inputs_ext,) = sim.load_ext(ext_file)
     inputs = [mx.sym.var(name) for name in inputs_ext]
     inputs_shape = {k:v['shape'] for k,v in inputs_ext.items()}
 
@@ -198,12 +195,10 @@ def to_nnvm(sym_file, param_file, ext_file, dump_sym, dump_params,
     use_dtype = "int32"
     for key, value in list(real_params.items()):
         real_params[key] = tvm.nd.array(value.asnumpy().astype(use_dtype), tvm_ctx)
-
     with nnvm.compiler.build_config(opt_level=0, runtime=runtime):
         deploy_graph, lib, real_params = nnvm.compiler.build(
             nnvm_sym, target=target, shape=inputs_shape,
             params=real_params, dtype=use_dtype)
-
     real_params = tvm_params_reduce(nnvm_sym, real_params, inputs_ext, tvm_ctx)
     open(dump_sym, "w").write(deploy_graph.json())
     param_bytes = nnvm.compiler.save_param_dict(real_params)
