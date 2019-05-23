@@ -1,3 +1,19 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 # pylint: disable=invalid-name,consider-using-enumerate
 """Injective transformation operators"""
 from __future__ import absolute_import as _abs
@@ -228,7 +244,7 @@ def split(ary, indices_or_sections, axis=0):
     return cpp.split(ary, indices_or_sections, axis)
 
 
-def take(a, indices, axis=None):
+def take(a, indices, axis=None, mode="clip"):
     """Take elements from an array along an axis.
 
     Parameters
@@ -243,13 +259,18 @@ def take(a, indices, axis=None):
         The axis over which to select values. By default,
         the flattened input array is used.
 
+    mode : str, optional
+        Specifies how out-of-bound indices will behave.
+        clip - clip to the range (default)
+        wrap - wrap around the indices
+
     Returns
     -------
     ret : tvm.Tensor
     """
     if axis is None:
-        return cpp.take(a, indices)
-    return cpp.take(a, indices, int(axis))
+        return cpp.take(a, indices, mode)
+    return cpp.take(a, indices, int(axis), mode)
 
 
 def gather_nd(a, indices):

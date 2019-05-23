@@ -1,3 +1,22 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ * 
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ * 
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 /*!
  *  Copyright (c) 2016 by Contributors
  * \file c_runtime_api.cc
@@ -25,6 +44,52 @@
 
 namespace tvm {
 namespace runtime {
+
+std::string GetCustomTypeName(uint8_t type_code) {
+  auto f = tvm::runtime::Registry::Get("_datatype_get_type_name");
+  CHECK(f) << "Function _datatype_get_type_name not found";
+  return (*f)(type_code).operator std::string();
+}
+
+uint8_t GetCustomTypeCode(const std::string& type_name) {
+  auto f = tvm::runtime::Registry::Get("_datatype_get_type_code");
+  CHECK(f) << "Function _datatype_get_type_code not found";
+  return (*f)(type_name).operator int();
+}
+
+bool GetCustomTypeRegistered(uint8_t type_code) {
+  auto f = tvm::runtime::Registry::Get("_datatype_get_type_registered");
+  CHECK(f) << "Function _datatype_get_type_registered not found";
+  return (*f)(type_code).operator bool();
+}
+
+uint8_t ParseCustomDatatype(const std::string& s, const char** scan) {
+  CHECK(s.substr(0, 6) == "custom") << "Not a valid custom datatype string";
+
+  auto tmp = s.c_str();
+
+  CHECK(s.c_str() == tmp);
+  *scan = s.c_str() + 6;
+  CHECK(s.c_str() == tmp);
+  if (**scan != '[') LOG(FATAL) << "expected opening brace after 'custom' type in" << s;
+  CHECK(s.c_str() == tmp);
+  *scan += 1;
+  CHECK(s.c_str() == tmp);
+  size_t custom_name_len = 0;
+  CHECK(s.c_str() == tmp);
+  while (*scan + custom_name_len <= s.c_str() + s.length() && *(*scan + custom_name_len) != ']')
+    ++custom_name_len;
+  CHECK(s.c_str() == tmp);
+  if (*(*scan + custom_name_len) != ']')
+    LOG(FATAL) << "expected closing brace after 'custom' type in" << s;
+  CHECK(s.c_str() == tmp);
+  *scan += custom_name_len + 1;
+  CHECK(s.c_str() == tmp);
+
+  auto type_name = s.substr(7, custom_name_len);
+  CHECK(s.c_str() == tmp);
+  return GetCustomTypeCode(type_name);
+}
 
 class DeviceAPIManager {
  public:

@@ -1,3 +1,19 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 import tvm
 
 class RewriteChecker:
@@ -450,6 +466,21 @@ def test_cmp_simplify():
     ck.verify(tvm.max(8, x) > 10, tvm.expr.LT(10, x))
     ck.verify(x + 1 < tvm.max(8, x), x < 7)
 
+    ck.analyzer.update(x, tvm.arith.ConstIntBound(0, 10), override=True)
+    ck.analyzer.update(y, tvm.arith.ConstIntBound(-10, 0), override=True)
+    ck.analyzer.update(z, tvm.arith.ConstIntBound(-5, 5), override=True)
+
+    ck.verify(x < 11, tvm.const(1, "bool"))
+    ck.verify(x <= 10, tvm.const(1, "bool"))
+    ck.verify(z <= 5, tvm.const(1, "bool"))
+    ck.verify(x + y <= 10, tvm.const(1, "bool"))
+    ck.verify(x + y >= -10, tvm.const(1, "bool"))
+    ck.verify(z - 5 <= y + 10, tvm.const(1, "bool"))
+    ck.verify(tvm.all(x > -1, z <= x + 5), tvm.const(1, "bool"))
+    ck.verify(x*y <= 0, tvm.const(1, "bool"))
+    ck.verify((x + 1)*(y - 1) < 0, tvm.const(1, "bool"))
+    ck.verify(y*y >= 0, tvm.const(1, "bool"))
+
 
 def test_logical_simplify():
     ck = RewriteChecker()
@@ -477,10 +508,10 @@ def test_logical_simplify():
               tvm.const(True, "bool"))
     ck.verify(tvm.expr.Or(tvm.expr.NE(x, y), tvm.expr.EQ(x, y)),
               tvm.const(True, "bool"))
-    ck.verify(tvm.expr.Or(x > y, tvm.expr.Not(x < y)), tvm.const(True, "bool"))
+    ck.verify(tvm.expr.Or(x > y, tvm.expr.Not(x > y)), tvm.const(True, "bool"))
 
     ck.verify(tvm.expr.Or(x <= y, y < x), tvm.const(True, "bool"))
-    ck.verify(tvm.expr.Or(y < x, y <= x), tvm.const(True, "bool"))
+    ck.verify(tvm.expr.Or(y < x, y >= x), tvm.const(True, "bool"))
 
     ck.verify(tvm.expr.Or(x < 1, 0 < x), tvm.const(True, "bool"))
     ck.verify(tvm.expr.Or(0 < x, x < 1), tvm.const(True, "bool"))

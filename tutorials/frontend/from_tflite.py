@@ -1,3 +1,19 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 """
 Compile TFLite Models
 ===================
@@ -52,25 +68,14 @@ Below you can find an example for how to compile TFLite model using TVM.
 ######################################################################
 # Utils for downloading and extracting zip files
 # ---------------------------------------------
-
-def download(url, path, overwrite=False):
-    import os
-    if os.path.isfile(path) and not overwrite:
-        print('File {} existed, skip.'.format(path))
-        return
-    print('Downloading from url {} to {}'.format(url, path))
-    try:
-        import urllib.request
-        urllib.request.urlretrieve(url, path)
-    except:
-        import urllib
-        urllib.urlretrieve(url, path)
+import os
 
 def extract(path):
     import tarfile
     if path.endswith("tgz") or path.endswith("gz"):
+        dir_path = os.path.dirname(path)
         tar = tarfile.open(path)
-        tar.extractall()
+        tar.extractall(path=dir_path)
         tar.close()
     else:
         raise RuntimeError('Could not decompress the file: ' + path)
@@ -80,14 +85,17 @@ def extract(path):
 # Load pretrained TFLite model
 # ---------------------------------------------
 # we load mobilenet V1 TFLite model provided by Google
+from tvm.contrib.download import download_testdata
+
 model_url = "http://download.tensorflow.org/models/mobilenet_v1_2018_08_02/mobilenet_v1_1.0_224.tgz"
 
 # we download model tar file and extract, finally get mobilenet_v1_1.0_224.tflite
-download(model_url, "mobilenet_v1_1.0_224.tgz", False)
-extract("mobilenet_v1_1.0_224.tgz")
+model_path = download_testdata(model_url, "mobilenet_v1_1.0_224.tgz", module=['tf', 'official'])
+model_dir = os.path.dirname(model_path)
+extract(model_path)
 
 # now we have mobilenet_v1_1.0_224.tflite on disk and open it
-tflite_model_file = "mobilenet_v1_1.0_224.tflite"
+tflite_model_file = os.path.join(model_dir, "mobilenet_v1_1.0_224.tflite")
 tflite_model_buf = open(tflite_model_file, "rb").read()
 
 # get TFLite model from buffer
@@ -103,30 +111,21 @@ from matplotlib import pyplot as plt
 import numpy as np
 
 image_url = 'https://github.com/dmlc/mxnet.js/blob/master/data/cat.png?raw=true'
-download(image_url, 'cat.png')
-resized_image = Image.open('cat.png').resize((224, 224))
+image_path = download_testdata(image_url, 'cat.png', module='data')
+resized_image = Image.open(image_path).resize((224, 224))
 plt.imshow(resized_image)
 plt.show()
 image_data = np.asarray(resized_image).astype("float32")
 
-# convert HWC to CHW
-image_data = image_data.transpose((2, 0, 1))
-
-# after expand_dims, we have format NCHW
+# after expand_dims, we have format NHWC
 image_data = np.expand_dims(image_data, axis=0)
 
 # preprocess image as described here:
 # https://github.com/tensorflow/models/blob/edb6ed22a801665946c63d650ab9a0b23d98e1b1/research/slim/preprocessing/inception_preprocessing.py#L243
-image_data[:, 0, :, :] = 2.0 / 255.0 * image_data[:, 0, :, :] - 1
-image_data[:, 1, :, :] = 2.0 / 255.0 * image_data[:, 1, :, :] - 1
-image_data[:, 2, :, :] = 2.0 / 255.0 * image_data[:, 2, :, :] - 1
+image_data[:, :, :, 0] = 2.0 / 255.0 * image_data[:, :, :, 0] - 1
+image_data[:, :, :, 1] = 2.0 / 255.0 * image_data[:, :, :, 1] - 1
+image_data[:, :, :, 2] = 2.0 / 255.0 * image_data[:, :, :, 2] - 1
 print('input', image_data.shape)
-
-####################################################################
-#
-# .. note:: Input layout:
-#
-#   Currently, TVM TFLite frontend accepts ``NCHW`` as input layout.
 
 ######################################################################
 # Compile the model with relay
@@ -134,7 +133,7 @@ print('input', image_data.shape)
 
 # TFLite input tensor name, shape and type
 input_tensor = "input"
-input_shape = (1, 3, 224, 224)
+input_shape = (1, 224, 224, 3)
 input_dtype = "float32"
 
 # parse TFLite model and convert into Relay computation graph
@@ -143,7 +142,7 @@ func, params = relay.frontend.from_tflite(tflite_model,
                                           shape_dict={input_tensor: input_shape},
                                           dtype_dict={input_tensor: input_dtype})
 
-# targt x86 cpu
+# target x86 CPU
 target = "llvm"
 with relay.build_module.build_config(opt_level=3):
     graph, lib, params = relay.build(func, target, params=params)
@@ -179,11 +178,11 @@ label_file_url = ''.join(['https://raw.githubusercontent.com/',
                           'app/src/main/assets/',
                           'labels_mobilenet_quant_v1_224.txt'])
 label_file = "labels_mobilenet_quant_v1_224.txt"
-download(label_file_url, label_file)
+label_path = download_testdata(label_file_url, label_file, module='data')
 
 # map id to 1001 classes
 labels = dict()
-with open(label_file) as f:
+with open(label_path) as f:
     for id, line in enumerate(f):
         labels[id] = line
 

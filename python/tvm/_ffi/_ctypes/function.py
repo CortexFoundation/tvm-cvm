@@ -1,3 +1,19 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 # coding: utf-8
 # pylint: disable=invalid-name, protected-access, too-many-branches, global-statement
 """Function configuration API."""
@@ -146,6 +162,9 @@ def _make_tvm_args(args, temp_args):
             values[i].v_handle = arg.handle
             type_codes[i] = TypeCode.FUNC_HANDLE
             temp_args.append(arg)
+        elif isinstance(arg, ObjectBase):
+            values[i].v_handle = arg.handle
+            type_codes[i] = TypeCode.OBJECT
         else:
             raise TypeError("Don't know how to handle type %s" % type(arg))
     return values, type_codes, num_args
@@ -224,12 +243,18 @@ def _handle_return_func(x):
         handle = FunctionHandle(handle)
     return _CLASS_FUNCTION(handle, False)
 
+class ObjectBase(object):
+    __slots__ = ["handle"]
+
+    def __init__(self, handle):
+        self.handle = handle
 
 # setup return handle for function type
 _node.__init_by_constructor__ = __init_handle_by_constructor__
 RETURN_SWITCH[TypeCode.FUNC_HANDLE] = _handle_return_func
 RETURN_SWITCH[TypeCode.MODULE_HANDLE] = _return_module
 RETURN_SWITCH[TypeCode.NDARRAY_CONTAINER] = lambda x: _make_array(x.v_handle, False, True)
+RETURN_SWITCH[TypeCode.OBJECT] = lambda x: _CLASS_OBJECT(x.v_handle)
 C_TO_PY_ARG_SWITCH[TypeCode.FUNC_HANDLE] = _wrap_arg_func(
     _handle_return_func, TypeCode.FUNC_HANDLE)
 C_TO_PY_ARG_SWITCH[TypeCode.MODULE_HANDLE] = _wrap_arg_func(
@@ -239,6 +264,7 @@ C_TO_PY_ARG_SWITCH[TypeCode.NDARRAY_CONTAINER] = lambda x: _make_array(x.v_handl
 
 _CLASS_MODULE = None
 _CLASS_FUNCTION = None
+_CLASS_OBJECT = None
 
 def _set_class_module(module_class):
     """Initialize the module."""
@@ -248,3 +274,7 @@ def _set_class_module(module_class):
 def _set_class_function(func_class):
     global _CLASS_FUNCTION
     _CLASS_FUNCTION = func_class
+
+def _set_class_object(obj_class):
+    global _CLASS_OBJECT
+    _CLASS_OBJECT = obj_class

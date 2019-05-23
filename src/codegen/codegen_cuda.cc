@@ -1,3 +1,22 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ * 
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ * 
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 /*!
  *  Copyright (c) 2017 by Contributors
  * \file codegen_cuda.cc
@@ -36,6 +55,10 @@ std::string CodeGenCUDA::Finish() {
 
   if (enable_int8_) {
     decl_stream << "#include <sm_61_intrinsics.h>\n";
+  }
+
+  if (need_math_constants_h_) {
+    decl_stream << "#include <math_constants.h>\n";
   }
 
   return CodeGenC::Finish();
@@ -320,8 +343,19 @@ inline void PrintConst(const FloatImm* op, std::ostream& os, CodeGenCUDA* p) { /
   switch (op->type.bits()) {
     case 64: case 32: {
       std::ostringstream temp;
-      temp << std::scientific << op->value;
-      if (op->type.bits() == 32) temp << 'f';
+      if (std::isinf(op->value)) {
+        if (op->value < 0) {
+          temp << "-";
+        }
+        temp << ((op->type.bits() == 32) ? "CUDART_INF_F" : "CUDART_INF");
+        p->need_math_constants_h_ = true;
+      } else if (std::isnan(op->value)) {
+        temp << ((op->type.bits() == 32) ? "CUDART_NAN_F" : "CUDART_NAN");
+        p->need_math_constants_h_ = true;
+      } else {
+        temp << std::scientific << op->value;
+        if (op->type.bits() == 32) temp << 'f';
+      }
       p->MarkConst(temp.str());
       os << temp.str();
       break;

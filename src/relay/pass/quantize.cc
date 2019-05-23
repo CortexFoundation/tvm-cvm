@@ -1,3 +1,22 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ * 
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ * 
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 /*!
  * Copyright (c) 2018 by Contributors
  *
@@ -277,6 +296,39 @@ RELAY_REGISTER_OP("nn.conv2d")
 .set_attr<FForwardRewrite>("FQRealizeRewrite", Conv2dRealize);
 
 
+Expr DenseRealize(const Call& ref_call,
+                  const Array<Expr>& new_args,
+                  const NodeRef& ctx) {
+  const QConfig& cfg = QConfig::Current();
+  CHECK_EQ(new_args.size(), 2);
+  if (!new_args[0]->derived_from<TempExprNode>() || !new_args[1]->derived_from<TempExprNode>()) {
+    return Expr(nullptr);
+  }
+  const auto* lhs = new_args[0].as<QRealizeIntExprNode>();
+  const auto* rhs = new_args[1].as<QRealizeIntExprNode>();
+
+  Expr ldata = lhs->data;
+  if (lhs->dtype != cfg->dtype_input) {
+    ldata = Cast(ldata, cfg->dtype_input);
+  }
+  Expr rdata = Cast(rhs->data, cfg->dtype_weight);
+
+  const auto ref_attrs = ref_call->attrs.as<DenseAttrs>();
+  auto attrs = make_node<DenseAttrs>();
+  *attrs = *ref_attrs;
+  DataType out_dtype = cfg->dtype_activation;
+  attrs->out_dtype = out_dtype;
+
+  Expr ret = CallNode::make(ref_call->op,
+          {ldata, rdata}, Attrs(attrs), ref_call->type_args);
+  Expr dom_scale = FoldConstant(Multiply(lhs->dom_scale, rhs->dom_scale));
+  return QRealizeIntExprNode::make(ret, dom_scale, out_dtype);
+}
+
+RELAY_REGISTER_OP("nn.dense")
+.set_attr<FForwardRewrite>("FQRealizeRewrite", DenseRealize);
+
+
 Expr MulRealize(const Call& ref_call,
                 const Array<Expr>& new_args,
                 const NodeRef& ctx) {
@@ -544,6 +596,7 @@ TVM_STATIC_IR_FUNCTOR(IRPrinter, vtable)
   p->stream << "nbit_activation=" << op->nbit_activation << ", ";
   p->stream << "global_scale=" << op->global_scale << ", ";
   p->stream << "skip_k_conv==" << op->skip_k_conv << ", ";
+  p->stream << "skip_conv_layers==" << op->skip_conv_layers << ", ";
   p->stream << "round_for_shift==" << op->round_for_shift << ", ";
   p->stream << "store_lowbit_output==" << op->store_lowbit_output << ", ";
   p->stream << "debug_enabled_ops==" << op->debug_enabled_ops << ", ";
@@ -552,20 +605,13 @@ TVM_STATIC_IR_FUNCTOR(IRPrinter, vtable)
 });
 
 TVM_REGISTER_API("relay._quantize._GetCurrentQConfig")
-.set_body([](TVMArgs args, TVMRetValue* ret) {
-  *ret = QConfig::Current();
-  });
+.set_body_typed(QConfig::Current);
 
 TVM_REGISTER_API("relay._quantize._EnterQConfigScope")
-.set_body([](TVMArgs args, TVMRetValue* ret) {
-  QConfig target = args[0];
-  QConfig::EnterQConfigScope(target);
-  });
+.set_body_typed(QConfig::EnterQConfigScope);
 
 TVM_REGISTER_API("relay._quantize._ExitQConfigScope")
-.set_body([](TVMArgs args, TVMRetValue* ret) {
-  QConfig::ExitQConfigScope();
-  });
+.set_body_typed(QConfig::ExitQConfigScope);
 
 }  // namespace quantize
 }  // namespace relay

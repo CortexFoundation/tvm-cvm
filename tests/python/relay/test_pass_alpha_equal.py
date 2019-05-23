@@ -1,3 +1,19 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 import tvm
 import numpy as np
 from tvm import relay
@@ -505,7 +521,7 @@ def test_match_alpha_equal():
                                                              relay.PatternVar(a)]),
                                    p.cons(z, a))
 
-    data = p.cons(p.z(), p.cons(p.z(), p.nil()))
+    data = p.cons(relay.const(1), p.cons(relay.const(2), p.nil()))
 
     match = relay.Match(data, [nil_case, cons_case])
     equivalent = relay.Match(data, [nil_case, equivalent_cons])
@@ -531,8 +547,8 @@ def test_match_alpha_equal():
         relay.Clause(relay.PatternWildcard(), p.nil())
     ])
     wrong_constructors = relay.Match(data, [
-        relay.Clause(relay.PatternConstructor(p.z), p.nil()),
-        relay.Clause(relay.PatternConstructor(p.s, [relay.PatternVar(x)]),
+        relay.Clause(relay.PatternConstructor(p.none), p.nil()),
+        relay.Clause(relay.PatternConstructor(p.some, [relay.PatternVar(x)]),
                      p.cons(x, p.nil()))
     ])
 

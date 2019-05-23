@@ -1,3 +1,19 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 """Test code for vision package"""
 from __future__ import print_function
 import math
@@ -50,7 +66,7 @@ def verify_get_valid_counts(dshape, score_threshold):
         tvm.testing.assert_allclose(tvm_out1.asnumpy(), np_out1, rtol=1e-3)
         tvm.testing.assert_allclose(tvm_out2.asnumpy(), np_out2, rtol=1e-3)
 
-    for device in ['llvm']:
+    for device in ['llvm', 'cuda', 'opencl']:
         check_device(device)
 
 
@@ -108,7 +124,7 @@ def test_non_max_suppression():
         f(tvm_data, tvm_valid_count, tvm_indices_out)
         tvm.testing.assert_allclose(tvm_indices_out.asnumpy(), np_indices_result, rtol=1e-4)
 
-    for device in ['llvm']:
+    for device in ['llvm', 'cuda', 'opencl']:
         check_device(device)
 
 
@@ -215,7 +231,7 @@ def test_multibox_detection():
         f(tvm_cls_prob, tvm_loc_preds, tvm_anchors, tvm_out)
         tvm.testing.assert_allclose(tvm_out.asnumpy(), expected_np_out, rtol=1e-4)
 
-    for device in ['llvm', 'opencl']:
+    for device in ['llvm', 'opencl', 'cuda']:
         check_device(device)
 
 
@@ -259,7 +275,7 @@ def verify_roi_align(batch, in_channel, in_size, num_roi, pooled_size, spatial_s
         f(tvm_a, tvm_rois, tvm_b)
         tvm.testing.assert_allclose(tvm_b.asnumpy(), b_np, rtol=1e-3)
 
-    for device in ['llvm', 'cuda']:
+    for device in ['llvm', 'cuda', 'opencl']:
         check_device(device)
 
 

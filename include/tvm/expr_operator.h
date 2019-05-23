@@ -1,5 +1,23 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 /*!
- *  Copyright (c) 2018 by Contributors
  * \file tvm/expr_operator.h
  * \brief Common operators defined for Expr.
  *
@@ -15,6 +33,7 @@
 #include "ir.h"
 
 namespace tvm {
+
 /*!
  * \brief Make a const value with certain data type.
  * \param t The target type.
@@ -410,6 +429,13 @@ TVM_DLL Expr abs(Expr x);
 TVM_DLL Expr sum(Expr source, Array<IterVar> axis);
 
 /*!
+ * \brief logical And of of source expression over axis
+ * \param source The source expression.
+ * \param axis List of iteration variables that will be used for reduction.
+ */
+TVM_DLL Expr all(Expr source, Array<IterVar> axis);
+
+/*!
  * \brief max of of source expression over axis
  * \param source The source expression.
  * \param axis List of iteration variables that will be used for reduction.
@@ -470,6 +496,7 @@ TVM_DECLARE_INTRIN_UNARY(exp);
 TVM_DECLARE_INTRIN_UNARY(tanh);
 TVM_DECLARE_INTRIN_UNARY(sigmoid);
 TVM_DECLARE_INTRIN_UNARY(sqrt);
+TVM_DECLARE_INTRIN_UNARY(rsqrt);
 TVM_DECLARE_INTRIN_UNARY(log);
 TVM_DECLARE_INTRIN_UNARY(popcount);
 
@@ -534,6 +561,12 @@ inline Expr MakeConstScalar(Type t, ValueType value) {
   if (t.is_int()) return ir::IntImm::make(t, static_cast<int64_t>(value));
   if (t.is_uint()) return ir::UIntImm::make(t, static_cast<uint64_t>(value));
   if (t.is_float()) return ir::FloatImm::make(t, static_cast<double>(value));
+  // For now, we store const scalar values of custom datatypes within doubles; later, during the
+  // datatypes lowering pass, we will lower the value to its true representation in the format
+  // specified by the datatype.
+  // TODO(gus) when do we need to start worrying about doubles not being precise enough?
+  if (static_cast<uint8_t>(t.code()) >= static_cast<uint8_t>(kCustomBegin))
+    return ir::FloatImm::make(t, static_cast<double>(value));
   LOG(FATAL) << "cannot make const for type " << t;
   return Expr();
 }

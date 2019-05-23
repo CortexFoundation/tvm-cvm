@@ -1,3 +1,22 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ * 
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ * 
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 /*!
  *  Copyright (c) 2017 by Contributors
  * \file topi/reduction.h
@@ -347,6 +366,27 @@ inline Tensor collapse_sum(const Tensor& data, Array<Expr> target_shape) {
   std::reverse(reduce_axes.begin(), reduce_axes.end());
   std::reverse(squeeze_axes.begin(), squeeze_axes.end());
   return DoCommReduce(data, tvm::sum, target_shape, reduce_axes, squeeze_axes);
+}
+
+/*!
+* \brief Creates an operation that computes the logical AND of elements
+* over a given axis
+*
+* \param data The input boolean tensor
+* \param axis The axes to reduce. If axis is empty, the operation will
+* perform logical AND over all elements of the array.
+* \param keepdims If this is set to true, the axes which are reduced are
+* left in the result as dimensions with size one. This enables the result
+* to broadcast correctly against the input array.
+* \param atleast1d Whether the output need to be atleast1d.
+*
+* \return A Tensor whose op member is the all operation
+*/
+inline Tensor all(const Tensor& data,
+                  const Array<Integer>& axis,
+                  bool keepdims = false,
+                  bool atleast1d = false) {
+  return CommReduce(data, axis, tvm::all, keepdims, atleast1d);
 }
 
 /*!

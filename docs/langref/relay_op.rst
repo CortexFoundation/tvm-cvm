@@ -1,3 +1,20 @@
+..  Licensed to the Apache Software Foundation (ASF) under one
+    or more contributor license agreements.  See the NOTICE file
+    distributed with this work for additional information
+    regarding copyright ownership.  The ASF licenses this file
+    to you under the Apache License, Version 2.0 (the
+    "License"); you may not use this file except in compliance
+    with the License.  You may obtain a copy of the License at
+
+..    http://www.apache.org/licenses/LICENSE-2.0
+
+..  Unless required by applicable law or agreed to in writing,
+    software distributed under the License is distributed on an
+    "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+    KIND, either express or implied.  See the License for the
+    specific language governing permissions and limitations
+    under the License.
+
 Relay Core Tensor Operators
 ===========================
 
@@ -24,6 +41,7 @@ This level enables fully connected multi-layer perceptron.
 
    tvm.relay.log
    tvm.relay.sqrt
+   tvm.relay.rsqrt
    tvm.relay.exp
    tvm.relay.sigmoid
    tvm.relay.add
@@ -92,6 +110,7 @@ This level enables additional math and transform operators.
    tvm.relay.zeros_like
    tvm.relay.ones
    tvm.relay.ones_like
+   tvm.relay.gather_nd
    tvm.relay.full
    tvm.relay.full_like
    tvm.relay.cast
@@ -116,6 +135,7 @@ This level enables additional math and transform operators.
    tvm.relay.greater_equal
    tvm.relay.less
    tvm.relay.less_equal
+   tvm.relay.all
    tvm.relay.logical_and
    tvm.relay.logical_or
    tvm.relay.logical_not
@@ -146,6 +166,14 @@ This level enables additional math and transform operators.
    tvm.relay.vision.yolo_reorg
 
 
+**Level 6: Algorithm Operators**
+
+.. autosummary::
+   :nosignatures:
+
+   tvm.relay.argsort
+
+
 **Level 10: Temporary Operators**
 
 This level support backpropagation of broadcast operators. It is temporary.
@@ -162,12 +190,15 @@ This level support backpropagation of broadcast operators. It is temporary.
    tvm.relay.annotation.on_device
    tvm.relay.reverse_reshape
    tvm.relay.nn.batch_matmul
+   tvm.relay.contrib.adaptive_max_pool2d
+   tvm.relay.contrib.adaptive_avg_pool2d
 
 
 Level 1 Definitions
 -------------------
 .. autofunction:: tvm.relay.log
 .. autofunction:: tvm.relay.sqrt
+.. autofunction:: tvm.relay.rsqrt
 .. autofunction:: tvm.relay.exp
 .. autofunction:: tvm.relay.sigmoid
 .. autofunction:: tvm.relay.add
@@ -225,6 +256,7 @@ Level 3 Definitions
 .. autofunction:: tvm.relay.zeros_like
 .. autofunction:: tvm.relay.ones
 .. autofunction:: tvm.relay.ones_like
+.. autofunction:: tvm.relay.gather_nd
 .. autofunction:: tvm.relay.full
 .. autofunction:: tvm.relay.full_like
 .. autofunction:: tvm.relay.cast
@@ -246,6 +278,7 @@ Level 4 Definitions
 .. autofunction:: tvm.relay.greater_equal
 .. autofunction:: tvm.relay.less
 .. autofunction:: tvm.relay.less_equal
+.. autofunction:: tvm.relay.all
 .. autofunction:: tvm.relay.logical_and
 .. autofunction:: tvm.relay.logical_or
 .. autofunction:: tvm.relay.logical_not
@@ -273,6 +306,11 @@ Level 5 Definitions
 .. autofunction:: tvm.relay.vision.yolo_reorg
 
 
+Level 6 Definitions
+-------------------
+.. autofunction:: tvm.relay.argsort
+
+
 Level 10 Definitions
 --------------------
 .. autofunction:: tvm.relay.broadcast_to_like
@@ -284,3 +322,5 @@ Level 10 Definitions
 .. autofunction:: tvm.relay.annotation.on_device
 .. autofunction:: tvm.relay.reverse_reshape
 .. autofunction:: tvm.relay.nn.batch_matmul
+.. autofunction:: tvm.relay.contrib.adaptive_max_pool2d
+.. autofunction:: tvm.relay.contrib.adaptive_avg_pool2d

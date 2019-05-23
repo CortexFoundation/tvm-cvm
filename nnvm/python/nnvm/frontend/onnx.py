@@ -1,3 +1,19 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 # pylint: disable=import-self, invalid-name, unused-argument, too-many-lines
 """ONNX: Open Neural Network Exchange frontend."""
 from __future__ import absolute_import as _abs
@@ -9,6 +25,13 @@ from .onnx_caffe2_utils import dimension_picker, dimension_constraint, \
     infer_channels, revert_caffe2_pad
 
 __all__ = ['from_onnx']
+
+
+def onnx_storage_order2layout(storage_order):
+    if storage_order not in (0, 1):
+        raise tvm.error.OpAttributeInvalid('Mode of storage_order must be either 0 or 1')
+
+    return 'NCHW' if sotrage_order == 0 else 'NHWC'
 
 
 class OnnxOpConverter(object):
@@ -191,8 +214,38 @@ class Gemm(OnnxOpConverter):
 
 
 class MaxPool(Pool):
+    """ Operator converter for MaxPool
+    """
     name = 'max_pool'
 
+    @classmethod
+    def _impl_v8(cls, inputs, attr, params):
+        return AttrCvt(
+            op_name=dimension_picker(cls.name),
+            transforms={
+                'kernel_shape': 'pool_size',
+                'pads': ('padding', (0, 0), revert_caffe2_pad),
+                'storage_order': ('layout', 'NCHW', onnx_storage_order2layout),
+            },
+            # very weird attributes here in onnx, force check
+            ignores=['dilations', 'auto_pad'],
+            # TODO(higumachan): make sure ceil_mode in onnx, and layout?
+            extras={'ceil_mode': False},
+            custom_check=dimension_constraint())(inputs, attr, params)
+
+    @classmethod
+    def _impl_v10(cls, inputs, attr, params):
+        return AttrCvt(
+            op_name=dimension_picker(cls.name),
+            transforms={
+                'kernel_shape': 'pool_size',
+                'pads': ('padding', (0, 0), revert_caffe2_pad),
+                'storage_order': ('layout', 'NCHW', onnx_storage_order2layout),
+                'ceil_mode': 'ceil_mode'
+            },
+            # very weird attributes here in onnx, force check
+            ignores=['dilations', 'auto_pad'],
+            custom_check=dimension_constraint())(inputs, attr, params)
 
 class Mul(Elemwise):
     name = 'mul'
@@ -388,8 +441,14 @@ class Upsample(OnnxOpConverter):
     """
 
     @classmethod
-    def _impl_v7(cls, inputs, attr, params):
+    def _impl_v9(cls, inputs, attr, params):
         scales = attr.get('scales')
+        if not scales:
+            #Here we are going to higher OPSET version.
+            assert len(inputs) == 2, "Upsample op take 2 inputs, {} given".format(len(inputs))
+            input_name = inputs[1].list_input_names()[0]
+            scales = params[input_name].asnumpy()
+            inputs = inputs[:1]
         assert len(scales) == 4 and scales[0] == 1.0 and scales[1] == 1.0 and scales[2] == scales[3]
         mode = attr.get('mode')
         if mode == b'nearest':
@@ -397,7 +456,8 @@ class Upsample(OnnxOpConverter):
         elif mode == b'linear':
             method = "BILINEAR"
         else:
-            raise ValueError("Invalid ONNX upsample mode: {}".format(mode))
+            raise tvm.error.OpAttributeInvalid(
+                'Value {} in attribute "mode" of operator Upsample is not valid.'.format(mode))
         return _sym.upsampling(inputs[0], scale=int(scales[-1]), method=method, layout='NCHW')
 
 
@@ -807,6 +867,19 @@ class GraphProto(object):
             else:
                 self._num_input += 1
                 self._nodes[i_name] = _sym.Variable(name=i_name)
+        # get list of unsupported ops
+        convert_map = _get_convert_map(opset)
+        unsupported_ops = set()
+        for node in graph.node:
+            op_name = node.op_type
+            if op_name not in convert_map and \
+               op_name != 'Constant' and \
+               op_name not in _identity_list:
+                unsupported_ops.add(op_name)
+        if unsupported_ops:
+            msg = 'The following operators are not supported for frontend ONNX: '
+            msg += ', '.join(unsupported_ops)
+            raise tvm.error.OpNotImplemented(msg)
         # construct nodes, nodes are stored as directed acyclic graph
         for node in graph.node:
             op_name = node.op_type
@@ -922,8 +995,8 @@ class GraphProto(object):
         elif op_name in convert_map:
             sym = convert_map[op_name](inputs, attrs, self._params)
         else:
-            raise NotImplementedError(
-                "Operator {} not implemented.".format(op_name))
+            raise tvm.error.OpNotImplemented(
+                'Operator {} is not supported in frontend ONNX.')
         return sym
 
     def _fix_outputs(self, op_name, outputs):

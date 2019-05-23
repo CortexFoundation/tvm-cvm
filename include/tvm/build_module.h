@@ -1,8 +1,26 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 /*!
-*  Copyright (c) 2017 by Contributors
-* \file tvm/build_module.h
-* \brief Functions for compiling ops.
-*/
+ * \file tvm/build_module.h
+ * \brief Functions for compiling ops.
+ */
 #ifndef TVM_BUILD_MODULE_H_
 #define TVM_BUILD_MODULE_H_
 
@@ -228,6 +246,9 @@ class BuildConfigNode : public Node {
   /*! \brief Whether to disable select rewriting. */
   bool disable_select_rewriting = false;
 
+  /*! \brief Whether to disable loop vectorization. */
+  bool disable_vectorize = false;
+
   void VisitAttrs(AttrVisitor* v) final {
     v->Visit("data_alignment", &data_alignment);
     v->Visit("offset_factor", &offset_factor);
@@ -242,6 +263,7 @@ class BuildConfigNode : public Node {
     v->Visit("dump_pass_ir", &dump_pass_ir);
     v->Visit("instrument_bound_checkers", &instrument_bound_checkers);
     v->Visit("disable_select_rewriting", &disable_select_rewriting);
+    v->Visit("disable_vectorize", &disable_vectorize);
   }
 
   static constexpr const char* _type_key = "BuildConfig";
@@ -326,6 +348,19 @@ TVM_DLL Array<LoweredFunc> lower(Schedule sch,
                                  const std::string& name,
                                  const std::unordered_map<Tensor, Buffer>& binds,
                                  const BuildConfig& config);
+/*!
+* \brief Split host/device function and running necessary pass before build
+* \param funcs The functions to be built.
+* \param target The target device to build for.
+* \param target_host The target for building host code. To use the default, pass Target()
+* \param config The build configuration.
+* \return The Array<Array<LoweredFunc>> with 2 elements. First is host function Array,
+          second is device function array
+*/
+TVM_DLL Array<Array<LoweredFunc> > split_dev_host_funcs(const Array<LoweredFunc>& funcs,
+                                                        const Target& target,
+                                                        const Target& target_host,
+                                                        const BuildConfig& config);
 
 /*!
 * \brief Build a device and host module for a specific target from an array of lowered functions.
@@ -337,6 +372,35 @@ TVM_DLL Array<LoweredFunc> lower(Schedule sch,
 */
 TVM_DLL runtime::Module build(const Array<LoweredFunc>& funcs,
                               const Target& target,
+                              const Target& target_host,
+                              const BuildConfig& config);
+
+/*!
+ * \brief Build a device and host module for a specific target from a map
+ * contains target to a list of lowered functions pairs. This function is used
+ * for heterogeneous build.
+ * \param input The map contains target to a list of lowered functions pairs.
+ * \param target_host The target for building host code. To use the default,
+ *        pass Target().
+ * \param config The build configuration.
+ * \return The built module that contains code for different processors.
+ */
+TVM_DLL runtime::Module build(const Map<Target, Array<LoweredFunc>>& input,
+                              const Target& target_host,
+                              const BuildConfig& config);
+
+/*!
+ * \brief Build a device and host module for a specific target from a map
+ * contains target to a list of lowered functions pairs. This function is used
+ * for heterogeneous build.
+ * \param input The map contains target string to a list of lowered functions
+ *        pairs.
+ * \param target_host The target for building host code. To use the default,
+ *        pass Target().
+ * \param config The build configuration.
+ * \return The built module that contains code for different processors.
+ */
+TVM_DLL runtime::Module build(const Map<std::string, Array<LoweredFunc>>& input,
                               const Target& target_host,
                               const BuildConfig& config);
 
@@ -431,7 +495,7 @@ inline runtime::TVMRetValue GenericFunc::operator()(Args&& ...args) const {
   const int kArraySize = kNumArgs > 0 ? kNumArgs : 1;
   TVMValue values[kArraySize];
   int type_codes[kArraySize];
-  runtime::detail::for_each(TVMArgsSetter(values, type_codes),
+  runtime::detail::for_each(runtime::TVMArgsSetter(values, type_codes),
     std::forward<Args>(args)...);
   runtime::TVMRetValue rv;
   CallPacked(TVMArgs(values, type_codes, kNumArgs), &rv);

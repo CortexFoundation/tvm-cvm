@@ -1,3 +1,19 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 """
 Deploy Single Shot Multibox Detector(SSD) model
 ===============================================
@@ -18,7 +34,7 @@ import numpy as np
 from nnvm import compiler
 from nnvm.frontend import from_mxnet
 from tvm import relay
-from tvm.contrib.download import download
+from tvm.contrib.download import download_testdata
 from tvm.contrib import graph_runtime
 from mxnet.model import load_checkpoint
 
@@ -65,28 +81,24 @@ inference_symbol_folder = \
 inference_symbol_url = "https://gist.github.com/kevinthesun/c1904e900848df4548ce5dfb18c719c7/" \
                        "archive/a28c4856c827fe766aa3da0e35bad41d44f0fb26.zip"
 
-dir = "ssd_model"
-if not os.path.exists(dir):
-    os.makedirs(dir)
-model_file_path = "%s/%s" % (dir, model_file)
-test_image_path = "%s/%s" % (dir, test_image)
-inference_symbol_path = "%s/inference_model.zip" % dir
-download(model_url, model_file_path)
-download(image_url, test_image_path)
-download(inference_symbol_url, inference_symbol_path)
+model_file_path = download_testdata(model_url, model_file, module=["mxnet", "ssd_model"])
+inference_symbol_path = download_testdata(inference_symbol_url, "inference_model.zip",
+                                          module=["mxnet", "ssd_model"])
+test_image_path = download_testdata(image_url, test_image, module="data")
+model_dir = os.path.dirname(model_file_path)
 
 zip_ref = zipfile.ZipFile(model_file_path, 'r')
-zip_ref.extractall(dir)
+zip_ref.extractall(model_dir)
 zip_ref.close()
 zip_ref = zipfile.ZipFile(inference_symbol_path)
-zip_ref.extractall(dir)
+zip_ref.extractall(model_dir)
 zip_ref.close()
 
 ######################################################################
 # Convert and compile model with NNVM or Relay for CPU.
 
-sym = mx.sym.load("%s/%s/ssd_resnet50_inference.json" % (dir, inference_symbol_folder))
-_, arg_params, aux_params = load_checkpoint("%s/%s" % (dir, model_name), 0)
+sym = mx.sym.load("%s/%s/ssd_resnet50_inference.json" % (model_dir, inference_symbol_folder))
+_, arg_params, aux_params = load_checkpoint("%s/%s" % (model_dir, model_name), 0)
 
 import argparse
 parser = argparse.ArgumentParser()
