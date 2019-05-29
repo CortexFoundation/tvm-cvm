@@ -60,14 +60,13 @@ def test_sym_nnvm(batch_size=10, iter_num=10):
         return data.data[0], data.label[0]
     data_iter_func()
 
-    dump_symbol, dump_params = get_dump_fname("sym.nnvm.compile")
-    _, dump_lib = get_dump_fname("nnvm.so")
-
-    load_symbol_fname, load_params_fname = get_dump_fname("sym.sim.quant")
-    sym, params = mx.sym.load(load_symbol_fname), nd.load(load_params_fname)
+    version = "18_v2"
+    dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
+    (inputs_ext,) = sim.load_ext(dump_ext)
+    sym, params = mx.sym.load(dump_sym), nd.load(dump_params)
     graph = nn.SymbolBlock(sym, inputs)
     load_parameters(graph, params, ctx=mx_ctx)
-    sim.load_ins_ext(params, inputs_ext)
+    # sim.load_ins_ext(params, inputs_ext)
     def graph_func(data):
         data = sim.load_real_data(data, 'data', inputs_ext)
         np.save("/tmp/resnet18/data.npy", data.asnumpy().astype('int8'))
@@ -87,11 +86,15 @@ def test_sym_nnvm(batch_size=10, iter_num=10):
     for key, value in list(real_params.items()):
         real_params[key] = tvm.nd.array(value.asnumpy().astype(use_dtype), tvm_ctx)
 
-    with nnvm.compiler.build_config(opt_level=0):
+    with nnvm.compiler.build_config(opt_level=0, runtime="cvm"):
         deploy_graph, lib, real_params = nnvm.compiler.build(
             nnvm_sym, target=target, shape=inputs_shape,
-            params=real_params, dtype=use_dtype, runtime="cvm")
-    with open(dump_symbol, "w") as fout:
+            params=real_params, dtype=use_dtype)
+
+    real_params = spass.tvm_params_reduce(nnvm_sym, real_params, inputs_ext, tvm_ctx)
+
+    dump_sym, dump_params = load_fname(version, "nnvm.compile", False)
+    with open(dump_sym, "w") as fout:
         fout.write(deploy_graph.json())
     with open(dump_params, "wb") as fout:
         param_bytes = nnvm.compiler.save_param_dict(real_params)
@@ -130,7 +133,7 @@ def test_sym_pass(batch_size=10, iter_num=10):
         data, _ = data_iter_func()
     data_iter.reset()
 
-    version = "18_v1"
+    version = "18_v2"
     net1 = utils.load_model(*load_fname(version), inputs, ctx=ctx)
     acc_top1 = mx.metric.Accuracy()
     acc_top5 = mx.metric.TopKAccuracy(5)
@@ -149,14 +152,16 @@ def test_sym_pass(batch_size=10, iter_num=10):
     sym_fname, param_fname = load_fname(version)
     sym, params = mx.sym.load(sym_fname), nd.load(param_fname)
     sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
-    inputs_ext['data']['data'] = data
-    in_bit, out_bit = 8, 8
-    qsym, qparams, _ = anno.mixed_precision(sym, params, inputs_ext,
-            in_bit=in_bit, out_bit=out_bit, ctx=[calib_ctx])
-    # qsym, qparams, precs, _ = calib.sym_simulate(sym, params, inputs_ext, data, calib_ctx)
-    # dump_sym, dump_params = load_fname(version, "sym.simulate")
-    # open(dump_sym, "w").write(qsym.tojson())
-    # qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, precs, "tvm")
+    if False:
+        inputs_ext['data']['data'] = data
+        in_bit, out_bit = 8, 8
+        qsym, qparams, _ = anno.mixed_precision(sym, params, inputs_ext,
+                in_bit=in_bit, out_bit=out_bit, ctx=[calib_ctx])
+    else:
+        qsym, qparams, precs, _ = calib.sym_simulate(sym, params, inputs_ext, data, calib_ctx)
+        #dump_sym, dump_params = load_fname(version, "sym.simulate")
+        #open(dump_sym, "w").write(qsym.tojson())
+        qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, precs, "cvm")
     dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
     sim.save_ext(dump_ext, inputs_ext)
     nd.save(dump_params, qparams)
@@ -258,11 +263,14 @@ if __name__ == "__main__":
     # zoo.save_model('resnet50_v1d_0.86')
     # zoo.save_model('resnet18_v1b_0.89')
 
+    # zoo.save_model('resnet18_v2')
+    # exit(-1)
+
     # save_data()
 
     # test_nnvm_load(batch_size=16, iter_num=10)
-    test_sym_pass(batch_size=16, iter_num=10)
-    # test_sym_nnvm(batch_size=1, iter_num=1)
+    test_sym_pass(batch_size=32, iter_num=5)
+    test_sym_nnvm(batch_size=1, iter_num=0)
     # test_performance(16, 10)
 
 

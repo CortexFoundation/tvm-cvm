@@ -17,7 +17,7 @@ def load_fname(prefix, suffix=None):
     names.extend(utils.extend_fname(dump_prefix, False))
     return names, inputs_ext
 
-names, inputs_ext = load_fname("./data/cifar_resnet20_v2", "sym.quantize")
+names, inputs_ext = load_fname("./data/quick_raw_qd_animal10_2_cifar_resnet20_v2", "sym.quantize")
 print (names, inputs_ext)
 spass.to_nnvm(*names, inputs_ext)
 
