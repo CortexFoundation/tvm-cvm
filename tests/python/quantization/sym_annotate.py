@@ -448,7 +448,7 @@ def _simulate_parameters(sym, params, graph, inputs_ext, scales):
         params[name] = params[name] * scales[name]
     return sym, params
 
-def _realize_tvm(sym, sb, params, graph, target_bit):
+def _realize_tvm(sym, sb, prec, params, graph):
     """Requantize Op:
         out = round(sym >> sb)  if sb >  0
         out = round(sym)        if sb == 0
@@ -459,7 +459,6 @@ def _realize_tvm(sym, sb, params, graph, target_bit):
         out = clip_int(out)
     """
     out = mx.sym.round(sym) # avoid precision loss represented in float32
-    sb, tb = sb.asscalar(), target_bit.asscalar()
     if sb < 0:
         out = out * (2 ** -sb)
         out = mx.sym.round(sym)
@@ -470,7 +469,7 @@ def _realize_tvm(sym, sb, params, graph, target_bit):
         out = out + 1
         out = out / 2
         out = mx.sym.floor(out)
-    clip_range = 2 ** (tb - 1) - 1
+    clip_range = 2 ** (prec - 1) - 1
     out = mx.sym.clip(out, a_min=-clip_range, a_max=clip_range)
     return out
 def _realize_cvm(sym, sb, prec, params, graph):
@@ -586,8 +585,11 @@ def _realize_parameters(sym, params, graph, inputs_ext, precs):
     logger = logging.getLogger('log.realize.parameters')
     name, op_name = sym.attr('name'), sym.attr('op_name')
     attr = sym.list_attr()
-    if op_name != 'null' or name in inputs_ext:
+    if op_name != 'null':
         return sym, params
+    if name in inputs_ext:
+        attr['precision'] = str(precs[name][out_key])
+        return mx.sym.var(name, attr=attr), params
     prec = precs[name][out_key]
     data = params[name]
     params[name] = sim.int_realize(data, prec, logger=logger)

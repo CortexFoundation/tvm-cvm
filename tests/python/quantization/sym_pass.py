@@ -7,6 +7,7 @@ from mxnet.gluon import nn, SymbolBlock
 from mxnet import ndarray as nd
 import nnvm as nnvm
 import tvm
+from tvm import relay
 
 from sym_utils import *
 from utils import *
@@ -156,8 +157,7 @@ def yxnet_realize(symbol, params, inputs_ext):
             ret_params[key] = tvm.nd.array(value.astype('int32').asnumpy())
     return ret_sym, ret_params
 
-def from_mxnet_prepare(symbol, params, inputs_ext):
-    print (inputs_ext)
+def prepare_for_cvm(symbol, params, inputs_ext):
     infer_shapes = sym_infer_shape(symbol, params, inputs_ext)
     def _mx_prepare(sym, params, graph, inputs_ext):
         name, op_name = sym.attr('name'), sym.attr('op_name')
@@ -174,7 +174,14 @@ def from_mxnet_prepare(symbol, params, inputs_ext):
             begin = [0 for s in cshape]
             end = [s for s in cshape]
             begin[axis], end[axis] = axis_begin, axis_end
-            print (axis, begin, end, axis_begin, axis_end)
+            node = get_mxnet_op('slice')(X, begin=begin, end=end, name=name)
+        elif op_name in ['slice']:
+            X = childs[0]
+            cshape = infer_shapes[X.attr('name')]
+            begin = get_attr(attr, 'begin')
+            end = get_attr(attr, 'end')
+            begin = [0 if s is None else s for s in begin]
+            end = [cshape[i] if s is None else s for i,s in enumerate(end)]
             node = get_mxnet_op('slice')(X, begin=begin, end=end, name=name)
         return node, params
     psym, pparams = topo_visit(symbol, params, inputs_ext,
@@ -185,7 +192,6 @@ def from_mxnet_prepare(symbol, params, inputs_ext):
 def to_nnvm(sym_file, param_file, dump_sym, dump_params, inputs_ext,
         runtime="cvm", target="cuda"):
     tvm_ctx = tvm.context(target, 1)
-    inputs = [mx.sym.var(name) for name in inputs_ext]
     inputs_shape = {k:v['shape'] for k,v in inputs_ext.items()}
 
     sym, params = mx.sym.load(sym_file), nd.load(param_file)
@@ -201,6 +207,27 @@ def to_nnvm(sym_file, param_file, dump_sym, dump_params, inputs_ext,
             params=real_params, dtype=use_dtype)
     real_params = tvm_params_reduce(nnvm_sym, real_params, inputs_ext, tvm_ctx)
     open(dump_sym, "w").write(deploy_graph.json())
+    param_bytes = nnvm.compiler.save_param_dict(real_params)
+    open(dump_params, "wb").write(param_bytes)
+    return deploy_graph, real_params
+
+def mxnet_to_cvm(sym, params, inputs_ext, dump_sym, dump_params,
+        batch_size=1, logger=logging):
+    for k,v in inputs_ext.items():
+        v['shape'] = (batch_size, *v['shape'][1:])
+    inputs_shape = {k:v['shape'] for k,v in inputs_ext.items()}
+    sym, params = prepare_for_cvm(sym, params, inputs_ext)
+    relay_sym, relay_params = relay.frontend.from_mxnet(sym, inputs_shape,
+            arg_params=params)
+    real_params = tvm_params_reduce(sym, relay_params, inputs_ext, tvm.context("cpu"))
+
+    logger.debug("Compiling into CVM Executor Graph")
+    with relay.build_config(opt_level=0):
+        graph_json, lib, graph_params = relay.build(relay_sym, "cvm")
+    assert len(graph_params.keys()) == 0, graph_params.keys()
+
+    logger.debug("Dump json & params to file")
+    open(dump_sym, "w").write(graph_json)
     param_bytes = nnvm.compiler.save_param_dict(real_params)
     open(dump_params, "wb").write(param_bytes)
 
@@ -283,8 +310,7 @@ def tvm_params_reduce(symbol, params, inputs_ext, ctx):
     for sym in topo_sort(symbol):
         name, attr = sym.attr('name'), sym.list_attr()
         if sym.attr('op_name') == 'null' and name not in inputs_ext:
-            print (name, attr)
-            precision = eval(attr['precision'])
+            precision = get_attr(attr, "precision")
             val = params[name]
             if precision > 8:
                 params[name] = tvm.nd.array(val.asnumpy().astype('int32'), ctx)
@@ -303,26 +329,26 @@ def _matrix_decomposition(sym, params, graph, inputs_ext, infer_shapes):
     node = sym
     if op_name == 'Convolution':
         # TODO: do matrix decomposition for conv op
-        childs_name = [c.attr('name') for c in childs]
-        childs_shape = [infer_shapes[n] for n in childs_name]
+        # childs_name = [c.attr('name') for c in childs]
+        # childs_shape = [infer_shapes[n] for n in childs_name]
 
-        for idx, cshape in enumerate(childs_shape):
-            cname = childs_name[idx]
-            if cname in params and cshape != params[cname].shape:
-                logger.critical(
-                    "parameter(%s): infer shape(%s) in graph isn't consistent \
-                    with params dict(%s)",
-                    cshape, params[cname].shape)
+        # for idx, cshape in enumerate(childs_shape):
+        #     cname = childs_name[idx]
+        #     if cname in params and cshape != params[cname].shape:
+        #         logger.critical(
+        #             "parameter(%s): infer shape(%s) in graph isn't consistent \
+        #             with params dict(%s)",
+        #             cshape, params[cname].shape)
 
-        assert 'layout' not in attr or attr['layout'] == 'NCHW'
-        # conv input is NCHW format
-        data_shape = childs_shape[0] # (batch, channel, height, weight)
-        weight_shape = childs_shape[1] # (filter, channel, kernel, kernel)
+        # assert 'layout' not in attr or attr['layout'] == 'NCHW'
+        # data_shape = childs_shape[0] # (batch, channel, height, weight)
+        # weight_shape = childs_shape[1] # (filter, channel, kernel, kernel)
 
-        channel = data_shape[1] # channel
-        kernel = [weight_shape[2], weight_shape[3]] # kernel size
-        matrix_len = channel * kernel[0] * kernel[1]
+        # channel = data_shape[1] # channel
+        # kernel = [weight_shape[2], weight_shape[3]] # kernel size
+        # matrix_len = channel * kernel[0] * kernel[1]
         # print (data_shape, weight_shape, matrix_len)
+        pass
 
     elif op_name == 'FullyConnected':
         childs_name = [c.attr('name') for c in childs]
@@ -378,6 +404,7 @@ def _matrix_decomposition(sym, params, graph, inputs_ext, infer_shapes):
 
 def sym_infer_shape(symbol, params, inputs_ext):
     logger = logging.getLogger('log.symbol.infer_shape')
+    check_ext_deps(inputs_ext, 'shape')
 
     def _infer_shape(sym, params, graph, inputs_ext, infer_shapes):
         logger = logging.getLogger('log.symbol.infer_shape')
@@ -501,8 +528,8 @@ def _sym_rewrite(sym, params, graph, inputs_ext, infer_shapes):
             assert pool_type == 'max', "Unsupported Pooling \
                     %s(%s, pool_type=%s)"%(op_name, name, pool_type)
     elif op_name == 'LeakyReLU':
-        act = attr['act_type']
-        slope = eval(attr['slope'])
+        act = get_attr(attr, 'act_type', 'leaky')
+        slope = get_attr(attr, 'slope', 0.25)
         assert act == 'leaky', "Unsupported LeakyReLU %s for act_type: %s" \
                 % (name, act)
         X = childs[0]
@@ -586,7 +613,7 @@ def _sym_rewrite(sym, params, graph, inputs_ext, infer_shapes):
         node = childs[0]
     elif op_name == '_mul_scalar':
         X = childs[0]
-        scalar = eval(attr['scalar'])
+        scalar = get_attr(attr, 'scalar')
         if scalar == 0:
             params[name] = nd.zeros(infer_shapes[name])
             node = mx.sym.var(name, shape=infer_shapes[name])
@@ -597,7 +624,7 @@ def _sym_rewrite(sym, params, graph, inputs_ext, infer_shapes):
             node = mx.sym.broadcast_mul(X, scale, name=name)
     elif op_name == '_div_scalar':
         X = childs[0]
-        scalar = eval(attr['scalar'])
+        scalar = get_attr(attr, 'scalar')
         sname = name + '_scalar'
         params[sname] = nd.array([1 / scalar])
         graph[sname] = scale = mx.sym.var(sname, shape=(1,))
@@ -605,7 +632,7 @@ def _sym_rewrite(sym, params, graph, inputs_ext, infer_shapes):
     elif op_name == 'slice_like':
         A, B = childs[0], childs[1]
         A_name, B_name = A.attr('name'), B.attr('name')
-        axes = eval(attr['axes'])
+        axes = get_attr(attr, 'axes')
         A_shape, B_shape = infer_shapes[A_name], infer_shapes[B_name]
         oshape = [None] * len(A_shape)
         begin, end = [None] * len(A_shape), [None] * len(A_shape)
@@ -830,7 +857,7 @@ def sym_calculate_ops(symbol, params, inputs_ext):
         if op_name in ['Convolution', 'FullyConnected']:
             W_shape = cshapes[1]
             base_ops = np.product(W_shape[1:]) * 2
-            if eval(attr['no_bias']) == False:
+            if not get_attr(attr, 'no_bias', False):
                 base_ops += 1
         elif op_name in ['BatchNorm']:
             base_ops = 4
@@ -839,7 +866,7 @@ def sym_calculate_ops(symbol, params, inputs_ext):
                 assert False
         elif op_name in ['Pooling']:
             pool_type = attr['pool_type']
-            is_global = eval(attr["global_pool"])
+            is_global = get_attr(attr, 'global_pool', False)
             if is_global:
                 _, _, K1, K2 = cshapes[0]
             else:

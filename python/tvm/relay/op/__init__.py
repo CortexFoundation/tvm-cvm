@@ -23,6 +23,7 @@ from .op import get, register, register_schedule, register_compute, register_gra
 # Operators
 from .reduce import *
 from .tensor import *
+from .cvm import *
 from .transform import *
 from .algorithm import *
 from . import nn
@@ -35,6 +36,7 @@ from . import op_attrs
 
 # operator registry
 from . import _tensor
+from . import _cvm
 from . import _tensor_grad
 from . import _transform
 from . import _reduce

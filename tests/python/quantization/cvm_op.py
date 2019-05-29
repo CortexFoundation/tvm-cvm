@@ -116,8 +116,8 @@ class Clip(mx.operator.CustomOp):
         a_min, a_max = self.min, self.max
         out = X.round()
         out = out.clip(a_min=a_min, a_max=a_max)
-        X_max, X_min = X.max().asscalar(), X.min().asscalar()
-        omax, omin = out.max().asscalar(), out.min().asscalar()
+        # X_max, X_min = X.max().asscalar(), X.min().asscalar()
+        # omax, omin = out.max().asscalar(), out.min().asscalar()
         # cvm_log.write("cvm_clip %s: %d %d %d %d\n%s \n" % (self.cvm_name,
         #             round(X_max), round(X_min),
         #             round(omax), round(omin),
@@ -170,8 +170,8 @@ class RightShift(mx.operator.CustomOp):
         out = out / 2
         out = out.floor()
         out = out.clip(a_min=a_min, a_max=a_max)
-        X_max, X_min = X.max().asscalar(), X.min().asscalar()
-        omax, omin = out.max().asscalar(), out.min().asscalar()
+        # X_max, X_min = X.max().asscalar(), X.min().asscalar()
+        # omax, omin = out.max().asscalar(), out.min().asscalar()
         # cvm_log.write("cvm_right_shift %s: %d %d %d %d\n%s \n" % (self.cvm_name,
         #             round(X_max), round(X_min),
         #             round(omax), round(omin),

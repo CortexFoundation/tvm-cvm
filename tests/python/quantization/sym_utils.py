@@ -36,8 +36,20 @@ def combile_name(n1, n2):
     res.extend(t1[len1-end:])
     return "_".join(res)
 
+def check_ext_deps(ext, deps=[], logger=logging):
+    if isinstance(deps, str):
+        deps = [deps]
+    for k, v in ext.items():
+        for dep in deps:
+            if dep not in v:
+                logger.critical("ext must have attribute %s vs. %s",
+                        dep, ext)
+                assert False
+
 def get_attr(attr, name, default=None):
     if name in attr:
+        if isinstance(default, str):
+            return attr[name]
         return eval(attr[name])
     if default is None:
         assert False, "attr %s is not exists in %s" % (name, attr)
@@ -367,4 +379,6 @@ mx_identity_ext = {
 
     '_mul_scalar': {},
     '_div_scalar': {},
+
+    'max': {},
 }

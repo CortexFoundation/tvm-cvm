@@ -68,6 +68,22 @@ def _get_channel_axis(layout, op_name):
     raise tvm.error.OpAttributeInvalid(
         'Value {} in attribute "layout" of operator {} is not valid.'.format(layout, op_name))
 
+def _custom(inputs, attrs):
+    op_type = attrs.get_str("op_type")
+    assert op_type in ['cvm_clip', 'cvm_left_shift', 'cvm_right_shift', 'cvm_lut']
+    new_attrs = {}
+    if op_type == 'cvm_clip':
+        new_attrs['precision'] = attrs.get_int('precision')
+        sym = _op.cvm_clip(inputs[0], **new_attrs)
+    elif op_type == 'cvm_lut':
+        new_attrs['in_dim'] = attrs.get_int('in_dim')
+        sym = _op.cvm_lut(inputs[0], inputs[1], **new_attrs)
+    else:
+        new_attrs['precision'] = attrs.get_int('precision')
+        new_attrs['shift_bit'] = attrs.get_int('shift_bit')
+        op_ref = _op.cvm_left_shift if op_type == 'cvm_left_shift' else _op.cvm_right_shift
+        sym = op_ref(inputs[0], **new_attrs)
+    return sym
 
 def _mx_activations(inputs, attrs):
     act_type = attrs.get_str("act_type")
@@ -768,9 +784,11 @@ _identity_list = [
     "ones_like",
     "where",
     "gather_nd",
+    "round",
 ]
 
 _convert_map = {
+    'Custom'                 : _custom,
     "_copy"                  : _rename(_op.copy),
     "relu"                   : _rename(_op.nn.relu),
     "broadcast_add"          : _rename(_op.add),
@@ -950,11 +968,12 @@ def _from_mxnet_impl(symbol, shape_dict, dtype_info):
         op_name = node["op"]
         if op_name == "null":
             shape = shape_dict[node_name] if node_name in shape_dict else None
+            precision = attrs.get_int("precision")
             if isinstance(dtype_info, dict):
                 dtype = dtype_info[node_name] if node_name in dtype_info else "float32"
             else:
                 dtype = dtype_info
-            node_map[nid] = [_expr.var(node_name, shape=shape, dtype=dtype)]
+            node_map[nid] = [_expr.var(node_name, shape=shape, dtype=dtype, precision=precision)]
         elif op_name in _convert_map:
             res = _convert_map[op_name](children, attrs)
             if isinstance(res, (_expr.TupleWrapper, tuple, list)):
@@ -972,7 +991,6 @@ def _from_mxnet_impl(symbol, shape_dict, dtype_info):
     outputs = outputs[0] if len(outputs) == 1 else _expr.Tuple(outputs)
     func = _expr.Function(ir_pass.free_vars(outputs), outputs)
     return func
-
 
 def _update_shape_dtype(shape, dtype, params):
     """Update shape dtype given params information"""

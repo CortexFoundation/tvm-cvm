@@ -30,15 +30,18 @@ namespace relay {
 using tvm::IRPrinter;
 using namespace tvm::runtime;
 
-TensorType TensorTypeNode::make(Array<IndexExpr> shape, DataType dtype) {
+TensorType TensorTypeNode::make(Array<IndexExpr> shape,
+                                DataType dtype,
+                                int precision) {
   NodePtr<TensorTypeNode> n = make_node<TensorTypeNode>();
   n->shape = std::move(shape);
   n->dtype = std::move(dtype);
+  n->precision = precision;
   return TensorType(n);
 }
 
 TensorType TensorTypeNode::Scalar(DataType dtype) {
-  return TensorTypeNode::make({}, dtype);
+  return TensorTypeNode::make({}, dtype, -1);
 }
 
 IndexExpr TensorTypeNode::Size() const {
