@@ -16,7 +16,6 @@ import sim_quant_helper as sim
 import cvm_op as cvm
 
 max_bit = 32 # INT32
-input_target_bit = 8
 default_target_bit = 8 # INT8
 bias_target_bit = default_target_bit * 4 - 1
 disable_requant_ops = [
@@ -26,6 +25,7 @@ disable_requant_ops = [
     'clip', 'negative',
     'repeat', 'tile', 'expand_dims',
     'Reshape', 'transpose', 'Flatten',
+    'max',
 ]
 
 def _get_thresholds(output, calib_mode='naive'):
@@ -56,6 +56,8 @@ def _calibrate_th_dict(symbol, params, inputs_ext, ctx=mx.cpu()):
         out_cache[name] = out.as_in_context(ctx)
         if op_name in disable_requant_ops:
             th_dict[name] = th_dict[childs[0].attr('name')]
+        elif op_name in ['Embedding']:
+            th_dict[name] = th_dict[childs[1].attr('name')]
         else:
             th_dict[name] = _get_thresholds(out, "naive")
         logger.debug("collect symbol %-40s out_shape=%-20s th_dict: (%7.5f, %7.5f)",
@@ -130,17 +132,17 @@ def _collect_scale_helper(sym, params, graph, inputs_ext,
 
     scale_helper[name] = get_scale(th_dict[name], default_target_bit)
     target_bits[name] = default_target_bit
-    if op_name == 'null':
-        if name in inputs_ext:
-            inputs_ext[name]['target_bit'] = input_target_bit
-            target_bits[name] = input_target_bit
-            scale_helper[name] = get_scale(th_dict[name], input_target_bit)
-    elif op_name in ['Convolution', 'FullyConnected']:
+    if op_name in ['Convolution', 'FullyConnected']:
         X_name, W_name = childs[0].attr('name'), childs[1].attr('name')
         if attr['no_bias'] == 'False':
             B_name = childs[2].attr('name')
             scale_helper[B_name] = scale_helper[X_name] * scale_helper[W_name]
             target_bits[B_name] = bias_target_bit
+    elif op_name in ['Embedding']:
+        X_name, W_name = childs[0].attr('name'), childs[1].attr('name')
+        X_range = params[W_name].shape[0]
+        target_bits[X_name] = math.ceil(math.log2(X_range)) + 1
+        scale_helper[X_name] = 1
     return sym, params
 def _annotate_layer(sym, params, graph, inputs_ext,
         scale_helper, target_bits, infer_shapes):
@@ -155,37 +157,6 @@ def _annotate_layer(sym, params, graph, inputs_ext,
         return node, params
     elif op_name in disable_requant_ops:
         return node, params
-    elif op_name == 'Convolution' and len(cscales[0].shape) > 1:
-        # Rewrite conv op for depth-wise
-        assert attr['kernel'] == "(1, 1)", "Assert failed: " + \
-            "depth-wise conv not followed by 1*1 conv(%-40s): %s" % (name, attr)
-        X, W = childs[0], childs[1]
-        ic = int(attr['num_filter'])
-        X = mx.sym.expand_dims(X, axis=1)
-        target_bits[X.attr('name')] = cbits[0]
-        out = mx.sym.broadcast_mul(X, W)
-        target_bit = cbits[0] + cbits[1]
-        target_bits[out.attr('name')] = target_bit
-        in_scale = (cscales[0] * cscales[1]).min()
-        relative_scale = in_scale / (cscales[0] * cscales[1])
-        relative_scale = relative_scale.expand_dims(axis=1)
-        out = _sim_requantize_op(out, relative_scale, params, graph)
-        target_bits[out.attr('name')] = target_bit
-        logger.debug("layer %-40s rewrite for depth-wise conv in_scale=%+16.8f" +
-                " out_scale=%+16.8f X_shape=%s W_shape=%s", name,
-                in_scale.asscalar(), scale_helper[name],
-                cscales[0].shape, cscales[1].shape)
-        node = mx.sym.sum(out, axis=2)
-        sum_bit = math.ceil(math.log2(ic)) + target_bit
-        target_bits[node.attr('name')] = sum_bit
-        if attr['no_bias'] == 'False':
-            B_name = childs[2].attr('name')
-            B_shape = params[B_name].shape
-            params[B_name] = params[B_name].reshape([1, *B_shape, 1, 1])
-            graph[B_name] = B = mx.sym.var(B_name, shape=params[B_name].shape)
-            node = mx.sym.broadcast_add(node, B)
-            target_bits[node.attr('name')] = 1 + sum_bit
-        requant_scale = scale_helper[name] / in_scale
     elif op_name in ['Convolution', 'FullyConnected', 'broadcast_mul']:
         requant_scale = scale_helper[name] / (cscales[0] * cscales[1])
     elif op_name in ['elemwise_add', 'elemwise_sub',
@@ -205,10 +176,12 @@ def _annotate_layer(sym, params, graph, inputs_ext,
             new_childs.append(c)
         requant_scale = scale_helper[name] / in_scale
         node = get_mxnet_op(op_name)(*new_childs, **attr, name=name)
+    elif op_name in ['Embedding']:
+        requant_scale = scale_helper[name] / cscales[1]
     elif op_name in ['sum']:
         requant_scale = scale_helper[name] / cscales[0]
     else:
-        logger.critical('Unrecognized op:%s(%s) . attrs(%s)', op_name, name, attr)
+        logger.critical('Unrecognized op:%s(%s) attrs(%s)', op_name, name, attr)
 
     if requant_scale != 1:
         r = (2**(default_target_bit-1)-1) / requant_scale
@@ -225,12 +198,10 @@ def _annotate_layer(sym, params, graph, inputs_ext,
 def _annotate_parameters(sym, params, graph, inputs_ext,
         scale_helper, target_bits):
     logger = logging.getLogger('log.annotate.parameters')
-    if sym.attr('op_name') != 'null':
+    name, op_name = sym.attr('name'), sym.attr('op_name')
+    if op_name != 'null' or name in inputs_ext:
         return sym, params
-    name = sym.attr('name')
-    if name in inputs_ext:
-        inputs_ext[name]['scale'] = scale_helper[name]
-    elif name in scale_helper:
+    if name in scale_helper:
         params[name] = params[name] * scale_helper[name]
     return sym, params
 def _realize_symbol(sym, params, graph, inputs_ext,
@@ -311,7 +282,10 @@ def _realize_parameters(sym, params, graph, inputs_ext,
     # calculate error
     error = params[name].astype('float32') - data
     error_rate = error / data
-    rate = nd.norm(error_rate).asscalar() / np.product(data.shape)
+    if nd.sum(error).asscalar() == 0:
+        rate = 0
+    else:
+        rate = nd.norm(error_rate).asscalar() / np.product(data.shape)
     if rate > 0.001:
         logger.warn("realize parameter %-60s avg error=%10.9f shape=%s",
                 name, rate, data.shape)
@@ -336,6 +310,12 @@ def sym_simulate(symbol, params, inputs_ext, calib_data, ctx):
             callback=_collect_scale_helper, th_dict=th_dict,
             get_scale=sim.get_sim_scale,
             scale_helper=scale_helper, target_bits=target_bits)
+
+    # update inputs_ext
+    for k, v in inputs_ext.items():
+        v['scale'] = scale_helper[k]
+        v['target_bit'] = target_bits[k]
+
     infer_shapes = sym_infer_shape(symbol, params, inputs_ext)
     symbol, params = topo_visit(symbol, params, get_op=get_mxnet_op,
             logger=logger, inputs_ext=inputs_ext,

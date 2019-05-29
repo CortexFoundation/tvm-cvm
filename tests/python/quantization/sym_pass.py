@@ -329,26 +329,26 @@ def _matrix_decomposition(sym, params, graph, inputs_ext, infer_shapes):
     node = sym
     if op_name == 'Convolution':
         # TODO: do matrix decomposition for conv op
-        childs_name = [c.attr('name') for c in childs]
-        childs_shape = [infer_shapes[n] for n in childs_name]
+        # childs_name = [c.attr('name') for c in childs]
+        # childs_shape = [infer_shapes[n] for n in childs_name]
 
-        for idx, cshape in enumerate(childs_shape):
-            cname = childs_name[idx]
-            if cname in params and cshape != params[cname].shape:
-                logger.critical(
-                    "parameter(%s): infer shape(%s) in graph isn't consistent \
-                    with params dict(%s)",
-                    cshape, params[cname].shape)
+        # for idx, cshape in enumerate(childs_shape):
+        #     cname = childs_name[idx]
+        #     if cname in params and cshape != params[cname].shape:
+        #         logger.critical(
+        #             "parameter(%s): infer shape(%s) in graph isn't consistent \
+        #             with params dict(%s)",
+        #             cshape, params[cname].shape)
 
-        assert 'layout' not in attr or attr['layout'] == 'NCHW'
-        # conv input is NCHW format
-        data_shape = childs_shape[0] # (batch, channel, height, weight)
-        weight_shape = childs_shape[1] # (filter, channel, kernel, kernel)
+        # assert 'layout' not in attr or attr['layout'] == 'NCHW'
+        # data_shape = childs_shape[0] # (batch, channel, height, weight)
+        # weight_shape = childs_shape[1] # (filter, channel, kernel, kernel)
 
-        channel = data_shape[1] # channel
-        kernel = [weight_shape[2], weight_shape[3]] # kernel size
-        matrix_len = channel * kernel[0] * kernel[1]
+        # channel = data_shape[1] # channel
+        # kernel = [weight_shape[2], weight_shape[3]] # kernel size
+        # matrix_len = channel * kernel[0] * kernel[1]
         # print (data_shape, weight_shape, matrix_len)
+        pass
 
     elif op_name == 'FullyConnected':
         childs_name = [c.attr('name') for c in childs]

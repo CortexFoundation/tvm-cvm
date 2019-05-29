@@ -1,5 +1,6 @@
 import mxnet as mx
 from mxnet import gluon
+from mxnet import nd
 from gluoncv import data as gdata
 from gluoncv.data.batchify import Tuple, Stack, Pad
 from gluoncv.data.transforms.presets.yolo import YOLO3DefaultValTransform
@@ -7,6 +8,7 @@ from gluoncv.utils.metrics.voc_detection import VOC07MApMetric
 
 import os
 import math
+import pickle
 
 def load_voc(batch_size, input_size=416):
     width, height = input_size, input_size
@@ -61,3 +63,18 @@ def load_imagenet_rec(batch_size, input_size=224):
     )
     return val_data
 
+
+def load_trec(batch_size, is_train = False):
+    if is_train:
+        fname = "./data/TREC/TREC.train.pk"
+    else:
+        fname = "./data/TREC/TREC.test.pk"
+    dataset = pickle.load(open(fname, "rb"))
+    data, label = [], []
+    for x, y in dataset:
+        if len(data) < batch_size:
+            data.append(x)
+            label.append(y)
+        else:
+            yield nd.transpose(nd.array(data)), nd.transpose(nd.array(label))
+            data, label = [], []

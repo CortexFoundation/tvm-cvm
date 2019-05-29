@@ -379,4 +379,6 @@ mx_identity_ext = {
 
     '_mul_scalar': {},
     '_div_scalar': {},
+
+    'max': {},
 }
