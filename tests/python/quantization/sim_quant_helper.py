@@ -5,17 +5,6 @@ import json
 import mxnet as mx
 from mxnet import ndarray as nd
 
-def save_ins_ext(params, inputs_ext):
-    for name in inputs_ext:
-        ext = inputs_ext[name]
-        scale, target_bit = ext['scale'], ext['target_bit']
-        params[name+'_scale'] = ext['scale']
-        params[name+'_target_bit'] = ext['target_bit']
-def load_ins_ext(params, inputs_ext):
-    for name in inputs_ext:
-        ext = inputs_ext[name]
-        ext['scale'] = params[name+'_scale']
-        ext['target_bit'] = params[name+'_target_bit']
 def load_sim_data(data, name, inputs_ext):
     return data * inputs_ext[name]['scale']
 def load_real_data(data, name, inputs_ext):
@@ -48,16 +37,22 @@ def get_simple_sim_scale(threshold, target_bit):
     return 2 ** shift_bit
 
 def get_sim_scale(thresholds, target_bit):
-    assert len(thresholds.shape) == 2
-    size = thresholds.shape[0]
-    assert thresholds.shape[1] == 2
-    scales = []
-    for value in thresholds:
-        alpha = value.abs().max().asscalar()
-        sim_max = 2 ** (target_bit - 1) - 1
-        scale = 0 if alpha == 0 else sim_max / alpha
-        scales.append(scale)
-    return nd.array(scales)
+    amin, amax = thresholds
+    alpha = max(abs(amin), abs(amax))
+    sim_max = 2 ** (target_bit - 1) - 1
+    scale = 1 if alpha == 0 else sim_max / alpha
+    return scale
+
+    # assert len(thresholds.shape) == 2
+    # size = thresholds.shape[0]
+    # assert thresholds.shape[1] == 2
+    # scales = []
+    # for value in thresholds:
+    #     alpha = value.abs().max().asscalar()
+    #     sim_max = 2 ** (target_bit - 1) - 1
+    #     scale = 0 if alpha == 0 else sim_max / alpha
+    #     scales.append(scale)
+    # return nd.array(scales)
 
 def int_realize(data, target_bit, logger=logging):
     out = data.round()

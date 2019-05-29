@@ -404,6 +404,7 @@ def _matrix_decomposition(sym, params, graph, inputs_ext, infer_shapes):
 
 def sym_infer_shape(symbol, params, inputs_ext):
     logger = logging.getLogger('log.symbol.infer_shape')
+    check_ext_deps(inputs_ext, 'shape')
 
     def _infer_shape(sym, params, graph, inputs_ext, infer_shapes):
         logger = logging.getLogger('log.symbol.infer_shape')

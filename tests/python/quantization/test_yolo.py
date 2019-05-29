@@ -166,28 +166,28 @@ def test_sym_pass(batch_size=10, iter_num=10):
     utils.load_parameters(top_graph, top_params, ctx=ctx)
 
     # quantize base graph
-    # qbase, qbase_params, qbase_prec, base_oscales = calib.sym_simulate(
-    #         base, base_params, base_inputs_ext, data, ctx)
-    # qbase, qbase_params = calib.sym_realize(qbase, qbase_params, base_inputs_ext, qbase_prec)
-    # dump_sym, dump_params, dump_ext = load_fname("_darknet53_voc", "base.quantize", True)
-    # open(dump_sym, "w").write(qbase.tojson())
-    # sim.save_ext(dump_ext, base_inputs_ext, base_oscales)
-    # nd.save(dump_params, qbase_params)
+    qbase, qbase_params, qbase_prec, base_oscales = calib.sym_simulate(
+            base, base_params, base_inputs_ext, data, ctx)
+    qbase, qbase_params = calib.sym_realize(qbase, qbase_params, base_inputs_ext, qbase_prec)
+    dump_sym, dump_params, dump_ext = load_fname("_darknet53_voc", "base.quantize", True)
+    open(dump_sym, "w").write(qbase.tojson())
+    sim.save_ext(dump_ext, base_inputs_ext, base_oscales)
+    nd.save(dump_params, qbase_params)
 
-    # qb_sym, qb_params, qb_ext = load_fname("_darknet53_voc", "base.quantize", True)
-    # net2_inputs_ext, base_oscales = sim.load_ext(qb_ext)
-    # net2_inputs = [mx.sym.var(n) for n in net2_inputs_ext]
-    # net2 = utils.load_model(qb_sym, qb_params, net2_inputs, ctx=ctx)
-    # base_metric = dataset.load_voc_metric()
-    # base_metric.reset()
-    # def base_quantize(data, label):
-    #     def net(data):
-    #         data = sim.load_real_data(data, 'data', net2_inputs_ext)
-    #         tmp = list(net2(data.as_in_context(ctx)))
-    #         tmp = [t / base_oscales[i] for i,t in enumerate(tmp)]
-    #         return top_graph(*tmp)
-    #     acc = validate_data(net, data, label, base_metric)
-    #     return "{:6.2%}".format(acc)
+    qb_sym, qb_params, qb_ext = load_fname("_darknet53_voc", "base.quantize", True)
+    net2_inputs_ext, base_oscales = sim.load_ext(qb_ext)
+    net2_inputs = [mx.sym.var(n) for n in net2_inputs_ext]
+    net2 = utils.load_model(qb_sym, qb_params, net2_inputs, ctx=ctx)
+    base_metric = dataset.load_voc_metric()
+    base_metric.reset()
+    def base_quantize(data, label):
+        def net(data):
+            data = sim.load_real_data(data, 'data', net2_inputs_ext)
+            tmp = list(net2(data.as_in_context(ctx)))
+            tmp = [t / base_oscales[i] for i,t in enumerate(tmp)]
+            return top_graph(*tmp)
+        acc = validate_data(net, data, label, base_metric)
+        return "{:6.2%}".format(acc)
 
     # quantize top graph
     # top_data = base_graph(data.as_in_context(base_ctx))
@@ -275,7 +275,7 @@ def test_sym_pass(batch_size=10, iter_num=10):
     # exit()
 
     utils.multi_validate(yolov3, data_iter_func,
-                        all_quantize,
+                        base_quantize,
 			# top_quantize, base_quantize,
             iter_num=iter_num, logger=logger)
 
@@ -296,5 +296,5 @@ if __name__ == '__main__':
 
     # zoo.save_model('yolo3_darknet53_voc')
 
-    # test_sym_pass(16, 10)
-    test_sym_nnvm(16, 0)
+    test_sym_pass(16, 10)
+    # test_sym_nnvm(16, 0)
