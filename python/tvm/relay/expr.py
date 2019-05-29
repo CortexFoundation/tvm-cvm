@@ -470,7 +470,8 @@ class TupleWrapper(object):
 def var(name_hint,
         type_annotation=None,
         shape=None,
-        dtype="float32"):
+        dtype="float32",
+        precision=-1):
     """Create a new tvm.relay.Var.
 
     This is a simple wrapper function that allows specify
@@ -510,7 +511,7 @@ def var(name_hint,
     if type_annotation is not None and shape is not None:
         raise ValueError("Can only specify either type_annotation or shape.")
     if shape is not None:
-        type_annotation = _ty.TensorType(shape, dtype)
+        type_annotation = _ty.TensorType(shape, dtype, precision)
     elif isinstance(type_annotation, str):
         type_annotation = _ty.TensorType((), type_annotation)
     return Var(name_hint, type_annotation)

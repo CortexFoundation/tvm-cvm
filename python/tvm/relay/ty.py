@@ -72,9 +72,9 @@ class TensorType(Type):
     tensor_type : tvm.relay.TensorType
         The tensor type.
     """
-    def __init__(self, shape, dtype="float32"):
+    def __init__(self, shape, dtype="float32", precision=-1):
         self.__init_handle_by_constructor__(
-            _make.TensorType, shape, dtype)
+            _make.TensorType, shape, dtype, precision)
 
     @property
     def concrete_shape(self):

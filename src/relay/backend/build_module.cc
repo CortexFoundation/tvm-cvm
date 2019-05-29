@@ -116,6 +116,18 @@ struct GraphCodegen {
   ~GraphCodegen() {}
 
   void Init(runtime::Module* m, TargetsMap targets) {
+    bool use_cvm = false;
+    for (auto& kv : targets) {
+      if (kv.second->target_name == "cvm") use_cvm = true;
+    }
+
+    if (use_cvm) {
+      auto pf = GetPackedFunc("relay.build_module._CVMRuntimeCodegen");
+      mod = (*pf)();
+    } else {
+      auto pf = GetPackedFunc("relay.build_module._GraphRuntimeCodegen");
+      mod = (*pf)();
+    }
     CallFunc("init", m, targets);
   }
 
@@ -555,6 +567,12 @@ class RelayBuildModule : public runtime::ModuleNode {
     } else {
       device_target = targets_;
     }
+
+    bool is_cvm = false;
+    for (auto& kv : targets_) {
+      if (kv.second->target_name == "cvm") is_cvm = true;
+    }
+
     func = Optimize(func, targets_, cfg, params);
     if (device_target.size() > 1) {
       func = RunDeviceAnnotationPass(func, cfg, &device_target);
@@ -571,7 +589,9 @@ class RelayBuildModule : public runtime::ModuleNode {
     ret_.graph_json = graph_codegen_->GetJSON();
     ret_.params = graph_codegen_->GetParams();
 
-    ret_.mod = tvm::build(graph_codegen_->GetLoweredFunc(), target_host_, tvm_cfg_);
+    if (not is_cvm) {
+      ret_.mod = tvm::build(graph_codegen_->GetLoweredFunc(), target_host_, tvm_cfg_);
+    }
   }
 
  protected:

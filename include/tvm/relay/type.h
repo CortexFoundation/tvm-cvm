@@ -93,10 +93,12 @@ class TensorTypeNode : public BaseTensorTypeNode {
   Array<IndexExpr> shape;
   /*! \brief The content data type */
   DataType dtype;
+  int precision;
 
   void VisitAttrs(tvm::AttrVisitor* v) final {
     v->Visit("shape", &shape);
     v->Visit("dtype", &dtype);
+    v->Visit("precision", &precision);
     v->Visit("span", &span);
   }
 
@@ -105,7 +107,7 @@ class TensorTypeNode : public BaseTensorTypeNode {
    */
   TVM_DLL IndexExpr Size() const;
 
-  TVM_DLL static TensorType make(Array<IndexExpr> shape, DataType dtype);
+  TVM_DLL static TensorType make(Array<IndexExpr> shape, DataType dtype, int precision=-1);
 
   /*! \brief Construct an scalar containing elements of dtype.  */
   TVM_DLL static TensorType Scalar(DataType dtype);

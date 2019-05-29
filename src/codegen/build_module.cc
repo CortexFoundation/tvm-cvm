@@ -125,6 +125,8 @@ Target CreateTarget(const std::string& target_name,
     t->device_type = kDLExtDev;
   } else if (target_name == "hybrid") {
     t->device_type = kDLCPU;
+  } else if (target_name == "cvm") {
+    t->device_type = kDLGPU;
   } else {
     LOG(ERROR) << "Unknown target name " << target_name;
     return target::stackvm();
@@ -436,7 +438,7 @@ Array<Array<LoweredFunc> > split_dev_host_funcs(const Array<LoweredFunc>& funcs,
     CHECK(all_names.count(x->name) == 0)
         << "Duplicate function name " << x->name;
     all_names.insert(x->name);
-    std::cout << "x = " << x->name << "\n";
+    // std::cout << "x = " << x->name << "\n";
   }
 
   Array<LoweredFunc> fhost;
