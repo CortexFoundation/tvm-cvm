@@ -76,6 +76,19 @@ def compute_multibox_transform_loc(attrs, inputs, _):
 
 reg.register_pattern("multibox_detection", OpPattern.OPAQUE)
 
+# Get counts of valid boxes
+@reg.register_schedule("get_valid_counts")
+def scahedule_get_valid_counts(_, outs, target):
+    """Schedule definition of get_valid_counts"""
+    with target:
+        return topi.generic.schedule_get_valid_counts(outs)
+
+@reg.register_compute("get_valid_counts")
+def compute_get_valid_counts(attrs, inputs, _, target):
+    """Compute definition of get_valid_counts"""
+    score_threshold = get_const_float(attrs.score_threshold)
+    return topi.vision.get_valid_counts(inputs[0], score_threshold)
+
 # non-maximum suppression
 @reg.register_schedule("non_max_suppression")
 def schedule_nms(_, outs, target):

@@ -166,6 +166,28 @@ struct ReshapeParam : public dmlc::Parameter<ReshapeParam> {
   }
 };
 
+struct RepeatParam : public dmlc::Parameter<RepeatParam> {
+  int repeats;
+  int axis;
+
+  DMLC_DECLARE_PARAMETER(RepeatParam) {
+    DMLC_DECLARE_FIELD(repeats)
+      .describe("The number of repetitions for each element.");
+    DMLC_DECLARE_FIELD(axis).set_default(0)
+        .describe(" The axis along which to repeat values.");
+  }
+};
+
+struct TileParam : public dmlc::Parameter<TileParam> {
+  Tuple<int> reps;
+
+  DMLC_DECLARE_PARAMETER(TileParam) {
+    DMLC_DECLARE_FIELD(reps)
+      .describe("The number of times for repeating the tensor a."
+                "Each dim sizeof reps must be a positive integer.");
+  }
+};
+
 struct SqueezeParam : public dmlc::Parameter<SqueezeParam> {
   TShape axis;
 

@@ -189,12 +189,12 @@ def prepare_for_cvm(symbol, params, inputs_ext):
             callback=_mx_prepare)
     return psym, pparams
 
-def to_nnvm(sym_file, param_file, dump_sym, dump_params, inputs_ext,
+def mxnet_to_nnvm(sym, params, inputs_ext, dump_sym, dump_params,
         runtime="cvm", target="cuda"):
     tvm_ctx = tvm.context(target, 1)
     inputs_shape = {k:v['shape'] for k,v in inputs_ext.items()}
 
-    sym, params = mx.sym.load(sym_file), nd.load(param_file)
+    sym, params = prepare_for_cvm(sym, params, inputs_ext)
     nnvm_sym, _ = nnvm.frontend.from_mxnet(sym)
     nnvm_sym, real_params = nnvm_realize(nnvm_sym, params, inputs_ext)
 
@@ -213,14 +213,13 @@ def to_nnvm(sym_file, param_file, dump_sym, dump_params, inputs_ext,
 
 def mxnet_to_cvm(sym, params, inputs_ext, dump_sym, dump_params,
         batch_size=1, logger=logging):
-    for k,v in inputs_ext.items():
-        v['shape'] = (batch_size, *v['shape'][1:])
     inputs_shape = {k:v['shape'] for k,v in inputs_ext.items()}
     sym, params = prepare_for_cvm(sym, params, inputs_ext)
     relay_sym, relay_params = relay.frontend.from_mxnet(sym, inputs_shape,
             arg_params=params)
     real_params = tvm_params_reduce(sym, relay_params, inputs_ext, tvm.context("cpu"))
 
+    # TODO: conv and dense layer dump without precision
     logger.debug("Compiling into CVM Executor Graph")
     with relay.build_config(opt_level=0):
         graph_json, lib, graph_params = relay.build(relay_sym, "cvm")
@@ -414,7 +413,7 @@ def sym_infer_shape(symbol, params, inputs_ext):
             if name in params:
                 assert params[name].shape == infer_shapes[name], \
                         "parameter %s shape %s is inconsistent with \
-                        params dict %s"%(name, out_shapes[0], params[name].shape)
+                        params dict %s"%(name, infer_shapes[name], params[name].shape)
             return sym, params
 
         args = sym.list_inputs()
@@ -482,7 +481,37 @@ def _sym_rewrite(sym, params, graph, inputs_ext, infer_shapes):
     name, op_name = sym.attr('name'), sym.attr('op_name')
     childs, attr = sym_iter(sym.get_children()), sym.list_attr()
     node = sym
-    if op_name == 'Pooling':
+    if op_name == 'Convolution':
+        X, W = childs[0], childs[1]
+        X_name, W_name = X.attr('name'), W.attr('name')
+        X_name, W_name = childs[0].attr('name'), childs[1].attr('name')
+        layout = get_attr(attr, 'layout', "NCHW")
+        no_bias = get_attr(attr, 'no_bias', False)
+        dilate, kernel = get_attr(attr, 'dilate'), get_attr(attr, 'kernel')
+        pad, stride = get_attr(attr, 'pad'), get_attr(attr, 'stride')
+        num_filter = get_attr(attr, 'num_filter')
+        num_group = get_attr(attr, 'num_group', 1)
+        if layout == "NCW":
+            attr = {
+                'layout': "NCHW", 'no_bias': no_bias,
+                'dilate': (*dilate, 1), 'kernel': (*kernel, 1),
+                'pad': (*pad, 0), 'stride': (*stride, 1),
+                'num_filter': num_filter, 'num_group': num_group,
+            }
+            X = mx.sym.expand_dims(X, axis=3)
+            params[W_name] = params[W_name].expand_dims(axis=3)
+            print (params[W_name].shape)
+            W = graph[W_name] = mx.sym.var(W_name, shape=params[W_name].shape)
+            B = None if no_bias else childs[2]
+            print (infer_shapes[name],
+                    infer_shapes[X_name], infer_shapes[W_name],
+                    infer_shapes[childs[2].attr('name')], attr)
+            node = get_mxnet_op(op_name)(X, W, B, **attr, name=name)
+            node = mx.sym.squeeze(node, axis=3)
+        else:
+            assert layout == "NCHW", "%s(name=%-40s attr=%s)" \
+                           % (op_name, name, attr)
+    elif op_name == 'Pooling':
         pool_type = attr['pool_type']
         is_global = attr["global_pool"]
         if pool_type == 'avg' and is_global == 'True':

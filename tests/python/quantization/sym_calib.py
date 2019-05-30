@@ -23,7 +23,7 @@ disable_requant_ops = [
     'Pooling',
     'slice', 'slice_like', 'slice_axis',
     'clip', 'negative',
-    'repeat', 'tile', 'expand_dims',
+    'repeat', 'tile', 'expand_dims', 'squeeze',
     'Reshape', 'transpose', 'Flatten',
     'max',
 ]

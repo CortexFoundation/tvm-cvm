@@ -4,6 +4,7 @@ from mxnet import ndarray as nd
 import mxnet as mx
 import nnvm
 import logging
+import json
 
 INT32_MIN, INT32_MAX = -2147483647, 2147483647
 INT8_MIN, INT8_MAX = -127, 127
@@ -89,8 +90,10 @@ def sym_iter(sym):
 
     if isinstance(sym, mx.sym.Symbol):
         sym = [sym[i] for i in range(len(sym))]
-
-    sym = [s for s in sym]
+    else:
+        assert isinstance(sym, nnvm.sym.Symbol)
+        size = len(sym.list_output_names())
+        sym = [sym[i] for i in range(size)]
     return sym
 
 def examine_parameters(symbol, params, inputs_ext, allows=[], callback=None):
@@ -187,7 +190,14 @@ def get_node(sym, graph):
     name = sym.attr('name')
     if name not in graph:
         assert False, "Unrecognized layer:%s in graph"%name
-    return graph[name]
+    if isinstance(sym, _sym.Symbol):
+        output_index = json.loads(sym.tojson())['heads'][0][1]
+    else:
+        assert isinstance(sym, nnvm.sym.Symbol)
+        output_index = sym.attr("heads")
+        print (name, sym, sym.list_inputs())
+        output_index = 0
+    return graph[name][output_index]
 
 def topo_visit(symbol, params, inputs_ext={}, get_op=get_mxnet_op,
         logger=logging, callback=None, **kwargs):
@@ -200,13 +210,7 @@ def topo_visit(symbol, params, inputs_ext={}, get_op=get_mxnet_op,
         attr = sym.list_attr()
 
         node = sym
-        # TODO: add support for _cond op
-        if op_name in ['_cond'] and logger:
-            logger.warn(
-                    "topo_visit do not support op %s:%s(%s), \
-attention used in non-changable graph pass",
-                    op_name, name, [c.attr('name') for c in childs])
-        elif childs is not None:
+        if childs is not None:
             # update childs in graph
             childs = [get_node(c, graph) for c in childs]
             node = get_op(op_name)(*childs, **attr, name=name)
@@ -234,7 +238,7 @@ attention used in non-changable graph pass",
 
     ret_sym = nodes[0]
     if len(nodes) > 1:
-        ret_sym = mx.sym.Group(nodes)
+        ret_sym = get_op("Group")(nodes)
 
     return ret_sym, params
 
@@ -307,6 +311,7 @@ nnvm_identity_ext = {
     'dense': OpExt('dense', [INT8_TYPE], [INT32_TYPE]),
     'sum': OpExt('sum', [INT8_TYPE], [INT32_TYPE]),
     'elemwise_add': OpExt('elemwise_add', [INT8_TYPE], [INT32_TYPE]),
+    'elemwise_sub': {},
 
     'reshape': OpExt('reshape', [INT8_TYPE, INT32_TYPE], [INT8_TYPE, INT32_TYPE]),
     'flatten': OpExt('flatten', [INT8_TYPE, INT32_TYPE], [INT8_TYPE, INT32_TYPE]),
@@ -328,10 +333,23 @@ nnvm_identity_ext = {
 
     'clip': OpExt('clip', [INT32_TYPE], [INT8_TYPE]),
     'concatenate': {},
+    'negative': {},
 
     'cvm_clip': {},
     'cvm_left_shift': {},
     'cvm_right_shift': {},
+    'cvm_lut': {},
+
+    'take': {},
+    'repeat': {},
+    'tile': {},
+    'transpose': {},
+    'expand_dims': {},
+    'squeeze': {},
+    'squeeze': {},
+
+    'get_valid_counts': {},
+    'non_max_suppression': {},
 }
 
 """Mxnet Symbol Operator Extension
@@ -381,4 +399,6 @@ mx_identity_ext = {
     '_div_scalar': {},
 
     'max': {},
+    'Embedding': {},
+    'squeeze': {},
 }

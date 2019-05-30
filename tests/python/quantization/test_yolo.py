@@ -283,12 +283,13 @@ def test_sym_nnvm(batch_size, iter_num):
     logger = logging.getLogger("log.test.nnvm")
     logger.info("=== Log Test NNVM ===")
 
-    sym_file, param_file, ext_file = load_fname("_darknet53_voc", "all.quantize", True)
-    dump_sym, dump_params = load_fname("_darknet53_voc", "all.nnvm.compile")
+    sym_file, param_file, ext_file = load_fname("_darknet53_voc", "top.quantize", True)
+    dump_sym, dump_params = load_fname("_darknet53_voc", "top.nnvm.compile")
     sym, params = mx.sym.load(sym_file), nd.load(param_file)
     inputs_ext, _ = sim.load_ext(ext_file)
-    spass.mxnet_to_cvm(sym, params, inputs_ext, dump_sym, dump_params,
-            batch_size=batch_size, logger=logger)
+    spass.mxnet_to_nnvm(sym, params, inputs_ext, dump_sym, dump_params)
+    # spass.mxnet_to_cvm(sym, params, inputs_ext, dump_sym, dump_params,
+    #         batch_size=batch_size, logger=logger)
 
 
 if __name__ == '__main__':
@@ -296,5 +297,5 @@ if __name__ == '__main__':
 
     # zoo.save_model('yolo3_darknet53_voc')
 
-    test_sym_pass(16, 10)
-    # test_sym_nnvm(16, 0)
+    # test_sym_pass(16, 10)
+    test_sym_nnvm(16, 0)

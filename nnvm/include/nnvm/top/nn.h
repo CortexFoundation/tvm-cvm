@@ -482,6 +482,15 @@ struct MultiBoxTransformLocParam : public dmlc::Parameter<MultiBoxTransformLocPa
   }
 };
 
+struct GetValidCountsParam : public dmlc::Parameter<GetValidCountsParam> {
+  double score_threshold;
+
+  DMLC_DECLARE_PARAMETER(GetValidCountsParam) {
+    DMLC_DECLARE_FIELD(score_threshold).set_default(0.0)
+      .describe("Lower limit of score for valid bounding boxes.");
+  }
+};
+
 struct NonMaximumSuppressionParam : public dmlc::Parameter<NonMaximumSuppressionParam> {
   bool return_indices;
   float iou_threshold;

@@ -49,6 +49,12 @@ def quantize(data):
     res = net2(data.as_in_context(ctx))
     return res
 
+quant_sym, quant_params, quant_ext = load_fname("sym.quantize", with_ext=True)
+open(quant_sym, "w").write(qsym.tojson())
+
+spass.mxnet_to_nnvm(qsym, qparams, inputs_ext, *load_fname("nnvm.compile"))
+#  spass.mxnet_to_cvm(qsym, qparams, inputs_ext, *load_fname("nnvm.compile"))
+
 utils.multi_eval_accuracy(trec, data_iter_func,
         quantize,
         iter_num=1000)
