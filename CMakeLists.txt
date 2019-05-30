@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.2)
 project(tvm C CXX)
 
+set (CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # Utility functions
 include(cmake/util/Util.cmake)
 include(cmake/util/FindCUDA.cmake)

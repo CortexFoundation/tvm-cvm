@@ -692,6 +692,130 @@ the input array into an output array with the same shape as the second input arr
 })
 .set_support_level(4);
 
+//repeat
+DMLC_REGISTER_PARAMETER(RepeatParam);
+
+inline bool RepeatShape(const nnvm::NodeAttrs& attrs,
+                           std::vector<TShape>* in_attrs,
+                           std::vector<TShape>* out_attrs) {
+  CHECK_EQ(in_attrs->size(), 1U);
+  CHECK_EQ(out_attrs->size(), 1U);
+  const TShape& shp = (*in_attrs)[0];
+  if (shp.ndim() == 0) return false;
+  const int ndim = static_cast<int>(shp.ndim());
+
+  const RepeatParam& param = nnvm::get<RepeatParam>(attrs.parsed);
+  const int repeats = param.repeats;
+  const int axis = param.axis;
+  CHECK(repeats >= 1)
+    << "repeat only accepts `repeats >= 1`"
+    << ", but got repeats = " << repeats;
+  CHECK(-ndim - 1 <= axis && axis <= ndim)
+    << "repeat only accepts `axis` in [-data.ndim - 1, data.ndim]"
+    << ", but got axis = " << axis
+    << ", and data.ndim = " << ndim;
+  const int pivot = axis < 0 ? ndim + axis : axis;
+  std::vector<int64_t> oshape;
+  for (int i = 0; i < pivot; ++i) {
+    oshape.emplace_back(shp[i]);
+  }
+  oshape.emplace_back(shp[pivot] * repeats);
+  for (int i = pivot+1; i < ndim; ++i) {
+    oshape.emplace_back(shp[i]);
+  }
+  TShape out_shape(oshape.begin(), oshape.end());
+  NNVM_ASSIGN_OUTPUT_SHAPE(attrs, *out_attrs, 0, out_shape);
+  return true;
+}
+
+NNVM_REGISTER_OP(repeat)
+.describe(R"code(Repeat elements of an array `repeats` times along axis `axis`
+
+- **data**: The input data to the operator.
+
+)code" NNVM_ADD_FILELINE)
+.add_argument("data", "Tensor", "Source input")
+.add_arguments(RepeatParam::__FIELDS__())
+.set_attr_parser(ParamParser<RepeatParam>)
+.set_attr<FGetAttrDict>("FGetAttrDict", ParamGetAttrDict<RepeatParam>)
+.set_attr<nnvm::FInferShape>("FInferShape", RepeatShape)
+.set_attr<nnvm::FInferType>("FInferType", ElemwiseType<1, 1>)
+.set_attr<FCorrectLayout>("FCorrectLayout", ElemwiseFixedLayoutUnknownOut<1, 1>)
+.set_num_inputs(1)
+.set_num_outputs(1)
+.set_attr<FTVMCompute>(
+  "FTVMCompute", [](const NodeAttrs& attrs,
+                    const Array<Tensor>& inputs,
+                    const Array<Tensor>& out_info) {
+    const RepeatParam& param = nnvm::get<RepeatParam>(attrs.parsed);
+    return Array<Tensor> {
+      topi::repeat(inputs[0], param.repeats, param.axis)
+    };
+})
+.set_support_level(1);
+
+// tile
+DMLC_REGISTER_PARAMETER(TileParam);
+
+inline bool TileShape(const nnvm::NodeAttrs& attrs,
+                           std::vector<TShape>* in_attrs,
+                           std::vector<TShape>* out_attrs) {
+  CHECK_EQ(in_attrs->size(), 1U);
+  CHECK_EQ(out_attrs->size(), 1U);
+  const TShape& shp = (*in_attrs)[0];
+  if (shp.ndim() == 0) return false;
+  uint32_t sdim = shp.ndim();
+
+  const TileParam& param = nnvm::get<TileParam>(attrs.parsed);
+  const auto& reps = param.reps;
+  uint32_t rdim = reps.ndim();
+  CHECK(rdim > 0)
+    << "repetition array is not defined. data.ndim = " << sdim;
+  for (size_t i = 0; i < rdim; ++i) {
+    CHECK_GT(reps[i], 0)
+        << "Tile reps value should always be larger than 0, but get: " << reps[i];
+  }
+  
+  uint32_t odim = std::max(sdim, rdim);
+  std::vector<int64_t> oshape(odim);
+  for (size_t i = 0; i < odim; ++i) {
+    const auto s = i < sdim ? shp[sdim-1-i] : 1;
+    const auto r = i < rdim ? reps[rdim-1-i] : 1;
+    oshape[odim-1-i] = s * r;
+  }
+  NNVM_ASSIGN_OUTPUT_SHAPE(attrs, *out_attrs, 0,
+      TShape(oshape.begin(), oshape.end()));
+  return true;
+}
+
+NNVM_REGISTER_OP(tile)
+.describe(R"code(Repeat the whole array multiple times.
+
+- **data**: The input data to the operator.
+
+)code" NNVM_ADD_FILELINE)
+.add_argument("data", "Tensor", "Source input")
+.add_arguments(TileParam::__FIELDS__())
+.set_attr_parser(ParamParser<TileParam>)
+.set_attr<FGetAttrDict>("FGetAttrDict", ParamGetAttrDict<TileParam>)
+.set_attr<nnvm::FInferShape>("FInferShape", TileShape)
+.set_attr<nnvm::FInferType>("FInferType", ElemwiseType<1, 1>)
+.set_attr<FCorrectLayout>("FCorrectLayout", ElemwiseFixedLayoutUnknownOut<1, 1>)
+.set_num_inputs(1)
+.set_num_outputs(1)
+.set_attr<FTVMCompute>(
+  "FTVMCompute", [](const NodeAttrs& attrs,
+                    const Array<Tensor>& inputs,
+                    const Array<Tensor>& out_info) {
+    const TileParam& param = nnvm::get<TileParam>(attrs.parsed);
+    Array<tvm::Integer> reps;
+    for (auto rep : param.reps) { reps.push_back(rep); }
+    return Array<Tensor> {
+      topi::tile(inputs[0], reps)
+    };
+})
+.set_support_level(1);
+
 // squeeze
 DMLC_REGISTER_PARAMETER(SqueezeParam);
 

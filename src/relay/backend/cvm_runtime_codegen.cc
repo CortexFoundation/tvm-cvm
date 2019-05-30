@@ -460,8 +460,8 @@ class CVMCodegen
       CVMAttrSerialization as(ss);
       as.Initialize();
       if (call_node->attrs.defined()) {
-        // call_node->attrs->GetNodePtr()->VisitAttrs(&as);
-        const_cast<BaseAttrsNode*>(call_node->attrs.operator->())->VisitNonDefaultAttrs(&as);
+        call_node->attrs->GetNodePtr()->VisitAttrs(&as);
+        // const_cast<BaseAttrsNode*>(call_node->attrs.operator->())->VisitNonDefaultAttrs(&as);
       }
       as.Finalize();
       std::string attrs = ss.str();

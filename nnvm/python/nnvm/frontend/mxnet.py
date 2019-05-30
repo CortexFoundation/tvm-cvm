@@ -334,6 +334,47 @@ def _argmin(inputs, attrs):
     new_attrs['keepdims'] = parse_bool_str(attrs, 'keepdims', default="False")
     return get_nnvm_op(op_name)(*inputs, **new_attrs)
 
+def _embedding(inputs, attrs):
+    indices, weight = inputs
+    return get_nnvm_op("take")(weight, indices, axis=0)
+
+def _repeat(inputs, attrs):
+    data = inputs[0]
+    new_attrs = {}
+    new_attrs["repeats"] = required_attr(attrs, 'repeats', 'repeat')
+    if 'axis' in attrs:
+        new_attrs['axis'] = attrs.get('axis')
+    else:
+        data = get_nnvm_op('flatten')(data)
+        new_attrs['axis'] = 0
+    return get_nnvm_op("repeat")(inputs[0], **new_attrs)
+
+def _box_nms(inputs, attrs):
+    force_suppress = parse_bool_str(attrs, 'force_suppress', default=False)
+    iou_thresh = attrs.get('overlap_thresh', 0.5)
+    top_k = attrs.get('topk', -1)
+    valid_thresh = attrs.get('valid_thresh', 0)
+    coord_start = attrs.get('coord_start', 2)
+    score_index = attrs.get('score_index', 1)
+    id_index = attrs.get('id_index', -1)
+    in_format = attrs.get('in_format', 'corner')
+    out_format = attrs.get('out_format', 'corner')
+    assert in_format == 'corner' and out_format == 'corner'
+
+    ret = get_nnvm_op("get_valid_counts")(inputs[0], score_threshold=valid_thresh)
+    nms_out = get_nnvm_op("non_max_suppression")(ret[1],
+                                                 ret[0],
+                                                 iou_threshold=iou_thresh,
+                                                 force_suppress=force_suppress,
+                                                 top_k=top_k,
+                                                 coord_start=coord_start,
+                                                 score_index=score_index,
+                                                 id_index=id_index,
+                                                 return_indices=False,
+                                                 invalid_to_bottom=True)
+    return nms_out
+
+
 _identity_list = ['__add_scalar__', '__add_symbol__', '__div_scalar__',
                   '__div_symbol__', '__mul_scalar__', '__mul_symbol__',
                   '__pow_scalar__', '__rdiv_scalar__', '__rpow_scalar__',
@@ -344,7 +385,8 @@ _identity_list = ['__add_scalar__', '__add_symbol__', '__div_scalar__',
                   'flatten', 'log', 'log2', 'log_softmax', 'max', 'min', 'negative',
                   'ones_like', 'relu', 'sigmoid', 'slice_like', 'softmax',
                   'sum', 'tanh', 'transpose', 'zeros_like', 'gather_nd',
-                  'reshape_like', 'where', 'floor', 'round', 'ceil']
+                  'reshape_like', 'where', 'floor', 'round', 'ceil',
+                  'squeeze', 'tile']
 
 _convert_map = {
     'Custom'        : _custom,
@@ -396,6 +438,9 @@ _convert_map = {
     'clip'          : _clip,
     'expand_dims'   : _expand_dims,
     'LRN'           : _lrn,
+    'Embedding'     : _embedding,
+    'repeat'        : _repeat,
+    "_contrib_box_nms" : _box_nms,
 }
 
 def _convert_symbol(op_name, inputs, attrs,
