@@ -35,6 +35,7 @@ inline bool LUTInferShape(const NodeAttrs& attrs,
 	for (size_t j = 0; j < dshape.ndim(); ++j) {
 	  oshape[j] = dshape[j];
 	}
+  NNVM_ASSIGN_OUTPUT_SHAPE(attrs, *out_shape, 0, oshape);
 	return true;
 }
 
@@ -43,8 +44,8 @@ inline bool LUTInferType(const NodeAttrs& attrs,
                           std::vector<int>* out_attrs) {
   CHECK_EQ(in_attrs->size(), 2U);
   CHECK_EQ(out_attrs->size(), 1U);
-  CHECK_EQ((*in_attrs)[0], kInt32);
-  NNVM_ASSIGN_INPUT_TYPE(attrs, *in_attrs, 0, static_cast<int>(kInt32));
+  // CHECK_EQ((*in_attrs)[0], kInt32);
+  NNVM_ASSIGN_INPUT_TYPE(attrs, *in_attrs, 0, (*in_attrs)[0]);
   NNVM_ASSIGN_INPUT_TYPE(attrs, *in_attrs, 1, (*in_attrs)[1]);
   NNVM_ASSIGN_OUTPUT_TYPE(attrs, *out_attrs, 0, (*in_attrs)[1]);
   return true;
@@ -83,7 +84,9 @@ NNVM_REGISTER_OP(cvm_lut)
                     const Array<Tensor>& out_info) {
     // const CVMLUTParam params = get<CVMLUTParam>(attrs.parsed);
     return Array<Tensor>{
-      topi::take(inputs[1], inputs[0]) };
+      topi::take(inputs[1],
+          topi::cast(inputs[0], tvm::Int(32)))
+    };
   }, 11)
 .add_argument("data", "Tensor", "input")
 .add_argument("table", "Tensor", "The table to lookup")
@@ -167,12 +170,13 @@ NNVM_REGISTER_OP(cvm_left_shift)
 		a_max = (1 << params.precision) - 1;
 		a_min = 0;
 	}
-	const Tensor& tmp = topi::left_shift(inputs[0],
+	const Tensor& tmp = topi::left_shift(
+      topi::cast(inputs[0], tvm::Int(32)),
 			tvm::make_const(tvm::Int(INT_PREC), params.shift_bit));
-    return Array<Tensor>{
-      topi::clip(tmp, tvm::make_const(tvm::Int(INT_PREC), a_min),
-                 tvm::make_const(tvm::Int(INT_PREC), a_max)) };
-  }, 11)
+  const Tensor& out = topi::clip(tmp, tvm::make_const(tvm::Int(INT_PREC), a_min),
+                 tvm::make_const(tvm::Int(INT_PREC), a_max));
+  return Array<Tensor>{ topi::cast(out, inputs[0]->dtype) };
+}, 11)
 .add_argument("data", "Tensor", "input")
 .add_arguments(CVMLeftShiftParam::__FIELDS__())
 .set_support_level(4);
@@ -211,19 +215,19 @@ which means to implement via tricky equation.
 		a_max = (1 << params.precision) - 1;
 		a_min = 0;
 	}
-	Tensor tmp = inputs[0];
+	Tensor tmp = topi::cast(inputs[0], tvm::Int(32));
 	if (params.shift_bit > 1) {
 		tmp = topi::right_shift(tmp,
 				tvm::make_const(tvm::Int(INT_PREC), params.shift_bit-1));
 	}
-	tmp = topi::add(tmp,
+	const auto& add = topi::add(tmp,
 			tvm::make_const(tvm::Int(INT_PREC), 1));
-	tmp = topi::right_shift(tmp,
+	const auto& rs = topi::right_shift(add,
 			tvm::make_const(tvm::Int(INT_PREC), 1));
-    return Array<Tensor>{
-      topi::clip(tmp, tvm::make_const(tvm::Int(INT_PREC), a_min),
-                 tvm::make_const(tvm::Int(INT_PREC), a_max)) };
-  }, 11)
+  const auto& out = topi::clip(rs, tvm::make_const(tvm::Int(INT_PREC), a_min),
+               tvm::make_const(tvm::Int(INT_PREC), a_max));
+  return Array<Tensor>{ topi::cast(out, inputs[0]->dtype) };
+}, 11)
 .add_argument("data", "Tensor", "input")
 .add_arguments(CVMRightShiftParam::__FIELDS__())
 .set_support_level(4);

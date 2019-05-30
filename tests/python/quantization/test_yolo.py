@@ -287,7 +287,8 @@ def test_sym_nnvm(batch_size, iter_num):
     dump_sym, dump_params = load_fname("_darknet53_voc", "top.nnvm.compile")
     sym, params = mx.sym.load(sym_file), nd.load(param_file)
     inputs_ext, _ = sim.load_ext(ext_file)
-    spass.mxnet_to_nnvm(sym, params, inputs_ext, dump_sym, dump_params)
+    spass.mxnet_to_nnvm(sym, params, inputs_ext, dump_sym, dump_params,
+            target="llvm")
     # spass.mxnet_to_cvm(sym, params, inputs_ext, dump_sym, dump_params,
     #         batch_size=batch_size, logger=logger)
 

@@ -162,6 +162,16 @@ def prepare_for_cvm(symbol, params, inputs_ext):
     def _mx_prepare(sym, params, graph, inputs_ext):
         name, op_name = sym.attr('name'), sym.attr('op_name')
         childs, attr = sym_iter(sym.get_children()), sym.list_attr()
+        if 'scalar' in attr:
+            scalar = float(attr['scalar'])
+            msg = "name:%s, op_name:%s, scalar:%s"%(name, op_name, attr)
+            assert scalar >= INT32_MIN and scalar <= INT32_MAX, msg
+            assert float(int(scalar)) == scalar, msg
+            attr['scalar'] = int(scalar)
+        if 'overlap_thresh' in attr:
+            thresh = float(attr['overlap_thresh']) * 100
+            attr['overlap_thresh'] = int(thresh)
+
         node = sym
         if op_name in ['slice_axis']:
             X = childs[0]
@@ -183,6 +193,17 @@ def prepare_for_cvm(symbol, params, inputs_ext):
             begin = [0 if s is None else s for s in begin]
             end = [cshape[i] if s is None else s for i,s in enumerate(end)]
             node = get_mxnet_op('slice')(X, begin=begin, end=end, name=name)
+        elif op_name in ['floor', 'ceil', 'round']:
+            node = childs[0]
+        elif op_name == '__div_scalar__':
+            scalar = int(attr['scalar'])
+            sb = math.log2(scalar)
+            assert int(sb) == sb, "op(%s name=%s) scalar (%s vs. %s)" \
+                % (op_name, name, scalar, sb)
+            X = childs[0]
+            sb_sym, sb_name = op_const(int(sb), graph, var=nnvm.sym.Variable)
+            params[sb_name] = nd.array([int(sb)])
+            node = nnvm.sym.broadcast_right_shift(X, sb_sym)
         return node, params
     psym, pparams = topo_visit(symbol, params, inputs_ext,
             get_op=get_mxnet_op,
@@ -196,11 +217,22 @@ def mxnet_to_nnvm(sym, params, inputs_ext, dump_sym, dump_params,
 
     sym, params = prepare_for_cvm(sym, params, inputs_ext)
     nnvm_sym, _ = nnvm.frontend.from_mxnet(sym)
-    nnvm_sym, real_params = nnvm_realize(nnvm_sym, params, inputs_ext)
 
-    use_dtype = "int32"
-    for key, value in list(real_params.items()):
-        real_params[key] = tvm.nd.array(value.asnumpy().astype(use_dtype), tvm_ctx)
+    # graph = nnvm.graph.create(nnvm_sym)
+    # nnvm_sym, real_params = nnvm_realize(nnvm_sym, params, inputs_ext)
+
+    args = nnvm_sym.list_input_names()
+    real_params = {}
+    use_dtype = "float32"
+    for key, value in params.items():
+        if key not in args:
+            logger.warn("key:%s not exists in graph", key)
+        else:
+            msg = "key:%s value:%s"%(key, value)
+            flat = value.asnumpy().flatten()
+            assert all(flat >= INT32_MIN) and all(flat <= INT32_MAX), msg
+            assert all(flat.astype('int32').astype('float32') == flat), msg
+            real_params[key] = tvm.nd.array(value.astype(use_dtype).asnumpy(), tvm_ctx)
     with nnvm.compiler.build_config(opt_level=0, runtime=runtime):
         deploy_graph, lib, real_params = nnvm.compiler.build(
             nnvm_sym, target=target, shape=inputs_shape,
