@@ -559,7 +559,7 @@ def _from_mxnet_impl(symbol, graph):
         name = sym.attr('name')
         if name not in graph:
             return None
-        output_index = json.loads(sym.tojson())['heads'][0][1]
+        output_index = json.loads(sym.tojson())['heads'][0][1] if len(sym) > 1 else 0
         return graph[name][output_index]
 
     assert symbol is not None
