@@ -269,6 +269,9 @@ reg.register_pattern("clip", OpPattern.ELEMWISE)
 reg.register_schedule("clip", _fschedule_elemwise)
 
 # cvm op
+reg.register_pattern("cvm_lut", OpPattern.INJECTIVE)
+reg.register_schedule("cvm_lut", _fschedule_injective)
+
 reg.register_pattern("cvm_clip", OpPattern.ELEMWISE)
 reg.register_schedule("cvm_clip", _fschedule_elemwise)
 

@@ -46,7 +46,7 @@ bool GetValidShape(const NodeAttrs& attrs,
   TShape shp = in_attrs->at(0);
   CHECK_EQ(in_attrs->size(), 1U);
   CHECK_EQ(out_attrs->size(), 2U);
-  TShape count_shape{1};
+  TShape count_shape{shp[0]};
   TShape oshape(shp);
   NNVM_ASSIGN_OUTPUT_SHAPE(attrs, *out_attrs, 0, count_shape);
   NNVM_ASSIGN_OUTPUT_SHAPE(attrs, *out_attrs, 1, oshape);

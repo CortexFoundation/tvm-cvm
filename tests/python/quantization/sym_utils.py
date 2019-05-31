@@ -194,7 +194,8 @@ def get_node(sym, graph):
         output_index = json.loads(sym.tojson())['heads'][0][1]
     else:
         assert isinstance(sym, nnvm.sym.Symbol)
-        output_index = 0
+        graph = nnvm.graph.create(sym)
+        output_index = json.loads(graph.json())['heads'][0][1]
     return graph[name][output_index]
 
 def topo_visit(symbol, params, inputs_ext={}, get_op=get_mxnet_op,

@@ -59,14 +59,14 @@ struct CVMOpParam : public dmlc::Parameter<CVMOpParam> {
   uint32_t num_inputs;
   uint32_t num_outputs;
   uint32_t flatten_data;
-  std::string op_attrs;
+  // std::string op_attrs;
 
   DMLC_DECLARE_PARAMETER(CVMOpParam) {
     DMLC_DECLARE_FIELD(func_name);
     DMLC_DECLARE_FIELD(num_inputs).set_default(1);
     DMLC_DECLARE_FIELD(num_outputs).set_default(1);
     DMLC_DECLARE_FIELD(flatten_data).set_default(0);
-    DMLC_DECLARE_FIELD(op_attrs).set_default("{}");
+    // DMLC_DECLARE_FIELD(op_attrs).set_default("{}");
   }
 };
 

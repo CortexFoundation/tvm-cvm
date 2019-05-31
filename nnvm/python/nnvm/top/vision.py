@@ -80,13 +80,13 @@ reg.register_pattern("multibox_detection", OpPattern.OPAQUE)
 @reg.register_schedule("get_valid_counts")
 def scahedule_get_valid_counts(_, outs, target):
     """Schedule definition of get_valid_counts"""
-    with target:
+    with tvm.target.create(target):
         return topi.generic.schedule_get_valid_counts(outs)
 
 @reg.register_compute("get_valid_counts")
-def compute_get_valid_counts(attrs, inputs, _, target):
+def compute_get_valid_counts(attrs, inputs, _):
     """Compute definition of get_valid_counts"""
-    score_threshold = get_const_float(attrs.score_threshold)
+    score_threshold = attrs.get_float("score_threshold")
     return topi.vision.get_valid_counts(inputs[0], score_threshold)
 
 # non-maximum suppression
