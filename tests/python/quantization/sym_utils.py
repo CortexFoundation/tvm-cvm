@@ -194,8 +194,6 @@ def get_node(sym, graph):
         output_index = json.loads(sym.tojson())['heads'][0][1]
     else:
         assert isinstance(sym, nnvm.sym.Symbol)
-        output_index = sym.attr("heads")
-        print (name, sym, sym.list_inputs())
         output_index = 0
     return graph[name][output_index]
 
@@ -305,6 +303,7 @@ nnvm_identity_ext = {
     'null': OpExt(out_types=[INT8_TYPE, INT32_TYPE]),
 
     'relu': OpExt('relu', [INT8_TYPE], [INT8_TYPE]),
+    'upsampling': OpExt('upsampling', [INT8_TYPE], [INT8_TYPE]),
     'max_pool2d': OpExt('max_pool2d', [INT8_TYPE], [INT8_TYPE]),
 
     'conv2d': OpExt('conv2d', [INT8_TYPE], [INT32_TYPE]),
@@ -384,6 +383,7 @@ mx_identity_ext = {
     'slice_axis': {},
     'repeat': {},
     'Reshape': {},
+    'UpSampling': {},
     'transpose': {},
     'tile': {},
     'expand_dims': {},
