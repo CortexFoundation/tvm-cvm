@@ -37,6 +37,17 @@ def load_fname(version, suffix=None, with_ext=False):
     fname = "./data/resnet%s%s"%(version, suffix)
     return utils.extend_fname(fname, with_ext)
 
+def test_sym_nnvm(batch_size=10):
+    version = "50_mxg"
+    dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
+    (inputs_ext,) = sim.load_ext(dump_ext)
+    for k, v in inputs_ext.items():
+        v['shape'] = (batch_size, *v['shape'][1:])
+    sym, params = mx.sym.load(dump_sym), nd.load(dump_params)
+
+    spass.mxnet_to_nnvm(sym, params, inputs_ext,
+            *load_fname(version, "nnvm.compile"))
+
 def test_sym_pass(batch_size=10, iter_num=10):
     logger = logging.getLogger("log.test.sym.pass")
 
@@ -82,7 +93,7 @@ def test_sym_pass(batch_size=10, iter_num=10):
     # qsym, qparams, _ = anno.mixed_precision(sym, params, inputs_ext,
     #         in_bit=in_bit, out_bit=out_bit, ctx=[calib_ctx])
     qsym, qparams, precs, _ = calib.sym_simulate(sym, params, inputs_ext, data, calib_ctx)
-    qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, precs, "tvm")
+    qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, precs, "cvm")
     dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
     sim.save_ext(dump_ext, inputs_ext)
     nd.save(dump_params, qparams)
@@ -109,9 +120,6 @@ def test_sym_pass(batch_size=10, iter_num=10):
     utils.multi_validate(resnet, data_iter_func,
             cvm_quantize,
             iter_num=iter_num, logger=logger)
-    # multi_eval_accuracy(graph_func, data_iter_func,
-    #         gluon_cv, cvm_quantize,
-    #         iter_num=iter_num, logger=logger)
 
 def test_performance(batch_size=10, iter_num=10):
     logger = logging.getLogger("log.test.tvm.performance")
@@ -167,14 +175,6 @@ def test_performance(batch_size=10, iter_num=10):
     utils.eval_time_accuracy(graph_func, data_iter_func, quantize,
             iter_num=iter_num, logger=logger)
 
-def save_data():
-    batch_size = 1024
-    data_iter = load_dataset(batch_size)
-    calib_data = data_iter.next()
-    x, _ = quant_helper(calib_data.data[0])
-    np.save('/tmp/imagenet.x', x.asnumpy())
-    np.save('/tmp/imagenet.y', calib_data.label[0].asnumpy())
-
 if __name__ == "__main__":
     utils.log_init()
 
@@ -187,7 +187,7 @@ if __name__ == "__main__":
     # save_data()
 
     test_sym_pass(batch_size=16, iter_num=10)
-    # test_sym_nnvm(batch_size=1, iter_num=1)
+    test_sym_nnvm(batch_size=1)
     # test_performance(16, 10)
 
 
