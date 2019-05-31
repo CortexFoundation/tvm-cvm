@@ -191,12 +191,15 @@ def get_node(sym, graph):
     if name not in graph:
         assert False, "Unrecognized layer:%s in graph"%name
     if isinstance(sym, _sym.Symbol):
-        output_index = json.loads(sym.tojson())['heads'][0][1]
+        oindex = 0 if len(sym) == 1 else json.loads(sym.tojson())['heads'][0][1]
     else:
         assert isinstance(sym, nnvm.sym.Symbol)
-        graph = nnvm.graph.create(sym)
-        output_index = json.loads(graph.json())['heads'][0][1]
-    return graph[name][output_index]
+        if sym.list_output_names() == 1:
+            oindex = 0
+        else:
+            graph = nnvm.graph.create(sym)
+            oindex = json.loads(graph.json())['heads'][0][1]
+    return graph[name][oindex]
 
 def topo_visit(symbol, params, inputs_ext={}, get_op=get_mxnet_op,
         logger=logging, callback=None, **kwargs):
