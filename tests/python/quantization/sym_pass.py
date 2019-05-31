@@ -211,19 +211,16 @@ def prepare_for_cvm(symbol, params, inputs_ext):
     return psym, pparams
 
 def mxnet_to_nnvm(sym, params, inputs_ext, dump_sym, dump_params,
-        runtime="cvm", target="cuda"):
+        runtime="cvm", target="cuda", logger=logging):
     tvm_ctx = tvm.context(target, 1)
     inputs_shape = {k:v['shape'] for k,v in inputs_ext.items()}
 
     sym, params = prepare_for_cvm(sym, params, inputs_ext)
     nnvm_sym, _ = nnvm.frontend.from_mxnet(sym)
 
-    # graph = nnvm.graph.create(nnvm_sym)
-    # nnvm_sym, real_params = nnvm_realize(nnvm_sym, params, inputs_ext)
-
     args = nnvm_sym.list_input_names()
     real_params = {}
-    use_dtype = "float32"
+    use_dtype = "int32"
     for key, value in params.items():
         if key not in args:
             logger.warn("key:%s not exists in graph", key)
@@ -233,11 +230,14 @@ def mxnet_to_nnvm(sym, params, inputs_ext, dump_sym, dump_params,
             assert all(flat >= INT32_MIN) and all(flat <= INT32_MAX), msg
             assert all(flat.astype('int32').astype('float32') == flat), msg
             real_params[key] = tvm.nd.array(value.astype(use_dtype).asnumpy(), tvm_ctx)
+
+    logger.debug("Compile mxnet graph to NNVM json")
     with nnvm.compiler.build_config(opt_level=0, runtime=runtime):
         deploy_graph, lib, real_params = nnvm.compiler.build(
             nnvm_sym, target=target, shape=inputs_shape,
             params=real_params, dtype=use_dtype)
-    real_params = tvm_params_reduce(nnvm_sym, real_params, inputs_ext, tvm_ctx)
+    if runtime == "cvm":
+        real_params = tvm_params_reduce(nnvm_sym, real_params, inputs_ext, tvm_ctx)
     open(dump_sym, "w").write(deploy_graph.json())
     param_bytes = nnvm.compiler.save_param_dict(real_params)
     open(dump_params, "wb").write(param_bytes)
