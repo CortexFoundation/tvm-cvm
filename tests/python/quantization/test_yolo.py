@@ -268,10 +268,10 @@ def test_sym_pass(batch_size=10, iter_num=10):
         return "{:6.2%}".format(acc)
 
     # data = sim.load_real_data(data, 'data', net4_inputs_ext)
-    # np.save("/tmp/yolo/data", data.asnumpy())
+    # np.save("/tmp/yolo/data", data.asnumpy().astype('int8'))
     # out = net4(data.as_in_context(ctx))
     # for i, o in enumerate(out):
-    #     np.save("/tmp/yolo/result"+str(i), o.asnumpy())
+    #     np.save("/tmp/yolo/result"+str(i), o.asnumpy().astype('int32'))
     # exit()
 
     utils.multi_validate(yolov3, data_iter_func,

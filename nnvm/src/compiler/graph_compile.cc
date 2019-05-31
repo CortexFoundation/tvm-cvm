@@ -46,10 +46,50 @@ namespace compiler {
 
 using namespace tvm;
 
+// Decorate the result of PlanMemory
+// This function does two things:
+// - Give separate memory to each variable.
+// - Tie the memory of output/lhs in assign node properly
+//   so the execution of assign can have side effect.
+nnvm::Graph DecorateMemoryPlan(
+    nnvm::Graph g,
+    const std::vector<int>& assign_flag) {
+  const IndexedGraph& idx = g.indexed_graph();
+  StorageVector storage_vec = g.MoveCopyAttr<StorageVector>("storage_id");
+  g.attrs.erase("storage_allocated_bytes");
+  g.attrs.erase("storage_inplace_index");
+  size_t num_not_allocated = g.MoveCopyAttr<size_t>(
+      "storage_num_not_allocated");
+  CHECK_EQ(num_not_allocated, 0U)
+      << "Can only build inference graph with all statically allocated memory";
+
+  // Reassign variable id so that they are different.
+  int max_id = 0;
+  for (size_t i = 0; i < storage_vec.size(); ++i) {
+    max_id = std::max(storage_vec[i] + 1, max_id);
+  }
+  for (uint32_t nid : idx.input_nodes()) {
+    storage_vec[idx.entry_id(nid, 0)] = max_id++;
+  }
+  // Tie up the assign node storage properly.
+  for (uint32_t nid = 0 ; nid < idx.num_nodes(); ++nid) {
+    if (assign_flag[nid] == 0) continue;
+    const auto& inode = idx[nid];
+    int var_storage_id = storage_vec[idx.entry_id(inode.inputs[0])];
+    storage_vec[idx.entry_id(nid, 0)] = var_storage_id;
+
+    if (assign_flag[nid] == 2) {
+      storage_vec[idx.entry_id(inode.inputs[1])] = var_storage_id;
+    }
+  }
+  g.attrs["storage_id"] = std::make_shared<any>(std::move(storage_vec));
+  return g;
+}
+
 nnvm::Graph GraphCompile(const nnvm::Graph& g) {
   // Get attributes from the graph.
   const ShapeVector& shape_vec = g.GetAttr<ShapeVector>("shape");
-  // const DTypeVector& dtype_vec = g.GetAttr<DTypeVector>("dtype");
+  const DTypeVector& dtype_vec = g.GetAttr<DTypeVector>("dtype");
   const GroupVec& group_vec = g.GetAttr<GroupVec>("group_root");
   const PatternVec& pattern_vec = g.GetAttr<PatternVec>("pattern");
 
@@ -73,6 +113,10 @@ nnvm::Graph GraphCompile(const nnvm::Graph& g) {
         << "variable precision must be 1 outputs";
       precision = std::stoi(search->second);
     }
+    for (uint32_t i = 0; i < inode.source->num_outputs(); ++i) {
+      uint32_t eid = idx.entry_id(nid, i);
+      prec_vec[eid] = precision;
+    }
     std::vector<std::string> attr_vec;
     for (auto& item: inode.source->attrs.dict) {
         std::stringstream tss;
@@ -87,11 +131,7 @@ nnvm::Graph GraphCompile(const nnvm::Graph& g) {
     }
     ss << "}";
     std::string attrs = ss.str();
-    for (uint32_t i = 0; i < inode.source->num_outputs(); ++i) {
-      uint32_t eid = idx.entry_id(nid, i);
-      prec_vec[eid] = precision;
-      op_attrs[eid] = attrs;
-    }
+    op_attrs[nid] = attrs;
   }
 
   const nnvm::Op* cvm_op = nnvm::Op::Get("cvm_op");
@@ -170,10 +210,10 @@ nnvm::Graph GraphCompile(const nnvm::Graph& g) {
   //
   std::vector<int> assign_flag(new_idx.num_nodes(), 0);
   ShapeVector new_shape_vec = ShapeVector(new_idx.num_node_entries(), TShape());
+  DTypeVector new_dtype_vec = DTypeVector(new_idx.num_node_entries());
   std::vector<int> new_prec_vec(new_idx.num_node_entries(), -1);
   std::vector<std::string> new_dltype_vec(new_idx.num_node_entries());
-  std::vector<std::string>  new_op_attrs(new_idx.num_node_entries());
-  std::vector<std::string> attr_parsed(new_idx.num_node_entries());
+  std::vector<std::string>  new_op_attrs(new_idx.num_nodes());
   for (const auto& kv : old_new) {
     uint32_t nid = kv.first;
     const auto& inode = idx[nid];
@@ -194,11 +234,12 @@ nnvm::Graph GraphCompile(const nnvm::Graph& g) {
         assign_flag[new_nid] = 1;
       }
     }
+    new_op_attrs[new_nid] = op_attrs[nid];
     for (uint32_t i = 0; i < inode.source->num_outputs(); ++i) {
       uint32_t new_eid = new_idx.entry_id(new_idx.node_id(kv.second.get()), i);
       uint32_t old_eid = idx.entry_id(nid, i);
       new_shape_vec[new_eid] = shape_vec[old_eid];
-      new_op_attrs[new_eid] = op_attrs[old_eid];
+      new_dtype_vec[new_eid] = dtype_vec[old_eid];
       new_prec_vec[new_eid] = prec_vec[old_eid];
       new_dltype_vec[new_eid] = "int32";
       // new_dltype_vec[new_eid] = tvm::runtime::TVMType2String(
@@ -207,17 +248,25 @@ nnvm::Graph GraphCompile(const nnvm::Graph& g) {
   }
 
   ret.attrs["shape"] = std::make_shared<any>(std::move(new_shape_vec));
+  ret.attrs["dtype"] = std::make_shared<any>(std::move(new_dtype_vec));
+
+  ret = nnvm::ApplyPass(ret, "PlanMemory");
+  ret = DecorateMemoryPlan(ret, assign_flag);
+
+  CHECK_EQ(new_idx.num_nodes(), new_op_attrs.size())
+    << "OpAttrs is not consistant with nodes " << new_idx.num_nodes()
+    << " vs. " << new_op_attrs.size();
+  ret.attrs.erase("dtype");
   ret.attrs["precision"] = std::make_shared<any>(std::move(new_prec_vec));
   ret.attrs["dltype"] = std::make_shared<any>(std::move(new_dltype_vec));
   ret.attrs["op_attrs"] = std::make_shared<any>(std::move(new_op_attrs));
-
   return ret;
 }
 
 NNVM_REGISTER_PASS(GraphCompile)
     .set_body(GraphCompile)
     .depend_graph_attr("shape")
-    // .depend_graph_attr("dtype")
+    .depend_graph_attr("dtype")
     .depend_graph_attr("fused_entry")
     .depend_graph_attr("group_root")
     .depend_graph_attr("pattern");

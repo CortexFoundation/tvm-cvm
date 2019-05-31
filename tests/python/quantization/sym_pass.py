@@ -162,6 +162,9 @@ def prepare_for_cvm(symbol, params, inputs_ext):
     def _mx_prepare(sym, params, graph, inputs_ext):
         name, op_name = sym.attr('name'), sym.attr('op_name')
         childs, attr = sym_iter(sym.get_children()), sym.list_attr()
+        if op_name == 'null':
+            return sym, params
+
         if 'scalar' in attr:
             scalar = float(attr['scalar'])
             msg = "name:%s, op_name:%s, scalar:%s"%(name, op_name, attr)
@@ -171,8 +174,8 @@ def prepare_for_cvm(symbol, params, inputs_ext):
         if 'overlap_thresh' in attr:
             thresh = float(attr['overlap_thresh']) * 100
             attr['overlap_thresh'] = int(thresh)
+        node = get_mxnet_op(op_name)(*childs, **attr)
 
-        node = sym
         if op_name in ['slice_axis']:
             X = childs[0]
             cshape = infer_shapes[X.attr('name')]
@@ -204,6 +207,7 @@ def prepare_for_cvm(symbol, params, inputs_ext):
             sb_sym, sb_name = op_const(int(sb), graph, var=nnvm.sym.Variable)
             params[sb_name] = nd.array([int(sb)])
             node = nnvm.sym.broadcast_right_shift(X, sb_sym)
+        infer_shapes[node.attr('name')] = infer_shapes[name]
         return node, params
     psym, pparams = topo_visit(symbol, params, inputs_ext,
             get_op=get_mxnet_op,
