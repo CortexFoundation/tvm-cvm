@@ -206,7 +206,6 @@ nnvm::Graph TVMGraphCompile(const nnvm::Graph& g) {
   ShapeVector new_shape_vec = ShapeVector(new_idx.num_node_entries(), TShape());
   DTypeVector new_dtype_vec = DTypeVector(new_idx.num_node_entries());
   std::vector<std::string> new_dltype_vec(new_idx.num_node_entries());
-  std::vector<std::string> attr_parsed(new_idx.num_node_entries());
   for (const auto& kv : old_new) {
     uint32_t nid = kv.first;
     const auto& inode = idx[nid];
