@@ -104,6 +104,17 @@ def prepare_for_cvm(symbol, params, inputs_ext):
             begin = [0 if s is None else s for s in begin]
             end = [cshape[i] if s is None else s for i,s in enumerate(end)]
             node = get_mxnet_op('slice')(X, begin=begin, end=end, name=name)
+        # elif op_name == 'slice_like':
+        #     A, B = childs[0], childs[1]
+        #     A_name, B_name = A.attr('name'), B.attr('name')
+        #     axes = get_attr(attr, 'axes')
+        #     A_shape, B_shape = infer_shapes[A_name], infer_shapes[B_name]
+        #     oshape = [None] * len(A_shape)
+        #     begin, end = [None] * len(A_shape), [None] * len(A_shape)
+        #     for ax in axes:
+        #         assert B_shape[ax] <= A_shape[ax]
+        #         begin[ax], end[ax] = 0, B_shape[ax]
+        #     node = mx.sym.slice(A, begin=begin, end=end)
         elif op_name in ['floor', 'ceil', 'round']:
             node = childs[0]
         elif op_name == '__div_scalar__':
@@ -602,17 +613,6 @@ def _sym_rewrite(sym, params, graph, inputs_ext, infer_shapes):
         params[sname] = nd.array([1 / scalar])
         graph[sname] = scale = mx.sym.var(sname, shape=(1,))
         node = mx.sym.broadcast_mul(X, scale, name=name)
-    # elif op_name == 'slice_like':
-    #     A, B = childs[0], childs[1]
-    #     A_name, B_name = A.attr('name'), B.attr('name')
-    #     axes = get_attr(attr, 'axes')
-    #     A_shape, B_shape = infer_shapes[A_name], infer_shapes[B_name]
-    #     oshape = [None] * len(A_shape)
-    #     begin, end = [None] * len(A_shape), [None] * len(A_shape)
-    #     for ax in axes:
-    #         assert B_shape[ax] <= A_shape[ax]
-    #         begin[ax], end[ax] = 0, B_shape[ax]
-    #     node = mx.sym.slice(A, begin=begin, end=end)
     infer_shapes[node.attr('name')] = infer_shapes[name]
     return node, params
 

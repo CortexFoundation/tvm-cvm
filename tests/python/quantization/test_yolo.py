@@ -174,7 +174,7 @@ def test_sym_pass(batch_size=10, iter_num=10):
     utils.load_parameters(top_graph, top_params, ctx=ctx)
 
     # quantize base graph
-    if True:
+    if False:
         qbase, qbase_params, qbase_prec, base_oscales = calib.sym_simulate(
                 base, base_params, base_inputs_ext, th_dict)
         qbase, qbase_params = calib.sym_realize(qbase, qbase_params, base_inputs_ext, qbase_prec)
@@ -200,7 +200,7 @@ def test_sym_pass(batch_size=10, iter_num=10):
            return "{:6.2%}".format(acc)
 
     # quantize top graph
-    if True:
+    if False:
         top_sym = base_graph(mx.sym.Group(base_inputs))
         top_names = [c.attr('name') for c in top_sym]
         in_bit, out_bit = 8, 30
@@ -245,7 +245,7 @@ def test_sym_pass(batch_size=10, iter_num=10):
             return "{:6.2%}".format(acc)
 
     # merge quantize model
-    if True:
+    if False:
         qb_sym, qb_params, qb_ext = load_fname("_darknet53_voc", "base.quantize", True)
         qbase, qbase_params = mx.sym.load(qb_sym), nd.load(qb_params)
         qbase_inputs_ext, _ = sim.load_ext(qb_ext)
@@ -276,12 +276,14 @@ def test_sym_pass(batch_size=10, iter_num=10):
             acc = validate_data(net, data, label, all_qmetric)
             return "{:6.2%}".format(acc)
 
-    if False:
+    if True:
+        data, _ = data_iter_func()
         data = sim.load_real_data(data, 'data', net4_inputs_ext)
         np.save("/tmp/yolo/data", data.asnumpy().astype('int8'))
         out = net4(data.as_in_context(ctx))
         for i, o in enumerate(out):
            np.save("/tmp/yolo/result"+str(i), o.asnumpy().astype('int32'))
+        exit()
 
     utils.multi_validate(yolov3, data_iter_func,
             all_quantize,
@@ -292,14 +294,11 @@ def test_sym_nnvm(batch_size, iter_num):
     logger = logging.getLogger("log.test.nnvm")
     logger.info("=== Log Test NNVM ===")
 
-    sym_file, param_file, ext_file = load_fname("_darknet53_voc", "top.quantize", True)
-    dump_sym, dump_params = load_fname("_darknet53_voc", "top.nnvm.compile")
+    sym_file, param_file, ext_file = load_fname("_darknet53_voc", "all.quantize", True)
+    dump_sym, dump_params = load_fname("_darknet53_voc", "all.nnvm.compile")
     sym, params = mx.sym.load(sym_file), nd.load(param_file)
     inputs_ext, _ = sim.load_ext(ext_file)
     spass.mxnet_to_nnvm(sym, params, inputs_ext, dump_sym, dump_params)
-    # spass.mxnet_to_cvm(sym, params, inputs_ext, dump_sym, dump_params,
-    #         batch_size=batch_size, logger=logger)
-
 
 if __name__ == '__main__':
     utils.log_init()
@@ -307,5 +306,5 @@ if __name__ == '__main__':
     # zoo.save_model('yolo3_darknet53_voc')
     # zoo.save_model("yolo3_mobilenet1.0_voc")
 
-    test_sym_pass(1, 100)
-    # test_sym_nnvm(16, 0)
+    # test_sym_pass(1, 100)
+    test_sym_nnvm(16, 0)

@@ -374,6 +374,10 @@ def _box_nms(inputs, attrs):
                                                  invalid_to_bottom=True)
     return nms_out
 
+def _slice_like(inputs, attrs):
+    new_attrs = { 'axis': attrs.get("axes") }
+    return get_nnvm_op("slice_like")(*inputs, **new_attrs)
+
 
 _identity_list = ['__add_scalar__', '__add_symbol__', '__div_scalar__',
                   '__div_symbol__', '__mul_scalar__', '__mul_symbol__',
@@ -383,7 +387,7 @@ _identity_list = ['__add_scalar__', '__add_symbol__', '__div_scalar__',
                   'broadcast_sub', 'broadcast_to', 'cast', 'abs', 'elemwise_add',
                   'elemwise_div', 'elemwise_mul', 'elemwise_sub', 'exp',
                   'flatten', 'log', 'log2', 'log_softmax', 'max', 'min', 'negative',
-                  'ones_like', 'relu', 'sigmoid', 'slice_like', 'softmax',
+                  'ones_like', 'relu', 'sigmoid', 'softmax',
                   'sum', 'tanh', 'transpose', 'zeros_like', 'gather_nd',
                   'reshape_like', 'where', 'floor', 'round', 'ceil',
                   'squeeze', 'tile']
@@ -440,7 +444,8 @@ _convert_map = {
     'LRN'           : _lrn,
     'Embedding'     : _embedding,
     'repeat'        : _repeat,
-    "_contrib_box_nms" : _box_nms,
+    "_contrib_box_nms"  : _box_nms,
+    "slice_like"        : _slice_like,
 }
 
 def _convert_symbol(op_name, inputs, attrs,
