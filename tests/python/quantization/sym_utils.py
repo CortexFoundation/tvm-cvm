@@ -56,16 +56,18 @@ def get_attr(attr, name, default=None):
         assert False, "attr %s is not exists in %s" % (name, attr)
     return default
 
+_MX_OP_CONTRIB_PREFIX = '_contrib_'
 def get_nd_op(op_name):
     op = getattr(nd, op_name, None)
     if op is None:
         op = getattr(nd._internal, op_name, None)
+    if op_name.startswith(_MX_OP_CONTRIB_PREFIX):
+        op = getattr(nd.contrib, op_name[len(_MX_OP_CONTRIB_PREFIX):], None)
 
     if op is None:
         raise RuntimeError("Unable to map op_name {} to mxnet.ndarray".format(op_name))
     return op
 
-_MX_OP_CONTRIB_PREFIX = '_contrib_'
 def get_mxnet_op(op_name):
     op = getattr(_internal, op_name, None)
     if op is None:
@@ -186,63 +188,44 @@ def topo_sort(symbol, logger=logging, with_deps=False):
 def sym_collect_attr(symbol, attr_name='op_name'):
     return {sym.attr(attr_name) for sym in topo_sort(symbol)}
 
+def get_entry_id(sym):
+    oindex = 0
+    if isinstance(sym, _sym.Symbol) and len(sym) > 1:
+        oindex = json.loads(sym.tojson())['heads'][0][1]
+    elif isinstance(sym, nnvm.sym.Symbol) and len(sym.list_output_names()) > 1:
+        graph = nnvm.graph.create(sym)
+        oindex = json.loads(graph.json())['heads'][0][1]
+    return oindex
+
 def get_node(sym, graph):
     name = sym.attr('name')
     if name not in graph:
-        assert False, "Unrecognized layer:%s in graph"%name
-    if isinstance(sym, _sym.Symbol):
-        oindex = 0 if len(sym) == 1 else json.loads(sym.tojson())['heads'][0][1]
-    else:
-        assert isinstance(sym, nnvm.sym.Symbol)
-        if sym.list_output_names() == 1:
-            oindex = 0
-        else:
-            graph = nnvm.graph.create(sym)
-            oindex = json.loads(graph.json())['heads'][0][1]
-    return graph[name][oindex]
+        assert False, "Unrecognized layer:%s in graph keys:5s" \
+            % (name, graph.keys())
+    return graph[name][get_entry_id(sym)]
 
-def topo_visit(symbol, params, inputs_ext={}, get_op=get_mxnet_op,
-        logger=logging, callback=None, **kwargs):
-    graph = {}
-    params = {k:v[:] for k,v in params.items()}
+def topo_visit(symbol, params, inputs_ext, callback,
+        get_op=get_mxnet_op, logger=logging,
+        with_maps=False, **kwargs):
+    graph, maps = {}, {}
+    params = {k:v[:] for k,v in params.items()} # copy params
     for sym in topo_sort(symbol, logger=logger):
-        name = sym.attr('name')
-        op_name = sym.attr('op_name')
-        childs = sym_iter(sym.get_children())
-        attr = sym.list_attr()
-
+        name, op_name = sym.attr('name'), sym.attr('op_name')
+        childs, attr = sym_iter(sym.get_children()), sym.list_attr()
         node = sym
         if childs is not None:
-            # update childs in graph
             childs = [get_node(c, graph) for c in childs]
             node = get_op(op_name)(*childs, **attr, name=name)
-
-            # check params dict
-            for c in childs:
-                if c.attr('op_name') != 'null':
-                    continue
-                cname = c.attr('name')
-                assert cname in params or cname in inputs_ext, \
-                    'symbol:%s(%s) parameter:%s is missing in params dict:%s' \
-                    % (name, [c.attr('name') for c in childs],
-                        cname, params.keys())
-
         if callback is not None:
-            # process symbol and params
             node, params = callback(node, params, graph, inputs_ext, **kwargs)
-
+        maps[node.attr('name')] = name
         graph[name] = node
-
-    nodes = []
-    for sym in symbol:
-        node = get_node(sym, graph)
-        nodes.append(node)
-
-    ret_sym = nodes[0]
-    if len(nodes) > 1:
-        ret_sym = get_op("Group")(nodes)
-
-    return ret_sym, params
+    nodes = [get_node(sym, graph) for sym in symbol]
+    ret = get_op("Group")(nodes) if len(nodes) > 1 else nodes[0]
+    if with_maps:
+        return ret, params, maps
+    else:
+        return ret, params
 
 
 """Deterministic Op Description

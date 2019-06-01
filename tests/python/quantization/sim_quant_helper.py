@@ -28,31 +28,10 @@ def load_ext(fname):
         infos.append(json.loads(line))
     return tuple(infos)
 
-def get_simple_sim_scale(threshold, target_bit):
-    min_range, max_range = threshold
-    alpha = max(abs(min_range), abs(max_range))
-
-    bit = math.ceil(math.log2(alpha))
-    shift_bit = target_bit - 1 - bit
-    return 2 ** shift_bit
-
-def get_sim_scale(thresholds, target_bit):
-    amin, amax = thresholds
-    alpha = max(abs(amin), abs(amax))
+def get_sim_scale(alpha, target_bit):
     sim_max = 2 ** (target_bit - 1) - 1
     scale = 1 if alpha == 0 else sim_max / alpha
     return scale
-
-    # assert len(thresholds.shape) == 2
-    # size = thresholds.shape[0]
-    # assert thresholds.shape[1] == 2
-    # scales = []
-    # for value in thresholds:
-    #     alpha = value.abs().max().asscalar()
-    #     sim_max = 2 ** (target_bit - 1) - 1
-    #     scale = 0 if alpha == 0 else sim_max / alpha
-    #     scales.append(scale)
-    # return nd.array(scales)
 
 def int_realize(data, target_bit, logger=logging):
     out = data.round()

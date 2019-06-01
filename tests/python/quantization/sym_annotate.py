@@ -171,7 +171,7 @@ def _is_annotate_op(sym):
     if op_name == 'Custom' and attr['op_type'] == 'cvm_annotate':
         return True
     return False
-def _sym_annotate(sym, params, graph, inputs_ext, precs):
+def _sym_annotate(sym, params, graph, inputs_ext, precs, th_dict):
     logger = logging.getLogger("log.sym.annotate")
     name, op_name = sym.attr('name'), sym.attr('op_name')
     childs, attr = sym_iter(sym.get_children()), sym.list_attr()
@@ -188,17 +188,19 @@ def _sym_annotate(sym, params, graph, inputs_ext, precs):
                     ANNO_TYPE.REQUANT, logger)
             precs[tmp.attr('name')][name] = c_tb
             precs[tmp.attr('name')][out_key] = c_tb
+            th_dict[tmp.attr('name')] = th_dict[c.attr('name')]
         new_childs.append(tmp)
     node = get_mxnet_op(op_name)(*new_childs, **attr, name=name)
 
     if op_name in ['sigmoid', 'exp']:
-       c_tb = cprecs[0][name]
-       c_bit = cprecs[0][out_key] if out_key in cprecs[0] else cprecs[0][name]
-       tmp = _annotate(childs[0], graph, precs, c_bit, c_tb,
-               ANNO_TYPE.IN_PREC_SCALE, logger)
-       precs[tmp.attr('name')][name] = c_tb
-       precs[tmp.attr('name')][out_key] = c_tb
-       node = get_mxnet_op(op_name)(tmp, **attr, name=name)
+        c_tb = cprecs[0][name]
+        c_bit = cprecs[0][out_key] if out_key in cprecs[0] else cprecs[0][name]
+        tmp = _annotate(childs[0], graph, precs, c_bit, c_tb,
+        ANNO_TYPE.IN_PREC_SCALE, logger)
+        precs[tmp.attr('name')][name] = c_tb
+        precs[tmp.attr('name')][out_key] = c_tb
+        th_dict[tmp.attr('name')] = th_dict[childs[0].attr('name')]
+        node = get_mxnet_op(op_name)(tmp, **attr, name=name)
 
     if target_key in precs[name]:
         out_tb, out_bit = precs[name][target_key], precs[name][out_key]
@@ -207,74 +209,12 @@ def _sym_annotate(sym, params, graph, inputs_ext, precs):
                     ANNO_TYPE.REQUANT, logger)
             precs[node.attr('name')][name] = out_tb
             precs[tmp.attr('name')][out_key] = out_tb
+            th_dict[node.attr('name')] = th_dict[name]
     return node, params
-
-def _get_thresholds(out):
-    return (out.min().asscalar(), out.max().asscalar())
-def _sym_calibrate_th_dict(symbol, params, inputs_ext, calib_len, ctx):
-    logger = logging.getLogger("log.sim.calibrate")
-    th_dict = {}
-    def _run_layer(calib_sym):
-        print ([c.attr('name') for c in calib_sym])
-        group = mx.sym.Group(calib_sym)
-        args = group.list_inputs()
-        inputs = [mx.sym.var(n) for n in inputs_ext if n in args]
-        data = [inputs_ext[n.attr('name')]['data'] for n in inputs]
-        ctx_data = []
-        for d in data:
-            tmp = gluon.utils.split_and_load(d, ctx_list=ctx, batch_axis=0, even_split=False)
-            ctx_data.append(tmp)
-        dlen, clen = len(ctx_data), len(ctx_data[0])
-        ctx_data = [[ctx_data[i][j] for i in range(dlen)] for j in range(clen)]
-
-        net = SymbolBlock(group, inputs)
-        load_parameters(net, params, ctx=ctx)
-        res = [net.forward(*d) for d in ctx_data]
-        for out in res:
-            for idx, s in enumerate(calib_sym):
-                amin, amax = _get_thresholds(out[idx])
-                sname = s.attr('name')
-                if sname in th_dict:
-                    amin = min(th_dict[sname][0], amin)
-                    amax = max(th_dict[sname][1], amax)
-                th_dict[sname] = (amin, amax)
-        for s in calib_sym:
-            logger.debug("calibrate layer: %-40s thresholds=%s",
-                   s.attr('name'), th_dict[s.attr('name')])
-
-    graph, calib_sym = [], []
-    for sym in topo_sort(symbol):
-        name, op_name = sym.attr('name'), sym.attr('op_name')
-        childs = sym_iter(sym.get_children())
-        if op_name == 'null':
-            out = inputs_ext[name]['data'] if name in inputs_ext else params[name]
-            amin, amax = _get_thresholds(out)
-            th_dict[name] = (amin, amax)
-            graph.append(name)
-        if _is_annotate_op(sym) or \
-            op_name in ['broadcast_add', 'broadcast_sub',
-                'elemwise_add', 'elemwise_sub', 'Concat']:
-                # 'sigmoid', 'exp']:
-            calib_sym.extend(childs)
-
-        if len(calib_sym) > calib_len:
-            # remove duplicate
-            calib_sym = {s.attr('name'):s for s in calib_sym if s.attr('name') not in graph}
-            calib_sym = list(calib_sym.values())
-            if len(calib_sym) <= calib_len:
-                continue
-            graph.extend([s.attr('name') for s in calib_sym])
-            _run_layer(calib_sym)
-            calib_sym = []
-    if len(calib_sym) > 0:
-        calib_sym = {s.attr('name'):s for s in calib_sym if s.attr('name') not in graph}
-        _run_layer(list(calib_sym.values()))
-    return th_dict
 
 def _update_scale_and_precs(symbol, params, inputs_ext, th_dict, precs, scales):
     logger = logging.getLogger('log.simulate.update.scale')
-    def _get_scale(amin, amax, prec):
-        alpha = max(abs(amin), abs(amax))
+    def _get_scale(alpha, prec):
         tb_max = 2 ** (prec - 1) - 1
         return tb_max / alpha
     for sym in topo_sort(symbol):
@@ -286,8 +226,7 @@ def _update_scale_and_precs(symbol, params, inputs_ext, th_dict, precs, scales):
                     name, scales[name])
         elif op_name == 'null':
             prec = precs[name][out_key]
-            amin, amax = th_dict[name]
-            scales[name] = _get_scale(amin, amax, prec)
+            scales[name] = _get_scale(th_dict[name], prec)
         elif op_name in ['Convolution', 'FullyConnected']:
             if get_attr(attr, 'no_bias', False) == False:
                 B_name = childs[2].attr('name')
@@ -310,9 +249,7 @@ def _update_scale_and_precs(symbol, params, inputs_ext, th_dict, precs, scales):
             scales[name] = min(cscales)
             for c in childs:
                cname = c.attr('name')
-               amin, amax = th_dict[cname]
-               alpha = max(abs(amin), abs(amax))
-               int_alpha = alpha * scales[cname]
+               int_alpha = th_dict[cname] * scales[cname]
                prec = math.ceil(math.log2(int_alpha)) + 1
                assert prec <= precs[cname][out_key], \
                         "Update %s for %s precision %s vs. %s" \
@@ -324,15 +261,13 @@ def _update_scale_and_precs(symbol, params, inputs_ext, th_dict, precs, scales):
             scales[name] = cscales[0]
         elif _is_annotate_op(sym):
             cname = childs[0].attr('name')
-            amin, amax = th_dict[cname]
-            alpha = max(abs(amin), abs(amax))
-            int_alpha = alpha * scales[cname]
+            int_alpha = th_dict[cname] * scales[cname]
             prec = math.ceil(math.log2(int_alpha)) + 1
             assert prec <= precs[cname][out_key], \
                     "Update %s for %s precision %s vs. %s" \
                     % (cname, name, prec, precs[cname][out_key])
             precs[cname][out_key] = prec
-            scales[name] = _get_scale(amin, amax, precs[name][out_key])
+            scales[name] = _get_scale(th_dict[cname], precs[name][out_key])
             if attr['anno_type'] == ANNO_TYPE.REQUANT:
                 if prec <= precs[name][out_key]:
                     scales[name] = scales[cname]
@@ -342,8 +277,8 @@ def _update_scale_and_precs(symbol, params, inputs_ext, th_dict, precs, scales):
             alpha = (2 ** (in_prec - 1)) - 1
             data = nd.array([-alpha, alpha])
             out = get_nd_op(op_name)(data / cscales[0])
-            amin, amax = _get_thresholds(out)
-            scales[name] = _get_scale(amin, amax, precs[name][out_key])
+            alpha = out.abs().max().asscalar()
+            scales[name] = _get_scale(alpha, precs[name][out_key])
         else:
             logger.critical('Unrecognized op:%s(%s) . attrs(%s)', op_name, name, attr)
         logger.debug("collect layer %-20s name=%-40s infos: out_scale=%-15.5f " +
@@ -648,7 +583,8 @@ def _merge_symbol(base, base_params, top, top_params, maps):
     params = {k:params[k] for k in symbol.list_inputs() if k in params}
     return symbol, params
 
-def sym_annotate(symbol, params, inputs_ext, outputs_ext, in_bit=8, out_bit=8):
+def sym_annotate(symbol, params, inputs_ext, outputs_ext, th_dict,
+        in_bit=8, out_bit=8):
     logger = logging.getLogger('log.infer.precision')
     precs = {}
     topo_visit(symbol, params, inputs_ext,
@@ -673,7 +609,8 @@ def sym_annotate(symbol, params, inputs_ext, outputs_ext, in_bit=8, out_bit=8):
         precs[sym.attr('name')][target_key] = out_bit
     symbol, params = topo_visit(symbol, params, inputs_ext,
             get_op=get_mxnet_op, logger=logger,
-            callback=_sym_annotate, precs=precs)
+            callback=_sym_annotate, precs=precs,
+            th_dict=th_dict)
 
     for sym in topo_sort(symbol):
         name, op_name = sym.attr('name'), sym.attr('op_name')
@@ -684,19 +621,15 @@ def sym_annotate(symbol, params, inputs_ext, outputs_ext, in_bit=8, out_bit=8):
                 [precs[c.attr('name')][name] for c in childs])
     return symbol, params, precs
 
-def sym_simulate(symbol, params, inputs_ext, outputs_ext, precs, ctx, calib_len):
+def sym_simulate(symbol, params, inputs_ext, outputs_ext, precs, th_dict):
     logger = logging.getLogger('log.simulate')
-    for k, v in inputs_ext.items():
-        assert 'data' in v, "inputs %s has not supply attribute data: %s"%(k, v)
 
     infer_shapes = spass.sym_infer_shape(symbol, params, inputs_ext)
-    th_dict = _sym_calibrate_th_dict(symbol, params, inputs_ext,
-            calib_len=calib_len, ctx=ctx)
     scales = {}
     for k, v in outputs_ext.items():
-        if 'thresholds' in v:
+        if 'threshold' in v:
             logger.debug("Update thresholds of output %s", k)
-            th_dict[k] = v['thresholds']
+            th_dict[k] = v['threshold']
         if 'fixed' in v and v['fixed']:
             scales[k] = 1
     _update_scale_and_precs(symbol, params, inputs_ext,
@@ -709,9 +642,6 @@ def sym_simulate(symbol, params, inputs_ext, outputs_ext, precs, ctx, calib_len)
     _, sparams = topo_visit(ssym, sparams, inputs_ext,
             get_op=get_mxnet_op, logger=logger,
             callback=_simulate_parameters, scales=scales)
-
-    for k, v in inputs_ext.items():
-        del v['data']
     sparams = examine_parameters(ssym, sparams, inputs_ext)
     return ssym, sparams, scales
 
@@ -754,18 +684,17 @@ def post_quantize(symbol, params, inputs_ext, extra_ext):
             callback=_post_quantize)
     return qsym, qparams
 
-def mixed_precision(symbol, params, inputs_ext,
-        in_bit=8, out_bit=8, out_ext=None, runtime="cvm",
-        calib_group=8, ctx=[mx.cpu()]):
+def mixed_precision(symbol, params, inputs_ext, th_dict,
+        in_bit=8, out_bit=8, out_ext=None, runtime="cvm"):
     if out_ext is None:
         out_ext = {s.attr('name'):{ 'type': s.attr('name') } for s in symbol}
     base, base_params, top, top_params = _extract_symbol(symbol, params,
             out_ext)
 
     sbase, sbase_params, precs = sym_annotate(base, base_params, inputs_ext,
-            out_ext, in_bit=in_bit, out_bit=out_bit)
+            out_ext, in_bit=in_bit, out_bit=out_bit, th_dict=th_dict)
     qbase, qbase_params, scales = sym_simulate(sbase, sbase_params,
-            inputs_ext, out_ext, precs, ctx, calib_len=calib_group)
+            inputs_ext, out_ext, precs, th_dict)
 
     # update type_ext
     maps = dict(zip([c.attr('name') for c in qbase], [c.attr('name') for c in base]))

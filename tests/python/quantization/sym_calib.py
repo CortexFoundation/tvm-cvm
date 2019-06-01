@@ -28,12 +28,22 @@ disable_requant_ops = [
     'max',
 ]
 
-def _get_thresholds(output, calib_mode='naive'):
-    min_range = output.min().asscalar()
-    max_range = output.max().asscalar()
-    return (min_range, max_range)
-def _calibrate_th_dict(symbol, params, inputs_ext, ctx=mx.cpu()):
-    logger = logging.getLogger('log.simulate.calibrate')
+def sym_calibrate(symbol, params, inputs_ext, old_ths={}, ctx=mx.cpu()):
+    logger = logging.getLogger('log.calibration')
+    check_ext_deps(inputs_ext, 'data', logger)
+
+    out_as_threholds = set()
+    for sym in topo_sort(symbol):
+        name, op_name = sym.attr('name'), sym.attr('op_name')
+        childs = sym_iter(sym.get_children())
+        if name in disable_requant_ops:
+            continue
+        elif name in ['Embedding']:
+            continue
+        elif op_name in ['sigmoid', 'exp']:
+            out_as_threholds.add(childs[0].attr('name'))
+        out_as_threholds.add(name)
+
     order, deps = topo_sort(symbol, logger=logger, with_deps=True)
     th_dict, out_cache = {}, {}
     for sym in order:
@@ -45,25 +55,39 @@ def _calibrate_th_dict(symbol, params, inputs_ext, ctx=mx.cpu()):
         elif childs is None:
             out = get_nd_op(op_name)(**attr)
         else:
-            cnames = [c.attr('name') for c in childs]
-            nd_inputs = [out_cache[n] for n in cnames]
+            cinfos = [(c.attr('name'), get_entry_id(c)) for c in childs]
+            nd_inputs = [out_cache[n[0]][n[1]] for n in cinfos]
             out = get_nd_op(op_name)(*nd_inputs, **attr)
-            for n in cnames:
+            for n, _ in cinfos:
                 assert n in deps
                 deps[n].remove(name)
                 if len(deps[n]) == 0:
                     del out_cache[n]
-        out_cache[name] = out.as_in_context(ctx)
-        if op_name in disable_requant_ops:
-            th_dict[name] = th_dict[childs[0].attr('name')]
+        out = [out] if len(sym) == 1 else out
+        out_cache[name] = [o.as_in_context(ctx) for o in out]
+        if name in out_as_threholds:
+            # TODO: set multiple output
+            opts = [float(o.abs().max().asscalar()) for o in out][0]
+        elif op_name in disable_requant_ops:
+            opts = th_dict[childs[0].attr('name')]
         elif op_name in ['Embedding']:
-            th_dict[name] = th_dict[childs[1].attr('name')]
+            opts = th_dict[childs[1].attr('name')]
         else:
-            th_dict[name] = _get_thresholds(out, "naive")
-        logger.debug("collect symbol %-40s out_shape=%-20s th_dict: (%7.5f, %7.5f)",
-               name, out.shape, th_dict[name][0], th_dict[name][1])
+            print (name, op_name)
+            assert False
+        if name in old_ths:
+            #  th_dict[name] = [max(old_ths[name][i], o) for i,o in enumerate(opts)]
+            th_dict[name] = max(old_ths[name], opts)
+            logger.debug("update symbol %-40s out_shape=%-20s th_dict: (%s)",
+                   name, [o.shape for o in out], th_dict[name])
+        else:
+            th_dict[name] = opts
+            logger.debug("collect symbol %-40s out_shape=%-20s th_dict: (%s)",
+                   name, [o.shape for o in out], th_dict[name])
 
     out_cache.clear()
+    for k, v in inputs_ext.items():
+        del v['data']
     return th_dict
 
 def _sim_requantize_op(sym, scale, params, graph, prefix=None):
@@ -296,14 +320,9 @@ def _realize_parameters(sym, params, graph, inputs_ext,
 
 
 # interface API
-def sym_simulate(symbol, params, inputs_ext, calib_data, ctx):
+def sym_simulate(symbol, params, inputs_ext, th_dict):
     logger = logging.getLogger('log.simulate')
-    if calib_data is not None:
-        for k, v in inputs_ext.items():
-            v['data'] = calib_data
-    check_ext_deps(inputs_ext, 'data')
 
-    th_dict = _calibrate_th_dict(symbol, params, inputs_ext, ctx=ctx)
     scale_helper, target_bits = {}, {}
     _, params = topo_visit(symbol, params, get_op=get_mxnet_op,
             logger=logger, inputs_ext=inputs_ext,
@@ -332,8 +351,6 @@ def sym_simulate(symbol, params, inputs_ext, calib_data, ctx):
     symbol, params = sym_attach_attrs(symbol, params, inputs_ext,
             precision=target_bits)
 
-    for k, v in inputs_ext.items():
-        del v['data']
     return symbol, params, target_bits, out_scales
 
 def sym_realize(symbol, params, inputs_ext, precs, runtime="cvm"):
