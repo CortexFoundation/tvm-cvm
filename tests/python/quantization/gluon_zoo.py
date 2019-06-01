@@ -30,6 +30,11 @@ def save_mobilenet_v2_1_0():
         fout.write(sym.tojson())
     graph.save_parameters('./data/mobilenet_v2_1_0.params')
 
+def load_resnet18_v1_yolo():
+    return cv.model_zoo.get_model('yolo3_resnet18_v1_voc',
+            pretrained=False, pretrained_base=True,
+            ctx=mx.gpu())
+
 def get_model(name, **kwargs):
     """Returns a pre-defined model by name
 

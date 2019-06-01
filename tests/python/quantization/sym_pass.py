@@ -1,6 +1,7 @@
 import logging
 import math
 import numpy as np
+import os
 
 import mxnet as mx
 from mxnet.gluon import nn, SymbolBlock
@@ -109,7 +110,8 @@ def prepare_for_cvm(symbol, params, inputs_ext):
         #     A_name, B_name = A.attr('name'), B.attr('name')
         #     axes = get_attr(attr, 'axes')
         #     A_shape, B_shape = infer_shapes[A_name], infer_shapes[B_name]
-        #     oshape = [None] * len(A_shape)
+        #     begin = [0 for s in A_shape]
+        #     end = [s for s in A_shape]
         #     begin, end = [None] * len(A_shape), [None] * len(A_shape)
         #     for ax in axes:
         #         assert B_shape[ax] <= A_shape[ax]
@@ -754,65 +756,73 @@ def sym_attach_attrs(symbol, params, inputs_ext, **kwargs):
             callback=_attach_attr, **kwargs)
 
 def sym_dump_layer_outputs(symbol, params, inputs_ext,
-        data, allows, datadir, batch_axis=0, max_num=20,
-        dtype='float64', out_dtype='int32', ctx=mx.gpu(),
-        dump_all=False):
+        datadir, max_num=20,
+        dtype="float64", out_dtype='int32', ctx=mx.gpu(),
+        dump_ops=[]):
     logger = logging.getLogger('log.sym.dump.internals')
-    def _run_layer(sym, params, inputs_ext):
-        args = sym.list_inputs()
-        inputs = [mx.sym.var(n) for n in inputs_ext if n in args]
-        graph = SymbolBlock(sym, inputs)
-        load_parameters(graph, params, ctx=ctx, dtype=dtype)
-        return graph.forward(data.astype(dtype).as_in_context(ctx))
-    def _str_output(out, start=None, max_num=None):
-        out = out.asnumpy().flatten()
-        out = out[start:max_num] if max_num else out
+    def _str_output(out, start=None, end=None):
+        out = out.asnumpy().flatten().astype(out_dtype)
+        out = out[start:end] if end else out
         dump = ' '.join(str(d) for d in out)
         return dump
     def _str_feature(out):
-        a_max = out.max().asscalar()
-        a_min = out.min().asscalar()
-        return "max: %s, min: %s" % (a_max, a_min)
+        maxes = [o.max().astype(out_dtype).asscalar() for o in out]
+        mines = [o.min().astype(out_dtype).asscalar() for o in out]
+        return "min=%s, max=%s" % (min(mines), max(maxes))
 
-    in_file, out_file = datadir+'/in.txt', datadir+'/out.txt'
-    fin, fout = open(in_file, "w+"), open(out_file, "w+")
-    for sym in topo_sort(symbol, logger):
+    DUMP_SUFFIX = "mrt.dump"
+    NPY_SUFFIX = "npy"
+    os.makedirs(datadir, exist_ok=True)
+    for fname in os.listdir(datadir):
+        if fname.endswith(DUMP_SUFFIX) or fname.endswith(NPY_SUFFIX):
+            os.remove(datadir + '/' + fname)
+
+    order, deps = topo_sort(symbol, logger=logger, with_deps=True)
+    out_cache = {}
+    for sym in order:
         name, op_name = sym.attr('name'), sym.attr('op_name')
-        if op_name not in allows and name not in allows:
-            continue
-
-        logger.info("Dump layer %-40s output", name)
-        prefix = datadir + '/' + name
-        childs = sym_iter(sym.get_children())
-        childs = childs if childs else []
-        for idx, c in enumerate(childs):
-            if c.attr('name') in inputs_ext:
-                out = data.astype(out_dtype)
-            elif c.attr('op_name') == 'null':
-                out = params[c.attr('name')].astype(out_dtype)
-            else:
-                out = _run_layer(c, params, inputs_ext).astype(out_dtype)[batch_axis]
-            if dump_all:
-                np.save(datadir+'/'+c.attr('name'), out.asnumpy())
-            dump_str = name + '_' + op_name + '_in' + str(idx) + ':\n'
-            dump_str += _str_output(out, max_num) + '\n'
-            fin.write(dump_str)
+        attr, childs = sym.list_attr(), sym_iter(sym.get_children())
+        if name in dump_ops or op_name in dump_ops:
+            cs = [] if childs is None else childs
+            for i, c in enumerate(cs):
+                dump_in = "%s/%s_%d.%s.in" % (datadir, name, i, DUMP_SUFFIX)
+                out = out_cache[c.attr('name')][get_entry_id(c)].asnumpy().astype(out_dtype)
+                np.save(dump_in, out)
 
         if op_name == 'null':
-            if name in inputs_ext:
-                out = data[batch_axis].astype(out_dtype)
-            else:
-                out = params[name]
+            out = inputs_ext[name]['data'] if name in inputs_ext \
+                  else params[name]
+        elif childs is None:
+            out = get_nd_op(op_name)(**attr)
         else:
-            out = _run_layer(sym, params, inputs_ext).astype(out_dtype)[batch_axis]
-        if dump_all:
-            np.save(datadir+'/'+name, out.asnumpy())
-        dump_str = name + '_' + op_name + ':' + _str_feature(out) + '\n'
-        dump_str += _str_output(out, max_num) + ' ' + '\n'
-        fout.write(dump_str)
+            cinfos = [(c.attr('name'), get_entry_id(c)) for c in childs]
+            nd_inputs = [out_cache[n[0]][n[1]] for n in cinfos]
+            out = get_nd_op(op_name)(*nd_inputs, **attr)
+            for n, _ in cinfos:
+                assert n in deps
+                deps[n].remove(name)
+                if len(deps[n]) == 0:
+                    del out_cache[n]
+        out = [out] if len(sym) == 1 else out
+        out_cache[name] = [o.astype(dtype).as_in_context(ctx) for o in out]
 
-    fin.close()
-    fout.close()
+        if name in dump_ops or op_name in dump_ops:
+            cs = [] if childs is None else childs
+            for i, o in enumerate(out):
+                dump_out = "%s/%s_%d.%s.out" % (datadir, name, i, DUMP_SUFFIX)
+                np.save(dump_out, o.asnumpy().astype(out_dtype))
+
+        prefix = "parameters" if op_name=='null' else op_name
+        prefix = attr['op_type'] if op_name=='Custom' else op_name
+        dump_file = "%s/%s.%s" % (datadir, prefix, DUMP_SUFFIX)
+        with open(dump_file, "a+") as fout:
+            fout.write(name + ": ")
+            fout.write(_str_feature(out))
+            fout.write("\n")
+            for i, o in enumerate(out):
+                fout.write(_str_output(o, end=max_num))
+                fout.write("\n")
+        logger.debug("Dump %-20s name=%-40s", op_name, name)
 
 def sym_calculate_ops(symbol, params, inputs_ext):
     logger = logging.getLogger("log.calculate.ops")

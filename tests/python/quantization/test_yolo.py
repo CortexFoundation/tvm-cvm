@@ -304,7 +304,28 @@ if __name__ == '__main__':
     utils.log_init()
 
     # zoo.save_model('yolo3_darknet53_voc')
+    # name = "yolo3_resnet18_v1_voc"
+    # net = zoo.load_resnet18_v1_yolo()
+    # sym = net(mx.sym.var('data'))
+    # if isinstance(sym, tuple):
+    #     sym = mx.sym.Group([*sym])
+    # open("./data/%s.json"%name, "w").write(sym.tojson())
+    # exit()
+
+    if True:
+        val_data = dataset.load_voc(1, 416)
+        val_data_iter = iter(val_data)
+        sym_file, param_file, ext_file = load_fname("_darknet53_voc", "all.quantize", True)
+        sym, params = mx.sym.load(sym_file), nd.load(param_file)
+        inputs_ext, _ = sim.load_ext(ext_file)
+        data, _ = next(val_data_iter)
+        data = sim.load_real_data(data, 'data', inputs_ext)
+        for k, v in inputs_ext.items():
+            v['data'] = data
+        spass.sym_dump_layer_outputs(sym, params, inputs_ext,
+                datadir="/tmp/yolo/out", dump_ops=["broadcast_mul72"])
+        exit()
     # zoo.save_model("yolo3_mobilenet1.0_voc")
 
-    # test_sym_pass(1, 100)
-    test_sym_nnvm(16, 0)
+    test_sym_pass(1, 1)
+    # test_sym_nnvm(16, 0)

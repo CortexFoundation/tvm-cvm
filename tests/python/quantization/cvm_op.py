@@ -101,7 +101,7 @@ if __name__ == '__main__':
                 input_idx_from_broadcast(ovars, shape1),
                 input_idx_from_broadcast(ovars, shape2))
 
-# cvm_log = open('/tmp/mnist/out/cvm_op.txt', "w+")
+# cvm_log = open('/tmp/yolo/out/cvm_op.txt', "w+")
 class Clip(mx.operator.CustomOp):
     def __init__(self, precision, cvm_name, **kwargs):
         super(Clip, self).__init__(**kwargs)
@@ -116,12 +116,6 @@ class Clip(mx.operator.CustomOp):
         a_min, a_max = self.min, self.max
         out = X.round()
         out = out.clip(a_min=a_min, a_max=a_max)
-        # X_max, X_min = X.max().asscalar(), X.min().asscalar()
-        # omax, omin = out.max().asscalar(), out.min().asscalar()
-        # cvm_log.write("cvm_clip %s: %d %d %d %d\n%s \n" % (self.cvm_name,
-        #             round(X_max), round(X_min),
-        #             round(omax), round(omin),
-        #             " ".join(str(int(round(d))) for d in out.asnumpy().flatten()[-20:])))
         self.assign(out_data[0], req[0], out)
 
     def backward(self, req, out_grad, in_data, out_data, in_grad, aux):
@@ -170,21 +164,16 @@ class RightShift(mx.operator.CustomOp):
         out = out / 2
         out = out.floor()
         out = out.clip(a_min=a_min, a_max=a_max)
-        # X_max, X_min = X.max().asscalar(), X.min().asscalar()
-        # omax, omin = out.max().asscalar(), out.min().asscalar()
-        # cvm_log.write("cvm_right_shift %s: %d %d %d %d\n%s \n" % (self.cvm_name,
-        #             round(X_max), round(X_min),
-        #             round(omax), round(omin),
-        #             " ".join(str(int(round(d))) for d in out.asnumpy().flatten()[-20:])))
         self.assign(out_data[0], req[0], out)
 
     def backward(self, req, out_grad, in_data, out_data, in_grad, aux):
         assert False
 
 class LUT(mx.operator.CustomOp):
-    def __init__(self, in_dim, **kwargs):
+    def __init__(self, in_dim, cvm_name, **kwargs):
         super(LUT, self).__init__(**kwargs)
         self.in_dim = int(in_dim)
+        self.cvm_name = cvm_name
 
     def forward(self, is_train, req, in_data, out_data, aux):
         assert is_train == False
@@ -306,8 +295,9 @@ class BroadcastShiftProp(mx.operator.CustomOpProp):
 
 @mx.operator.register("cvm_lut")
 class LUTProp(mx.operator.CustomOpProp):
-    def __init__(self, in_dim):
+    def __init__(self, in_dim, cvm_name='cvm_lut'):
         self.in_dim = in_dim
+        self.cvm_name = cvm_name
         super(LUTProp, self).__init__(need_top_grad=False)
     def list_arguments(self):
         return ['data', 'table']
@@ -323,7 +313,7 @@ class LUTProp(mx.operator.CustomOpProp):
         B_type = X_type
         return [X_type, B_type], [X_type], []
     def create_operator(self, ctx, shapes, dtypes):
-        return LUT(self.in_dim)
+        return LUT(self.in_dim, self.cvm_name)
 
 @mx.operator.register("cvm_annotate")
 class AnnotateProp(mx.operator.CustomOpProp):
