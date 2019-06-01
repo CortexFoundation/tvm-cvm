@@ -36,9 +36,9 @@ def sym_calibrate(symbol, params, inputs_ext, old_ths={}, ctx=mx.cpu()):
     for sym in topo_sort(symbol):
         name, op_name = sym.attr('name'), sym.attr('op_name')
         childs = sym_iter(sym.get_children())
-        if name in disable_requant_ops:
+        if op_name in disable_requant_ops:
             continue
-        elif name in ['Embedding']:
+        elif op_name in ['Embedding']:
             continue
         elif op_name in ['sigmoid', 'exp']:
             out_as_threholds.add(childs[0].attr('name'))
@@ -71,10 +71,10 @@ def sym_calibrate(symbol, params, inputs_ext, old_ths={}, ctx=mx.cpu()):
         elif op_name in disable_requant_ops:
             opts = th_dict[childs[0].attr('name')]
         elif op_name in ['Embedding']:
-            opts = th_dict[childs[1].attr('name')]
+           opts = th_dict[childs[1].attr('name')]
         else:
-            print (name, op_name)
-            assert False
+           print (name, op_name)
+           assert False
         if name in old_ths:
             #  th_dict[name] = [max(old_ths[name][i], o) for i,o in enumerate(opts)]
             th_dict[name] = max(old_ths[name], opts)

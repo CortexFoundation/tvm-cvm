@@ -127,7 +127,7 @@ def test_sym_pass(batch_size=10, iter_num=10):
     sym, params = mx.sym.load(sym_file), nd.load(param_file)
     infer_shapes = spass.sym_infer_shape(sym, params, inputs_ext)
     sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
-    if True:
+    if False:
         th_dict = {}
         for i in range(16):
           data, _ = data_iter_func()
@@ -183,7 +183,7 @@ def test_sym_pass(batch_size=10, iter_num=10):
         sim.save_ext(dump_ext, base_inputs_ext, base_oscales)
         nd.save(dump_params, qbase_params)
 
-    if True:
+    if False:
         qb_sym, qb_params, qb_ext = load_fname("_darknet53_voc", "base.quantize", True)
         net2_inputs_ext, base_oscales = sim.load_ext(qb_ext)
         net2_inputs = [mx.sym.var(n) for n in net2_inputs_ext]
@@ -200,7 +200,7 @@ def test_sym_pass(batch_size=10, iter_num=10):
            return "{:6.2%}".format(acc)
 
     # quantize top graph
-    if False:
+    if True:
         top_sym = base_graph(mx.sym.Group(base_inputs))
         top_names = [c.attr('name') for c in top_sym]
         in_bit, out_bit = 8, 30
@@ -245,7 +245,7 @@ def test_sym_pass(batch_size=10, iter_num=10):
             return "{:6.2%}".format(acc)
 
     # merge quantize model
-    if False:
+    if True:
         qb_sym, qb_params, qb_ext = load_fname("_darknet53_voc", "base.quantize", True)
         qbase, qbase_params = mx.sym.load(qb_sym), nd.load(qb_params)
         qbase_inputs_ext, _ = sim.load_ext(qb_ext)
@@ -260,7 +260,7 @@ def test_sym_pass(batch_size=10, iter_num=10):
         nd.save(param_file, qparams)
         sim.save_ext(ext_file, qbase_inputs_ext, out_scales)
 
-    if False:
+    if True:
         sym_file, param_file, ext_file = load_fname("_darknet53_voc", "all.quantize", True)
         net4_inputs_ext, net4_scales = sim.load_ext(ext_file)
         net4_inputs = [mx.sym.var(n) for n in net4_inputs_ext]
@@ -284,7 +284,8 @@ def test_sym_pass(batch_size=10, iter_num=10):
            np.save("/tmp/yolo/result"+str(i), o.asnumpy().astype('int32'))
 
     utils.multi_validate(yolov3, data_iter_func,
-            base_quantize, # top_quantize, all_quantize,
+            all_quantize,
+            # base_quantize, # top_quantize, all_quantize,
             iter_num=iter_num, logger=logger)
 
 def test_sym_nnvm(batch_size, iter_num):
