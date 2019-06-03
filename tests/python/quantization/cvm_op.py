@@ -106,8 +106,8 @@ class Clip(mx.operator.CustomOp):
     def __init__(self, precision, cvm_name, **kwargs):
         super(Clip, self).__init__(**kwargs)
         clip = 2 ** (int(precision) - 1) - 1
-        self.min = int(-clip)
-        self.max = int(clip)
+        self.min = float(-clip)
+        self.max = float(clip)
         self.cvm_name = cvm_name
 
     def forward(self, is_train, req, in_data, out_data, aux):

@@ -757,9 +757,11 @@ def sym_attach_attrs(symbol, params, inputs_ext, **kwargs):
 
 def sym_dump_layer_outputs(symbol, params, inputs_ext,
         datadir, max_num=20,
-        dtype="float64", out_dtype='int32', ctx=mx.gpu(),
+        dtype="float64", out_dtype='int32', data_dtype="int8",
+        ctx=mx.gpu(),
         dump_ops=[]):
     logger = logging.getLogger('log.sym.dump.internals')
+    check_ext_deps(inputs_ext, 'data')
     def _str_output(out, start=None, end=None):
         out = out.asnumpy().flatten().astype(out_dtype)
         out = out[start:end] if end else out
@@ -772,10 +774,15 @@ def sym_dump_layer_outputs(symbol, params, inputs_ext,
 
     DUMP_SUFFIX = "mrt.dump"
     NPY_SUFFIX = "npy"
+    logger.info("Clean datadir: %s", datadir)
     os.makedirs(datadir, exist_ok=True)
     for fname in os.listdir(datadir):
         if fname.endswith(DUMP_SUFFIX) or fname.endswith(NPY_SUFFIX):
             os.remove(datadir + '/' + fname)
+
+    for k, v in inputs_ext.items():
+        np.save("%s/%s"%(datadir, k),
+                v['data'].asnumpy().astype(data_dtype))
 
     order, deps = topo_sort(symbol, logger=logger, with_deps=True)
     out_cache = {}
@@ -794,6 +801,16 @@ def sym_dump_layer_outputs(symbol, params, inputs_ext,
                   else params[name]
         elif childs is None:
             out = get_nd_op(op_name)(**attr)
+        elif get_attr(attr, 'op_type', 'null')=='cvm_clip' and \
+                dtype=="float64":
+            cinfos = [(c.attr('name'), get_entry_id(c)) for c in childs]
+            nd_inputs = [out_cache[n[0]][n[1]] for n in cinfos]
+            np_inputs = [o.asnumpy() for o in nd_inputs]
+            precision = get_attr(attr, 'precision')
+            amax = (2 ** (precision - 1)) - 1
+            amin = -amax
+            np_out = np.clip(np_inputs[0], amin, amax)
+            out = nd.array(np_out, dtype=dtype)
         else:
             cinfos = [(c.attr('name'), get_entry_id(c)) for c in childs]
             nd_inputs = [out_cache[n[0]][n[1]] for n in cinfos]
@@ -823,6 +840,11 @@ def sym_dump_layer_outputs(symbol, params, inputs_ext,
                 fout.write(_str_output(o, end=max_num))
                 fout.write("\n")
         logger.debug("Dump %-20s name=%-40s", op_name, name)
+
+    for i, sym in enumerate(symbol):
+        name, eid = sym.attr('name'), get_entry_id(sym)
+        np.save("%s/result_%d"%(datadir, i),
+                out_cache[name][eid].asnumpy().astype(out_dtype))
 
 def sym_calculate_ops(symbol, params, inputs_ext):
     logger = logging.getLogger("log.calculate.ops")

@@ -323,7 +323,8 @@ if __name__ == '__main__':
         for k, v in inputs_ext.items():
             v['data'] = data
         spass.sym_dump_layer_outputs(sym, params, inputs_ext,
-                datadir="/tmp/yolo/out", dump_ops=["broadcast_mul72"])
+                datadir="/tmp/yolo/out",
+                dump_ops=[""])
         exit()
     # zoo.save_model("yolo3_mobilenet1.0_voc")
 
