@@ -917,6 +917,67 @@ def sym_calculate_ops(symbol, params, inputs_ext):
                 i, k, v, v / total_ops))
     return total_ops
 
+def sym_infer_precision(symbol, params, inputs_ext):
+    logger = logging.getLogger('log.infer.precision')
+    infer_shapes = sym_infer_shape(symbol, params, inputs_ext)
+    MAX_BIT = 32
+    precs = {}
+    for sym in topo_sort(symbol):
+        name, op_name = sym.attr('name'), sym.attr('op_name')
+        childs, attr = sym_iter(sym.get_children()), sym.list_attr()
+        cns = [c.attr('name') for c in childs] if childs else []
+        cprecs = [precs[n] for n in cns]
+        if op_name == 'null':
+            oprec = get_attr(attr, 'precision')
+        elif op_name in ['Convolution', 'FullyConnected']:
+            wshp = infer_shapes[cns[1]]
+            sum_len = np.product(wshp[1:])
+            sum_bit = math.ceil(math.log2(sum_len))
+            oprec = cprecs[0] + cprecs[1] + sum_bit
+            if not get_attr(attr, 'no_bias', False):
+                oprec = max(oprec, cprecs[2])
+                oprec += 1
+        elif op_name in [
+                'Activation', 'relu',
+                'Pooling',
+                'slice', 'slice_like', 'slice_axis',
+                'clip', 'negative',
+                'repeat', 'tile', 'expand_dims',
+                'Reshape', 'transpose', 'Flatten',
+        ]:
+            oprec = cprecs[0]
+        elif op_name in ['broadcast_add', 'broadcast_sub',
+                'elemwise_add', 'elemwise_sub', 'Concat']:
+            oprec = max(cprecs)
+        elif op_name in ['broadcast_mul']:
+            oprec = cprecs[0] + cprecs[1]
+        elif op_name in ['sum']:
+            axis = get_attr(attr, 'axis', None)
+            shp = infer_shapes[cns[0]]
+            sum_axis = [shp[i] for i in axis] if axis else shp
+            sum_len = np.product(sum_axis)
+            sum_bit = math.ceil(math.log2(sum_len))
+            oprec = cprecs[0] + sum_bit
+        elif op_name in ['sigmiod', 'exp']:
+            oprec = cprecs[1]
+        elif op_name == 'Custom':
+            op_type = get_attr(attr, 'op_type', 'null')
+            assert op_type in ['cvm_clip', 'cvm_left_shift', 'cvm_right_shift',
+                    'cvm_lut']
+            if op_type in ['cvm_clip', 'cvm_left_shift', 'cvm_right_shift']:
+                oprec = get_attr(attr, 'precision')
+            else:
+                oprec = cprecs[1]
+        else:
+            print (name, op_name, attr)
+            assert False
+
+        logger.debug("%-20s name=%-40s precision=%s from %s",
+                op_name, name, oprec, cprecs)
+        assert oprec <= MAX_BIT
+        precs[name] = oprec
+    return precs
+
 
 
 

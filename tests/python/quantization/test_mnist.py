@@ -9,7 +9,7 @@ from tvm.contrib import graph_runtime
 from quant_op import *
 from quant_utils import *
 import utils
-import mrt
+import mrt as _mrt
 import sym_annotate as anno
 import sym_utils as sutils
 import sym_pass as spass
@@ -143,15 +143,18 @@ def test_sym_pass(iter_num=10):
     sym_file, param_file = load_fname(version)
     sym, params = mx.sym.load(sym_file), nd.load(param_file)
     sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
-    inputs_ext['data']['data'] = data
-    th_dict = mrt.sym_calibrate(sym, params, inputs_ext, ctx=ctx)
-    qsym, qparams, qext = mrt.quantize(sym, params, inputs_ext, th_dict, {})
-    # th_dict = calib.sym_calibrate(sym, params, inputs_ext, ctx=ctx)
-    # qsym, qparams, precs, _ = calib.sym_simulate(sym, params, inputs_ext, th_dict)
-    # qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, precs, "cvm")
-    # qext = inputs_ext
+    if True:
+        mrt = _mrt.MRT(sym, params, inputs_ext)
+        mrt.set_data('data', data)
+        mrt.calibrate(ctx=ctx)
+        mrt.set_output_prec(8)
+        qsym, qparams, inputs_ext = mrt.quantize()
+    else:
+        th_dict = calib.sym_calibrate(sym, params, inputs_ext, ctx=ctx)
+        qsym, qparams, precs, _ = calib.sym_simulate(sym, params, inputs_ext, th_dict)
+        qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, precs, "cvm")
     dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
-    sim.save_ext(dump_ext, qext)
+    sim.save_ext(dump_ext, inputs_ext)
     nd.save(dump_params, qparams)
     open(dump_sym, "w").write(qsym.tojson())
 
@@ -195,5 +198,5 @@ def test_nnvm_pass(iter_num=10):
 print ("Test mnist", version)
 # train_mnist()
 utils.log_init()
-test_sym_pass(10)
+test_sym_pass(1000)
 # test_nnvm_pass(10)

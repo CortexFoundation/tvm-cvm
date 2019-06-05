@@ -47,6 +47,7 @@ if True:
     mrt.calibrate(ctx=ctx)
     mrt.set_input_prec('data', 16)
     mrt.set_fixed('data')
+    mrt.set_output_prec(8)
     qsym, qparams, inputs_ext = mrt.quantize()
 else:
     inputs_ext['data']['data'] = data

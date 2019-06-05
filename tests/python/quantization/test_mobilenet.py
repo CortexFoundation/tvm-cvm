@@ -9,6 +9,7 @@ import nnvm
 
 import sym_calib as calib
 import utils
+import mrt as _mrt
 import dataset as ds
 import gluon_zoo as zoo
 import sym_pass as spass
@@ -54,7 +55,7 @@ def test_mx_quantize(batch_size=10, iter_num=10):
         return data.data[0], data.label[0]
     data, _ = data_iter_func()
 
-    version = "1_0"
+    version = "1.0"
     net1 = utils.load_model(*load_fname(version), inputs, ctx=ctx)
     acc_top1 = mx.metric.Accuracy()
     acc_top5 = mx.metric.TopKAccuracy(5)
@@ -74,10 +75,17 @@ def test_mx_quantize(batch_size=10, iter_num=10):
     sym_fname, param_fname = load_fname(version)
     sym, params = mx.sym.load(sym_fname), nd.load(param_fname)
     sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
-    inputs_ext['data']['data'] = data
-    th_dict = calib.sym_calibrate(sym, params, inputs_ext, ctx=calib_ctx)
-    qsym, qparams, precs, _ = calib.sym_simulate(sym, params, inputs_ext, th_dict)
-    qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, precs)
+    if True:
+        mrt = _mrt.MRT(sym, params, inputs_ext)
+        mrt.set_data('data', data)
+        mrt.calibrate()
+        mrt.set_output_prec(8)
+        qsym, qparams, inputs_ext = mrt.quantize()
+    else:
+        inputs_ext['data']['data'] = data
+        th_dict = calib.sym_calibrate(sym, params, inputs_ext, ctx=calib_ctx)
+        qsym, qparams, precs, _ = calib.sym_simulate(sym, params, inputs_ext, th_dict)
+        qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, precs)
     dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
     sim.save_ext(dump_ext, inputs_ext)
     nd.save(dump_params, qparams)
@@ -119,8 +127,7 @@ if __name__ == '__main__':
     # zoo.save_model('mobilenet1.0', 1000)
     # zoo.save_model('mobilenet1.0_int8', 1000)
 
-    # test_sym_pass(16, 10)
-    #  test_mx_quantize(16, 1000)
-    test_sym_nnvm()
+    test_mx_quantize(16, 1000)
+    # test_sym_nnvm()
     # test_sym_nnvm(16, 10)
     # test_performance(16, 10)

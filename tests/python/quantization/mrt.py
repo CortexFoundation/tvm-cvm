@@ -45,6 +45,7 @@ def sym_calibrate(symbol, params, inputs_ext, old_ths={}, ctx=mx.cpu()):
         out = [out] if len(sym) == 1 else out
         out_cache[name] = [o.as_in_context(ctx) for o in out]
         opts = [float(o.abs().max().asscalar()) for o in out][0]
+        # TODO: out may be multiple
         if name in old_ths:
             #  th_dict[name] = [max(old_ths[name][i], o) for i,o in enumerate(opts)]
             th_dict[name] = max(old_ths[name], opts)
@@ -54,11 +55,11 @@ def sym_calibrate(symbol, params, inputs_ext, old_ths={}, ctx=mx.cpu()):
                    name, [o.shape for o in out], th_dict[name])
 
     out_cache.clear()
-    for k, v in inputs_ext.items():
-        del v['data']
     return th_dict
 
 L0, L1, L2, L3, L4, L5, L6 = 0, 25, 50, 75, 100, 150, 200
+LBINARY = L4
+LCONV = L5
 LFIX = 1000
 class PREC():
     def __init__(self, *args):
@@ -94,9 +95,6 @@ class PREC():
 
 out_key = 'out_key'
 target_key = 'target_key'
-def set_input_prec(precs, name, in_bit=8, level=L5):
-    precs[name] = { out_key: PREC(in_bit, level) }
-
 def _set_default_inputs(inputs_ext, precs):
     for k in inputs_ext:
         if k not in precs:
@@ -132,41 +130,6 @@ def _mrt_sim_quantize(sym, sb, params, graph, prec):
                 name=requant_op, op_type='mrt_sim_quant')
 
 MAX_BIT = 32
-def _requantize_by_scale(sym, params, graph, scales,
-        prec, th, oscale, iscale):
-    in_prec = _get_bit(th * iscale)
-    assert in_prec <= prec
-    tb = _get_bit(th * oscale)
-    rescale = oscale / iscale
-    frac, exp = sim.cvm_float(rescale, MAX_BIT-in_prec)
-    oscale = iscale * frac * (2 ** exp)
-    out = sym
-    if frac > 1:
-        var = mx_const(frac, graph, params)
-        out = mx.sym.broadcast_mul(out, var)
-    out = _mrt_sim_quantize(out, (-exp), params, graph, tb)
-    print (sym.attr('name'), frac, exp, iscale, oscale)
-    return out
-def _requantize(sym, params, graph, scales,
-        prec, th, tb, iscale):
-    assert prec >= 0 and prec <= MAX_BIT
-    oscale = scale(th, tb)
-    out = sym
-    if prec > tb and iscale > oscale:
-        rescale = oscale / iscale
-        frac, exp = sim.cvm_float(rescale, MAX_BIT-prec)
-        oscale = iscale * frac * (2 ** exp)
-        if frac > 1:
-            var = mx_const(frac, graph, params)
-            out = mx.sym.broadcast_mul(out, var)
-        out = _mrt_sim_quantize(out, (-exp), params, graph, tb)
-        print (sym.attr('name'), frac, exp, iscale, oscale)
-    else:
-        out = _mrt_sim_quantize(out, 0, params, graph, tb)
-        oscale = iscale
-    scales[out.attr('name')] = oscale
-    return out, oscale
-
 id_counts = {}
 def _uniq_name(name):
     if name in id_counts:
@@ -179,9 +142,8 @@ def _get_prec(precs, name, prec=None):
         assert prec is not None
         precs[name] = PREC(prec)
     return precs[name]
-def _get_prec_range(prec):
-    alpha = (2 ** (prec - 1)) - 1
-    return (-alpha, alpha)
+def _get_range(prec):
+    return (2 ** (prec - 1)) - 1
 def _get_bit(opt):
     if isinstance(opt, nd.NDArray):
         opt = opt.abs().max().asscalar()
@@ -190,35 +152,71 @@ def _get_bit(opt):
 def _simulate(sym, params, graph, inputs_ext,
         th_dict, infer_shapes, precs, scales):
     """ MRT Quantization
-    1. Update children's precision
+    1. Request children's precision
+    2. Requantize children to requested precision
     """
-    def _requant_param(X, def_prec):
-        iname = X.attr('name')
-        In_prec = _get_prec(precs[iname], name, def_prec)
-        In_name = _uniq_name(iname)
-        xs = scale(th_dict[iname], In_prec.p)
-        in_p = params[iname] * xs
-        params[In_name] = nd.clip(in_p, *_get_prec_range(In_prec.p))
-        In_attr = { 'precision': str(In_prec.p), }
-        X = graph[In_name] = mx.sym.var(In_name,
-                shape=params[In_name].shape, attr=In_attr)
-        return X, xs
-    def _requant_op(X, def_prec):
-        iname = X.attr('name')
-        X_prec = _get_prec(precs[iname], name, def_prec)
-        prec, tb = precs[iname][out_key].p, X_prec.p
-        X, xs = _requantize(X, params, graph, scales,
-                prec, th_dict[iname], tb, scales[iname])
-        return X, xs
-    def _requant(X, def_prec):
-        if is_params(X, params, inputs_ext):
-            return _requant_param(X, def_prec)
-        else:
-            return _requant_op(X, def_prec)
-
     logger = logging.getLogger('log.mrt.simulate')
     name, op_name = sym.attr('name'), sym.attr('op_name')
     childs, attr = sym_iter(sym.get_children()), sym.list_attr()
+
+    def _requant_parameter(pname, arg):
+        P_name = _uniq_name(pname)
+        if isinstance(arg, PREC):
+            def_prec = arg
+            P_prec = _get_prec(precs[pname], name, def_prec)
+            xs = scale(th_dict[pname], P_prec.p)
+        else:
+            xs = float(arg)
+            def_prec = _get_bit(th_dict[pname] * xs)
+            P_prec = _get_prec(precs[pname], name, def_prec)
+        params[P_name] = params[pname] * xs
+        P_attr = { 'precision': str(P_prec.p) }
+        graph[P_name] = mx.sym.var(P_name,
+                shape=params[P_name].shape, attr=P_attr)
+        logger.debug(
+            "Parameter %-40s th_dict=%-16.8f multiply scale=%-10.5f to prec=%s",
+                pname, th_dict[pname], xs, P_prec)
+        return graph[P_name], xs
+    def _requant_operator(X, arg, exactly=False):
+        xopn, xn = X.attr('op_name'), X.attr('name')
+        X_name = _uniq_name(xn)
+        if isinstance(arg, PREC):
+            def_prec = arg
+            oprec = _get_prec(precs[xn], name, def_prec).p
+            oscale = scale(th_dict[xn], oprec)
+        else:
+            oscale = float(arg)
+            def_prec = _get_bit(th_dict[xn] * oscale)
+            oprec = _get_prec(precs[xn], name, def_prec).p
+        iscale = scales[xn]
+        iprec = precs[xn][out_key].p
+        if exactly or (iprec > oprec and iscale > oscale):
+            rescale = oscale / iscale
+            frac, exp = sim.cvm_float(rescale, MAX_BIT - iprec)
+            oscale = iscale * frac * (2 ** exp)
+            if frac > 1:
+                X = _mrt_sim_quantize(X, 0, params, graph, iprec)
+                var = mx_const(frac, graph, params)
+                X = mx.sym.broadcast_mul(X, var)
+            X = _mrt_sim_quantize(X, (-exp), params, graph, oprec)
+            logger.debug(
+                "Operator  %-20s name=%-40s requantize with scale=%-16.8f<%d, %d>" +
+                " iprec=%d, iscale=%-10.5f, oprec=%d, oscale=%-10.5f",
+                    xopn, xn, rescale, frac, exp, iprec, iscale,
+                    oprec, oscale)
+        else:
+            oscale = iscale
+        return X, oscale
+    def _requant(X, arg, exactly=False):
+        if is_params(X, params, inputs_ext):
+            return _requant_parameter(X.attr('name'), arg)
+        else:
+            return _requant_operator(X, arg, exactly)
+    def _default_process_op(new_childs, oscale):
+        orange = th_dict[name] * oscale
+        def_prec = PREC(_get_bit(orange))
+        oprec = _get_prec(precs[name], out_key, def_prec)
+        return get_mxnet_op(op_name)(*new_childs, **attr, name=name)
 
     cns = [c.attr('name') for c in childs] if childs else []
     cprecs = [precs[n] for n in cns]
@@ -233,82 +231,78 @@ def _simulate(sym, params, graph, inputs_ext,
         # calculate by op
         return sym, params
     elif op_name in disable_requant_ops:
+        th_dict[name] = th_dict[cns[0]]
         precs[name][out_key] = precs[cns[0]][out_key]
         scales[name] = scales[cns[0]]
-        logger.debug("%-40s pass through scale=%s, prec=%s",
-                name, scales[name], precs[name][out_key])
         return sym, params
+    elif op_name in ['sigmoid', 'exp']:
+        X, xs = _requant_operator(childs[0], PREC(8, L5), True)
+        iprec = _get_prec(cprecs[0], name).p
+        alpha = _get_range(iprec)
+        X = mx.sym.broadcast_add(X, alpha_sym)
+
+        data = nd.arange(-alpha, alpha+1)
+        out = get_nd_op(op_name)(data / scales[cns[0]])
+        oprec = _get_prec(precs[name], out_key, PREC(16, L5)).p
+        oscale = scale(th_dict[name], oprec)
+        weight = (out * oscale).reshape(2*alpha, 1)
+        W_name = _uniq_name("cvm_lut_weight")
+        precs[W_name] = { out_key: oprec.p }
+        params[W_name] = weight
+        W = graph[W_name] = mx.sym.var(W_name, shape=weight.shape)
+        var = mx_const(alpha, graph, params)
+        sym = mx.sym.Custom(X, W, in_dim=2*alpha,
+                name=name, op_type='cvm_lut')
     elif op_name in ['Convolution', 'FullyConnected']:
-        X, xs = _requant_op(childs[0], PREC(8, L5))
-        W, ws = _requant_param(childs[1], PREC(8, L5))
-
-        no_bias = get_attr(attr, 'no_bias', False)
-        B = None if no_bias else childs[2]
-        if not no_bias:
-            B_name = _uniq_name(cns[2])
+        X, xs = _requant_operator(childs[0], PREC(8, L5))
+        W, ws = _requant_parameter(cns[1], PREC(8, L5))
+        B = None
+        if not get_attr(attr, 'no_bias', False):
             bs = ws * xs
-            bias = params[cns[2]] * bs
-            def_prec = PREC(_get_bit(bias))
-            B_prec = _get_prec(cprecs[2], name, def_prec)
-            params[B_name] = nd.clip(bias, *_get_prec_range(B_prec.p))
-            B_attr = { 'precision': str(B_prec.p), }
-            B = graph[B_name] = mx.sym.var(B_name,
-                    shape=params[B_name].shape, attr=B_attr)
-
+            B, _ = _requant_parameter(cns[2], bs)
         oscale = scales[name] = ws * xs
-        new_childs = [X, W, B]
+        sym = get_mxnet_op(op_name)(X, W, B, **attr, name=name)
     elif op_name in ['broadcast_mul']:
-        # TODO: A must by symbol or inputs
-        #       need adjust graph sequence.
-        X, B = childs[0], childs[1]
-        X, xs = _requant_op(X, PREC(8, L4))
-        B, bs = _requant(B, PREC(8, L4))
-
+        X, xs = _requant(childs[0], PREC(8, L4))
+        B, bs = _requant(childs[1], PREC(8, L4))
         oscale = scales[name] = xs * bs
-        new_childs = [X, B]
+        sym = get_mxnet_op(op_name)(X, B, **attr, name=name)
     elif op_name in ['sum']:
-        X, xs = _requant_op(childs[0], PREC(8, L4))
+        X, xs = _requant_operator(childs[0], PREC(8, L4))
         oscale = xs
-        new_childs = [X]
-    elif op_name in ['elemwise_add', 'Concat']:
+        sym = get_mxnet_op(op_name)(X, **attr, name=name)
+    elif op_name in ['elemwise_add', 'elemwise_sub',
+            'broadcast_add', 'broadcast_sub',
+            'Concat']:
         in_th = max([th_dict[n] for n in cns])
-        in_prec = PREC(8, 14)
+        in_prec = PREC(8, L4)
         oscale = scale(in_th, in_prec.p)
         new_childs = []
         for c in childs:
-            cn = c.attr('name')
-            if is_params(c, params, inputs_ext):
-                un = _uniq_name(cn)
-                p = params[cn] * oscale
-                params[un] = nd.clip(p, *_get_prec_range(c_prec.p))
-                c_attr = { 'precision': str(c_prec.p), }
-                c = graph[un] = mx.sym.var(un,
-                        shape=params[un].shape, attr=c_attr)
-            else:
-                prec = precs[cn][out_key].p
-                s = scales[cn]
-                c = _requantize_by_scale(c, params, graph, scales,
-                        prec, th_dict[cn], oscale, scales[cn])
+            c, _ = _requant(c, oscale, True)
             new_childs.append(c)
+        sym = get_mxnet_op(op_name)(*new_childs, **attr, name=name)
     elif op_name in ['Embedding']:
         X, xs = childs[0], scales[cns[0]]
         if xs != 1:
-            X_prec = precs[cns[0]][out_key]
-            X = _requantize_by_scale(X, params, graph, scales,
-                    X_prec.p, th_dict[cns[0]], 1/xs, xs)
-        W, ws = _requant_param(childs[1], PREC(8, L4))
-
-        print (th_dict[cns[0]], th_dict[name], th_dict[cns[1]])
+            X, _ = _requant_operator(childs[0], 1/xs, True)
+        W, ws = _requant_parameter(cns[1], PREC(8, L4))
         oscale = scales[name] = ws
         new_childs = [X, W]
         th_dict[name] = th_dict[cns[1]]
+        sym = get_mxnet_op(op_name)(X, W, **attr, name=name)
     else:
         print (name, op_name, attr)
+        assert False
+
     orange = th_dict[name] * oscale
     def_prec = PREC(_get_bit(orange))
     oprec = _get_prec(precs[name], out_key, def_prec)
-    sym = get_mxnet_op(op_name)(*new_childs, **attr, name=name)
-    logger.debug("%-40s output scale=%s, prec=%s", name, oscale, oprec)
+
+    if name in precs[name]:
+        oprec = precs[name][name]
+        sym, os = _requant_operator(sym, PREC(oprec))
+        scales[sym.attr('name')] = os
 
     oname = sym.attr('name')
     th_dict[oname] = th_dict[name]
@@ -392,17 +386,28 @@ class MRT():
         self.inputs_ext = inputs_ext
 
         self.precs = {}
-        self.th_dict = {}
+        self.th_dict = None
         self.scales = {}
-        self.fixed = set()
+        self._fixed = set()
 
         self.logger = logging.getLogger('log.mrt')
+        self._set_prerequisites()
 
     def set_input_prec(self, name, prec=8, level=L5):
-        set_input_prec(self.precs, name, prec, level)
+        self.precs[name][out_key] = PREC(prec, level)
 
-    def set_fixed(self, name):
-        self.fixed.add(name)
+    def set_output_prec(self, prec, level=L5):
+        """ Output precision used by point to self in network
+        """
+        for sym in self.sym:
+            name = sym.attr('name')
+            self.precs[name][name] = PREC(prec, level)
+
+    def set_fixed(self, fixes):
+        if isinstance(fixes, list):
+            self._fixed.update(fixes)
+        else:
+            self._fixed.add(fixes)
 
     def set_data(self, name, data):
         if name not in self.inputs_ext:
@@ -418,29 +423,37 @@ class MRT():
         return self.th_dict
 
     def quantize(self):
-        self._preset()
+        if self.th_dict is None:
+            self.logger.error("Please calibrate thresholds first.")
+            assert False
+
         self._check_fixed()
         return quantize(self.sym, self.params, self.inputs_ext,
                 self.th_dict, self.precs)
 
-    def _preset(self):
-        _set_default_inputs(self.inputs_ext, self.precs)
-        _set_prerequisites(self.sym, self.precs, self.th_dict)
+    def _set_prerequisites(self):
+        for sym in topo_sort(self.sym):
+            name = sym.attr('name')
+            self.precs[name] = {}
+
+        for k in self.inputs_ext:
+            self.precs[k][out_key] = PREC(8, L0)
 
     def _check_fixed(self):
         for sym in topo_sort(self.sym):
             name, op_name = sym.attr('name'), sym.attr('op_name')
-            if name in self.fixed:
-                assert op_name == 'null'
-                if is_params(sym, self.params, self.inputs_ext):
-                    bit = _get_bit(self.params[name])
-                    if out_key in self.precs[name]:
-                        prec = self.precs[name][out_key]
-                        assert prec >= PREC(bit)
-                        self.precs[name][out_key] = PREC(bit, LFIX)
-                else:
-                    bit = self.precs[name][out_key].p
-                self.th_dict[name] = (2 ** (bit - 1)) - 1
+            if name not in self._fixed:
+                continue
+            assert op_name == 'null'
+            if is_params(sym, self.params, self.inputs_ext):
+                bit = _get_bit(self.params[name])
+                if out_key in self.precs[name]:
+                    prec = self.precs[name][out_key]
+                    assert prec >= PREC(bit)
+                    self.precs[name][out_key] = PREC(bit, LFIX)
+            else:
+                bit = self.precs[name][out_key].p
+            self.th_dict[name] = _get_range(bit)
 
 
 

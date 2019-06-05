@@ -24,7 +24,7 @@ import sym_pass as spass
 import sym_annotate as anno
 import sym_calib as calib
 import sim_quant_helper as sim
-import mrt
+import mrt as _mrt
 import gluon_zoo as zoo
 
 # import resnet18 as resnet
@@ -81,36 +81,27 @@ def test_sym_pass(batch_size=10, iter_num=10):
         _, top5 = acc_top5.get()
         return "top1={:6.2%} top5={:6.2%}".format(top1, top5)
 
-
     sym_fname, param_fname = load_fname(version)
     sym, params = mx.sym.load(sym_fname), nd.load(param_fname)
     sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
 
-    dump_sym, dump_params, dump_ext = load_fname(version, "mrt", True)
-    if False:
-        inputs_ext['data']['data'] = data
-        th_dict = mrt.sym_calibrate(sym, params, inputs_ext, ctx=calib_ctx)
-        sim.save_ext(dump_ext, th_dict)
-    (th_dict,) = sim.load_ext(dump_ext)
-
-    precs = {}
-    mrt.set_input_prec(precs, 'data')
-    mrt.quantize(sym, params, inputs_ext, precs, th_dict)
-    exit()
-
-    sym_fname, param_fname = load_fname(version)
-    sym, params = mx.sym.load(sym_fname), nd.load(param_fname)
-    sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
-    # inputs_ext['data']['data'] = data
-    # in_bit, out_bit = 8, 8
-    # qsym, qparams, _ = anno.mixed_precision(sym, params, inputs_ext,
-    #         in_bit=in_bit, out_bit=out_bit, ctx=[calib_ctx])
-    qsym, qparams, precs, _ = calib.sym_simulate(sym, params, inputs_ext, data, calib_ctx)
-    qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, precs, "cvm")
-    dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
-    sim.save_ext(dump_ext, inputs_ext)
-    nd.save(dump_params, qparams)
-    open(dump_sym, "w").write(qsym.tojson())
+    if True:
+        if True:
+            dump_sym, dump_params, dump_ext = load_fname(version, "mrt", True)
+            mrt = _mrt.MRT(sym, params, inputs_ext)
+            mrt.set_data('data', data)
+            mrt.calibrate(ctx=calib_ctx)
+            mrt.set_output_prec(8)
+            qsym, qparams, inputs_ext = mrt.quantize()
+        else:
+            inputs_ext['data']['data'] = data
+            th_dict = calib.sym_calibrate(sym, params, inputs_ext, ctx=calib_ctx)
+            qsym, qparams, precs, _ = calib.sym_simulate(sym, params, inputs_ext, th_dict)
+            qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, precs, "cvm")
+        dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
+        sim.save_ext(dump_ext, inputs_ext)
+        nd.save(dump_params, qparams)
+        open(dump_sym, "w").write(qsym.tojson())
 
     dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
     (inputs_ext,) = sim.load_ext(dump_ext)
@@ -199,8 +190,8 @@ if __name__ == "__main__":
 
     # save_data()
 
-    test_sym_pass(batch_size=16, iter_num=10)
-    # test_sym_nnvm(batch_size=1)
+    # test_sym_pass(batch_size=16, iter_num=10)
+    test_sym_nnvm(batch_size=1)
     # test_performance(16, 10)
 
 
