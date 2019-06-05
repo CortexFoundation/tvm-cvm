@@ -9,6 +9,8 @@ from utils import *
 import sym_pass as spass
 import sim_quant_helper as sim
 
+# TODO: op's requant_type: rPassThrough, rInjective
+
 disable_requant_ops = [
     'Activation', 'relu',
     'Pooling',
@@ -58,8 +60,8 @@ def sym_calibrate(symbol, params, inputs_ext, old_ths={}, ctx=mx.cpu()):
     return th_dict
 
 L0, L1, L2, L3, L4, L5, L6 = 0, 25, 50, 75, 100, 150, 200
-LBINARY = L4
-LCONV = L5
+rPassThrough = 'r_pass_through'
+rInjective = 'r_injective'
 LFIX = 1000
 class PREC():
     def __init__(self, *args):
