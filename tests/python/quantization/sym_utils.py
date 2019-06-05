@@ -5,6 +5,7 @@ import mxnet as mx
 import nnvm
 import logging
 import json
+import math
 
 INT32_MIN, INT32_MAX = -2147483647, 2147483647
 INT8_MIN, INT8_MAX = -127, 127
@@ -114,6 +115,15 @@ def examine_parameters(symbol, params, inputs_ext, allows=[], callback=None):
         if name in params:
             new_params[name] = params[name]
     return new_params
+
+def mx_const(number, graph, params):
+    name = 'const_var_' + str(number)
+    prec = math.ceil(math.log2(number)) + 1
+    if name not in graph:
+        attr = { 'precision': str(prec) }
+        graph[name] = mx.sym.var(name, shape=(1,), attr=attr)
+        params[name] = nd.array([number])
+    return graph[name]
 
 def op_const(number, graph, var=mx.sym.var):
     name = 'const_var_' + str(number)

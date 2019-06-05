@@ -433,67 +433,23 @@ def _realize_layer(sym, params, graph, inputs_ext, runtime):
     X, scale = childs[0], eval(attr['scale'])
     in_prec, out_prec = eval(attr['in_prec']), eval(attr['out_prec'])
     frac, sb = sim.extract_float(scale)
-    if name in [
-        # 'resnetv10_pool0_fwd_requant_8',
-        # 'resnetv10_stage1__plus0_in0_squeeze',
-        # 'resnetv10_stage1_relu0_fwd_requant_8',
-        # 'resnetv10_stage1_activation0_requant_8',
-        # 'resnetv10_stage1_relu1_fwd_requant_8',
-        # 'resnetv10_stage1__plus1_in1_squeeze',
-        # 'resnetv10_stage1_activation1_requant_8',
-        # 'resnetv10_stage2_relu0_fwd_requant_8',
-        # 'resnetv10_stage2__plus0_in1_squeeze',
-        # 'resnetv10_stage2_activation0_requant_8',
-        # 'resnetv10_stage2_relu1_fwd_requant_8',
-        # 'resnetv10_stage2__plus1_in1_squeeze',
-        # 'resnetv10_stage2_activation1_requant_8',
-        # 'resnetv10_stage3__plus0_in0_squeeze',
-        # 'resnetv10_stage3_relu0_fwd_requant_8',
-        # 'resnetv10_stage3_activation0_requant_8',
-        # 'resnetv10_stage3_relu1_fwd_requant_8',
-        # 'resnetv10_stage3__plus1_in1_squeeze',
-        # 'resnetv10_stage3_activation1_requant_8',
-        # 'resnetv10_stage4_relu0_fwd_requant_8',
-        # 'resnetv10_stage4__plus0_in1_squeeze',
-        # 'resnetv10_stage4_activation0_requant_8',
-        # 'resnetv10_stage4__plus1_in0_squeeze',
-        # 'resnetv10_stage4_relu1_fwd_requant_8',
-        # 'resnetv10_stage4_activation1_requant_8',
-        # 'broadcast_mul0_requant_8',
-        # 'resnetv10_dense0_fwd_requant_8',
-    ]:
-        print (name, scale, in_prec, out_prec, frac, sb)
-        return sym, params
 
     assert runtime in ['cvm', 'tvm']
     _realize_func = _realize_cvm if runtime == 'cvm' else _realize_tvm
 
     def cal_bit(A_bit, B_bit, sb):
-        # A_target_bit, B_target_bit = 16, 16
-        # A_target_bit = min(A_bit, A_target_bit)
-        # B_target_bit = min(B_bit, B_target_bit)
-        # A_target_bit = 32 - B_target_bit if B_target_bit < 16 else A_target_bit
-        # B_target_bit = 32 - A_target_bit if A_target_bit < 16 else B_target_bit
-        # A_target_bit = min(A_bit, A_target_bit)
-        # B_target_bit = min(B_bit, B_target_bit)
-        # A_target_bit = A_bit
-        # B_target_bit = PLACE_HOLDER - A_target_bit
-        # A_sb, B_sb = A_bit - A_target_bit, B_bit - B_target_bit
-        # Y_sb = (-sb) - A_sb - B_sb
-        # return A_sb, A_target_bit, B_sb, B_target_bit, Y_sb
-
-        max_bit = 32
-        total_bit = A_bit + B_bit
-        excess_bit = (total_bit - max_bit) // 2 if total_bit > max_bit else 0
-        A_target_bit = A_bit - excess_bit
-        B_target_bit = min(B_bit - excess_bit, 32 - A_target_bit)
-        A_sb, B_sb = A_bit - A_target_bit, B_bit - B_target_bit
-        Y_sb = (-sb) - A_sb - B_sb
-        return A_sb, A_target_bit, B_sb, B_target_bit, Y_sb
+       max_bit = 32
+       total_bit = A_bit + B_bit
+       excess_bit = (total_bit - max_bit) // 2 if total_bit > max_bit else 0
+       A_target_bit = A_bit - excess_bit
+       B_target_bit = min(B_bit - excess_bit, 32 - A_target_bit)
+       A_sb, B_sb = A_bit - A_target_bit, B_bit - B_target_bit
+       Y_sb = (-sb) - A_sb - B_sb
+       return A_sb, A_target_bit, B_sb, B_target_bit, Y_sb
 
     if scale == 1:
         node = _realize_func(X, 0, out_prec, params, graph)
-        logger.debug("layer %-40s X prec=%s", name, out_prec)
+        logger.debug("layer %-40s skip prec=%s", name, out_prec)
     elif frac == 1:
         node =_realize_func(X, sb, out_prec, params, graph)
         logger.debug("layer %-40s X(%s >> %s) prec=%s",
@@ -514,6 +470,14 @@ def _realize_layer(sym, params, graph, inputs_ext, runtime):
         node = _realize_func(node, Y_sb, out_prec, params, graph)
         logger.debug("layer %-40s Y(INT%s >> %s) X(%s >> %s) B(%s vs. %s %s >> %s)",
                 name, out_prec, Y_sb, in_prec, A_sb, scale, frac, sb, B_sb)
+
+    if childs[0].attr('name') in [
+        'yolov30_yolooutputv30_tile0',
+        'yolov30_yolooutputv31_tile0',
+        'yolov30_yolooutputv32_tile0',
+    ]:
+        sb = out_prec - 16
+        node = _realize_func(node, sb, 16, params, graph)
     return node, params
 
 def _realize_parameters(sym, params, graph, inputs_ext, precs):

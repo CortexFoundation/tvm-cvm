@@ -24,6 +24,7 @@ import sym_pass as spass
 import sym_annotate as anno
 import sym_calib as calib
 import sim_quant_helper as sim
+import mrt
 import gluon_zoo as zoo
 
 # import resnet18 as resnet
@@ -50,7 +51,6 @@ def test_sym_nnvm(batch_size=10):
 
 def test_sym_pass(batch_size=10, iter_num=10):
     logger = logging.getLogger("log.test.sym.pass")
-
     calib_ctx = mx.gpu(2)
     ctx = [mx.gpu(int(i)) for i in "1,2,3,4,5,6,7".split(',') if i.strip()]
     inputs_ext = { 'data': {
@@ -63,11 +63,7 @@ def test_sym_pass(batch_size=10, iter_num=10):
     def data_iter_func():
         data = data_iter.next()
         return data.data[0], data.label[0]
-    for i in range(10):
-        if i == 3:
-            break
-        data, _ = data_iter_func()
-    data_iter.reset()
+    data, _ = data_iter_func()
 
     version = "50_mxg"
     net1 = utils.load_model(*load_fname(version), inputs, ctx=ctx)
@@ -84,6 +80,23 @@ def test_sym_pass(batch_size=10, iter_num=10):
         acc_top5.update(label, res)
         _, top5 = acc_top5.get()
         return "top1={:6.2%} top5={:6.2%}".format(top1, top5)
+
+
+    sym_fname, param_fname = load_fname(version)
+    sym, params = mx.sym.load(sym_fname), nd.load(param_fname)
+    sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
+
+    dump_sym, dump_params, dump_ext = load_fname(version, "mrt", True)
+    if False:
+        inputs_ext['data']['data'] = data
+        th_dict = mrt.sym_calibrate(sym, params, inputs_ext, ctx=calib_ctx)
+        sim.save_ext(dump_ext, th_dict)
+    (th_dict,) = sim.load_ext(dump_ext)
+
+    precs = {}
+    mrt.set_input_prec(precs, 'data')
+    mrt.quantize(sym, params, inputs_ext, precs, th_dict)
+    exit()
 
     sym_fname, param_fname = load_fname(version)
     sym, params = mx.sym.load(sym_fname), nd.load(param_fname)
@@ -187,7 +200,7 @@ if __name__ == "__main__":
     # save_data()
 
     test_sym_pass(batch_size=16, iter_num=10)
-    test_sym_nnvm(batch_size=1)
+    # test_sym_nnvm(batch_size=1)
     # test_performance(16, 10)
 
 

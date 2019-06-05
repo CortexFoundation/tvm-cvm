@@ -457,12 +457,8 @@ def _sym_rewrite(sym, params, graph, inputs_ext, infer_shapes):
             }
             X = mx.sym.expand_dims(X, axis=3)
             params[W_name] = params[W_name].expand_dims(axis=3)
-            print (params[W_name].shape)
             W = graph[W_name] = mx.sym.var(W_name, shape=params[W_name].shape)
             B = None if no_bias else childs[2]
-            print (infer_shapes[name],
-                    infer_shapes[X_name], infer_shapes[W_name],
-                    infer_shapes[childs[2].attr('name')], attr)
             node = get_mxnet_op(op_name)(X, W, B, **attr, name=name)
             node = mx.sym.squeeze(node, axis=3)
         else:
@@ -830,7 +826,7 @@ def sym_dump_layer_outputs(symbol, params, inputs_ext,
                 np.save(dump_out, o.asnumpy().astype(out_dtype))
 
         prefix = "parameters" if op_name=='null' else op_name
-        prefix = attr['op_type'] if op_name=='Custom' else op_name
+        prefix = attr['op_type'] if op_name=='Custom' else prefix
         dump_file = "%s/%s.%s" % (datadir, prefix, DUMP_SUFFIX)
         with open(dump_file, "a+") as fout:
             fout.write(name + ": ")

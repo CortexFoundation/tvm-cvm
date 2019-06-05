@@ -375,8 +375,8 @@ def sym_realize(symbol, params, inputs_ext, precs, runtime="cvm"):
           callback=_check_int_params)
     return symbol, params
 
-def pure_int8_quantize(symbol, params, inputs_ext,
-        runtime="cvm", ctx=mx.gpu()):
+def pure_int8_quantize(symbol, params, inputs_ext, th_dict,
+        runtime="cvm"):
     """Layer-Wise Quantization Method
     Quantize graph into INT8 for each layer including inputs and outputs
 
@@ -403,7 +403,7 @@ def pure_int8_quantize(symbol, params, inputs_ext,
         Output of quantized graph / Output of original graph
 
     """
-    ssym, sparams, precs, oscales = sym_simulate(symbol, params, inputs_ext, None, ctx=ctx)
+    ssym, sparams, precs, oscales = sym_simulate(symbol, params, inputs_ext, th_dict)
     qsym, qparams = sym_realize(ssym, sparams, inputs_ext, precs, runtime=runtime)
 
     return qsym, qparams, oscales

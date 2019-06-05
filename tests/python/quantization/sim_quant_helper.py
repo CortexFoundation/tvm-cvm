@@ -105,6 +105,28 @@ def float_bin(number, places = 24):
         res += str(whole)
     return sign, res
 
+def cvm_float(number, bits=24):
+    alpha = max((2 ** (bits - 1)) - 1, 1)
+    bits -= 1
+    assert number >= 0
+    if number == 0:
+        return 0, 0
+    exp = 0
+    while (number >= 1):
+        number /= 2
+        exp += 1
+    while (number < 1):
+        number *= 2
+        exp -= 1
+    while (bits > 1):
+        if (int(number) == number):
+            break
+        number *= 2
+        exp -= 1
+        bits -= 1
+    frac, sb = round(number), exp
+    return min(frac, alpha), sb
+
 def nd_quant(data, shift_bits=None, target_bit=8,
         logger=logging):
     real_bits = target_bit - 1 # real bits is decreased for int type

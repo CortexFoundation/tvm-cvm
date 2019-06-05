@@ -12,6 +12,7 @@ import dataset as ds
 import sym_calib as calib
 import sim_quant_helper as sim
 import utils
+import mrt as _mrt
 
 def load_fname(suffix=None, with_ext=False):
     suffix = "."+suffix if suffix is not None else ""
@@ -40,8 +41,17 @@ def trec(data):
 
 sym, params = mx.sym.load(sym_file), nd.load(param_file)
 sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
-inputs_ext['data']['data'] = data
-qsym, qparams, _ = calib.pure_int8_quantize(sym, params, inputs_ext, ctx=ctx)
+if True:
+    mrt = _mrt.MRT(sym, params, inputs_ext)
+    mrt.set_data('data', data)
+    mrt.calibrate(ctx=ctx)
+    mrt.set_input_prec('data', 16)
+    mrt.set_fixed('data')
+    qsym, qparams, inputs_ext = mrt.quantize()
+else:
+    inputs_ext['data']['data'] = data
+    th_dict = calib.sym_calibrate(sym, params, inputs_ext, ctx=ctx)
+    qsym, qparams, _ = calib.pure_int8_quantize(sym, params, inputs_ext, th_dict)
 net2 = gluon.nn.SymbolBlock(qsym, inputs)
 utils.load_parameters(net2, qparams, ctx=ctx)
 def quantize(data):
@@ -52,8 +62,11 @@ def quantize(data):
 quant_sym, quant_params, quant_ext = load_fname("sym.quantize", with_ext=True)
 open(quant_sym, "w").write(qsym.tojson())
 
-spass.mxnet_to_nnvm(qsym, qparams, inputs_ext, *load_fname("nnvm.compile"))
-#  spass.mxnet_to_cvm(qsym, qparams, inputs_ext, *load_fname("nnvm.compile"))
+if False:
+    spass.mxnet_to_nnvm(qsym, qparams, inputs_ext, *load_fname("nnvm.compile"))
+    inputs_ext['data']['data'] = data
+    spass.sym_dump_layer_outputs(qsym, qparams, inputs_ext,
+            datadir='/tmp/trec/out', max_num=1000, data_dtype="int32")
 
 utils.multi_eval_accuracy(trec, data_iter_func,
         quantize,

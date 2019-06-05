@@ -9,6 +9,7 @@ from tvm.contrib import graph_runtime
 from quant_op import *
 from quant_utils import *
 import utils
+import mrt
 import sym_annotate as anno
 import sym_utils as sutils
 import sym_pass as spass
@@ -139,34 +140,37 @@ def test_sym_pass(iter_num=10):
     def graph_func(data):
         return net1.forward(data.as_in_context(ctx))
 
-    # sym_file, param_file = load_fname(version)
-    # sym, params = mx.sym.load(sym_file), nd.load(param_file)
-    # sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
-    # qsym, qparams, precs, _ = calib.sym_simulate(sym, params, inputs_ext, data, ctx)
-    # qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, precs, "cvm")
-    # dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
-    # sim.save_ext(dump_ext, inputs_ext)
-    # nd.save(dump_params, qparams)
-    # open(dump_sym, "w").write(qsym.tojson())
-
-    # dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
-    # sym, params = mx.sym.load(dump_sym), nd.load(dump_params)
-    # (inputs_ext,) = sim.load_ext(dump_ext)
-    # inputs = [mx.sym.var(n) for n in inputs_ext]
-    # net2 = utils.load_model(dump_sym, dump_params, inputs, ctx=ctx)
-    # def cvm_quantize(data):
-    #     data = sim.load_real_data(data, 'data', inputs_ext)
-    #     return net2.forward(data.as_in_context(ctx))
-
     sym_file, param_file = load_fname(version)
     sym, params = mx.sym.load(sym_file), nd.load(param_file)
-    print (sutils.sym_collect_attr(sym))
     sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
     inputs_ext['data']['data'] = data
-    qsym, qparams, _ = anno.mixed_precision(sym, params, inputs_ext,
-            ctx=[mx.gpu(7)])
-    # qsym, qparams, precs = anno.sym_annotate(sym, params, inputs_ext)
-    # qsym, qparams, _ = anno.sym_simulate(qsym, qparams, inputs_ext, precs, ctx=[ctx])
+    th_dict = mrt.sym_calibrate(sym, params, inputs_ext, ctx=ctx)
+    qsym, qparams, qext = mrt.quantize(sym, params, inputs_ext, th_dict, {})
+    # th_dict = calib.sym_calibrate(sym, params, inputs_ext, ctx=ctx)
+    # qsym, qparams, precs, _ = calib.sym_simulate(sym, params, inputs_ext, th_dict)
+    # qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, precs, "cvm")
+    # qext = inputs_ext
+    dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
+    sim.save_ext(dump_ext, qext)
+    nd.save(dump_params, qparams)
+    open(dump_sym, "w").write(qsym.tojson())
+
+    dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
+    sym, params = mx.sym.load(dump_sym), nd.load(dump_params)
+    (inputs_ext,) = sim.load_ext(dump_ext)
+    inputs = [mx.sym.var(n) for n in inputs_ext]
+    net2 = utils.load_model(dump_sym, dump_params, inputs, ctx=ctx)
+    def cvm_quantize(data):
+        data = sim.load_real_data(data, 'data', inputs_ext)
+        return net2.forward(data.as_in_context(ctx))
+
+    # sym_file, param_file = load_fname(version)
+    # sym, params = mx.sym.load(sym_file), nd.load(param_file)
+    # print (sutils.sym_collect_attr(sym))
+    # sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
+    # inputs_ext['data']['data'] = data
+    # qsym, qparams, _ = anno.mixed_precision(sym, params, inputs_ext,
+    #         ctx=[mx.gpu(7)])
     net3 = nn.SymbolBlock(qsym, inputs)
     utils.load_parameters(net3, qparams, ctx=ctx)
     def mixed_precision(data):
@@ -181,53 +185,15 @@ def test_nnvm_pass(iter_num=10):
     logger = logging.getLogger("log.test.nnvm")
     logger.info("=== Log Test NNVM ===")
 
-    target = "cuda"
-    tvm_ctx = tvm.context(target, 1)
-    mx_ctx = mx.gpu(2)
-    inputs_ext = { 'data': {
-        'shape': (batch_size, 1, 28, 28),
-    } }
-    inputs = [mx.sym.var(name) for name in inputs_ext]
-    inputs_shape = {k:v['shape'] for k,v in inputs_ext.items()}
-
-    data_iter = iter(val_loader)
-    def data_iter_func():
-        return next(data_iter)
-    data, _ = data_iter_func()
-
     dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
     sym, params = mx.sym.load(dump_sym), nd.load(dump_params)
     (inputs_ext,) = sim.load_ext(dump_ext)
-    net1 = utils.load_model(dump_sym, dump_params, inputs, ctx=mx_ctx)
-    def mnist_quantize(data):
-        data = sim.load_real_data(data, 'data', inputs_ext)
-        np.save("/tmp/mnist/data.npy", data.asnumpy().astype('int8'))
-        res = net1.forward(data.as_in_context(mx_ctx))
-        np.save("/tmp/mnist/result.npy", res.asnumpy().astype('int8'))
-        return res
 
-    nnvm_sym, _ = nnvm.frontend.from_mxnet(sym)
-    nnvm_sym, real_params = spass.nnvm_realize(nnvm_sym, params, inputs_ext)
+    dump_sym, dump_params = load_fname(version, "nnvm.compile")
+    spass.mxnet_to_nnvm(sym, params, inputs_ext, dump_sym, dump_params)
 
-    use_dtype = "int32"
-    for key, value in list(real_params.items()):
-       real_params[key] = tvm.nd.array(value.asnumpy().astype(use_dtype), tvm_ctx)
-
-    with nnvm.compiler.build_config(opt_level=0, runtime="cvm"):
-       deploy_graph, lib, real_params = nnvm.compiler.build(
-           nnvm_sym, target=target, shape=inputs_shape,
-           params=real_params, dtype=use_dtype)
-
-    real_params = spass.tvm_params_reduce(nnvm_sym, real_params, inputs_ext, tvm_ctx)
-    dump_symbol, dump_params = '/tmp/mnist/symbol.json', '/tmp/mnist/params'
-    with open(dump_symbol, "w") as fout:
-       fout.write(deploy_graph.json())
-    with open(dump_params, "wb") as fout:
-       param_bytes = nnvm.compiler.save_param_dict(real_params)
-       fout.write(param_bytes)
-
-print ("Test mnist", version )
+print ("Test mnist", version)
 # train_mnist()
 utils.log_init()
-test_sym_pass(10000)
+test_sym_pass(10)
 # test_nnvm_pass(10)
