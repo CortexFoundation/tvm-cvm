@@ -291,20 +291,6 @@ def _simulate(sym, scale, in_prec, out_prec, name):
     node = mx.sym.Custom(sym, in_prec=in_prec, out_prec=out_prec,
             scale=scale, name=name, op_type='cvm_sim_quant')
     return node
-
-    name = sym.attr('name') if prefix is None else prefix
-    scale_name = name + '_scale'
-    assert scale_name not in graph, "scale name %s has existed in graph" \
-            % (scale_name)
-    node = mx.sym.Custom(sym, in_prec)
-    scale_sym = graph[scale_name] = mx.sym.var(scale_name, shape=(1,))
-    params[scale_name] = nd.array([scale])
-
-    requant_op_name = name + '_requantize'
-    assert requant_op_name not in graph
-    node = mx.sym.broadcast_mul(sym, scale_sym, name=requant_op_name)
-    graph[requant_op_name] = node
-    return node
 def _is_simulate_op(sym):
     op_name, attr = sym.attr('op_name'), sym.list_attr()
     if op_name == 'Custom' and attr['op_type'] == 'cvm_sim_quant':
@@ -369,6 +355,15 @@ def _simulate_layer(sym, params, graph, inputs_ext, scales, precs):
         X = mx.sym.broadcast_add(childs[0], alpha_sym)
         node = mx.sym.Custom(X, W, in_dim=2*alpha,
                 name=name, op_type='cvm_lut')
+
+    # if target_key in precs[name]:
+    #     out_tb, out_bit = precs[name][target_key], precs[name][out_key]
+    #     if out_tb < out_bit:
+    #         rescale = 1 / (2 ** (out_bit - out_tb))
+    #         node = _simulate(node, rescale, out_bit, out_tb, name+"_out")
+    #         # node = _annotate(node, graph, precs, out_bit, out_tb,
+    #         #         ANNO_TYPE.REQUANT, logger)
+    #         # th_dict[node.attr('name')] = th_dict[name]
     scales[node.attr('name')] = scales[name]
     precs[node.attr('name')] = precs[name]
     return node, params
@@ -451,9 +446,9 @@ def _realize_layer(sym, params, graph, inputs_ext, runtime):
         node = _realize_func(X, 0, out_prec, params, graph)
         logger.debug("layer %-40s skip prec=%s", name, out_prec)
     elif frac == 1:
-        node =_realize_func(X, sb, out_prec, params, graph)
+        node =_realize_func(X, -sb, out_prec, params, graph)
         logger.debug("layer %-40s X(%s >> %s) prec=%s",
-                name, in_prec, sb, out_prec)
+                name, in_prec, -sb, out_prec)
     else:
         B_bit = math.ceil(math.log2(frac)) + 1
         A_sb, A_tb, B_sb, B_tb, Y_sb = cal_bit(in_prec, B_bit, sb)
@@ -475,6 +470,9 @@ def _realize_layer(sym, params, graph, inputs_ext, runtime):
         'yolov30_yolooutputv30_tile0',
         'yolov30_yolooutputv31_tile0',
         'yolov30_yolooutputv32_tile0',
+        'yolov30_yolooutputv30_expand_dims0',
+        'yolov30_yolooutputv31_expand_dims0',
+        'yolov30_yolooutputv32_expand_dims0',
     ]:
         sb = out_prec - 16
         node = _realize_func(node, sb, 16, params, graph)
@@ -640,7 +638,7 @@ def post_quantize(symbol, params, inputs_ext, extra_ext):
             score_scale = extra_ext['score']
             bbox_scale = extra_ext['bbox']
             valid_thresh = get_attr(attr, 'valid_thresh', 0)
-            attr['valid_thresh'] = int(valid_thresh * score_scale)
+            attr['valid_thresh'] = int(valid_thresh * score_scale / (2 **8))
             node = get_mxnet_op(op_name)(*childs, **attr, name=name)
         return node, params
     qsym, qparams = topo_visit(symbol, params, inputs_ext,

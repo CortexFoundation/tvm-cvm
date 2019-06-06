@@ -41,10 +41,10 @@ def load_fname(version, suffix=None, with_ext=False):
 def test_sym_nnvm(batch_size=10):
     version = "50_mxg"
     dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
+    sym, params = mx.sym.load(dump_sym), nd.load(dump_params)
     (inputs_ext,) = sim.load_ext(dump_ext)
     for k, v in inputs_ext.items():
         v['shape'] = (batch_size, *v['shape'][1:])
-    sym, params = mx.sym.load(dump_sym), nd.load(dump_params)
 
     spass.mxnet_to_nnvm(sym, params, inputs_ext,
             *load_fname(version, "nnvm.compile"))
@@ -189,6 +189,18 @@ if __name__ == "__main__":
     # zoo.save_model('resnet18_v1b_0.89')
 
     # save_data()
+    if True:
+        version = "50_mxg"
+        dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
+        sym, params = mx.sym.load(dump_sym), nd.load(dump_params)
+        (inputs_ext,) = sim.load_ext(dump_ext)
+        data_iter = utils.load_dataset(16)
+        while(1000):
+            data = data_iter.next().data[0]
+            inputs_ext['data']['data'] = sim.load_real_data(data, 'data', inputs_ext)
+            spass.sym_dump_ops(sym, params, inputs_ext,
+                    datadir="/data/wlt", ctx=mx.gpu(2))
+        exit()
 
     # test_sym_pass(batch_size=16, iter_num=100)
     test_sym_nnvm(batch_size=1)

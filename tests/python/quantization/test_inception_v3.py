@@ -275,6 +275,19 @@ if __name__ == '__main__':
 
     # zoo.save_inception_v3()
     # zoo.save_model('inceptionv3', 1000)
+    if True:
+        data_iter = ds.load_imagenet_rec(4, 299)
+        version = "v3"
+        while True:
+            dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
+            (inputs_ext,) = sim.load_ext(dump_ext)
+            sym, params = mx.sym.load(dump_sym), nd.load(dump_params)
+            data = data_iter.next().data[0]
+            data = sim.load_real_data(data, 'data', inputs_ext)
+            inputs_ext['data']['data'] = data
+            spass.sym_dump_ops(sym, params, inputs_ext,
+                    datadir="/data/wlt", ctx=mx.gpu(3))
+        exit()
 
     # test_sym_pass(600, 100000)
     test_sym_nnvm(1, 0)

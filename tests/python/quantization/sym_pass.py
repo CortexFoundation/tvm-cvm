@@ -751,6 +751,8 @@ def sym_attach_attrs(symbol, params, inputs_ext, **kwargs):
             logger=logger, inputs_ext=inputs_ext,
             callback=_attach_attr, **kwargs)
 
+import hashlib
+import shutil
 def sym_dump_ops(symbol, params, inputs_ext, datadir,
         dtype="float64", out_dtype="int32",
         ctx=mx.gpu(), cleanDir=False):
@@ -758,33 +760,60 @@ def sym_dump_ops(symbol, params, inputs_ext, datadir,
     check_ext_deps(inputs_ext, 'data')
 
     if cleanDir:
-        import shutil
+        logger.info("Clean directory: %s", datadir)
         shutil.rmtree(datadir, ignore_errors=True)
 
-    op_counts = {}
-    def get_op_count(op_name):
-        op_dir = "%s/%s" % (datadir, op_name)
-        op_count = 0
-        if op_name not in op_counts:
-            os.mkdirs(op_dir, exist_ok=True)
-            for count in os.listdir(op_dir):
-                op_count = max(op_count, count)
-            op_count += 1
-        op_counts[op_name] = op_count
-        count_dir = "%s/%s" % (op_dir, op_count)
-        os.mkdirs(count_dir, exist_ok=True)
-        return count_dir
-    def dump_op(op_name, attr, ins, outs):
-        count_dir = get_op_count(op_name)
-        attr_file = "%s/%s" % (count_dir, "attr")
-        open(attr_file, "w").write(attr)
-        for i, _in in enumerate(ins):
-            in_file = "%s/in_%d" % (count_dir, i)
-            np.save(in_file, _in.asnumpy().astype(out_dtype))
-        for i, _out in enumerate(outs):
-            out_file = "%s/out_%d" % (count_dir, i)
-            np.save(out_file, _out.asnumpy().astype(out_dtype))
+    npdir = "%s/%s" % (datadir, ".hidden.out")
+    os.makedirs(npdir, exist_ok=True)
 
+    def sha256(data):
+        hsh = hashlib.sha256(data).hexdigest()
+        return hashlib.sha256("{}{}{}{}{}{}{}{}{}".format(
+                hsh, data.shape, data.dtype,
+                data.min(), data.max(),
+                data.argmax(), data.argmin(),
+                data.mean(), data.var(),
+        ).encode()).hexdigest()
+    def dump_nd(hsh, in_file, data):
+        hsh_file = "%s/%s.npy" % (npdir, hsh)
+        if os.path.exists(hsh_file):
+            loaded = np.load(hsh_file)
+            if not np.equal(loaded, data).all():
+                logger.error(
+                    "Failed dump op:%-20s hash=%s, link to file=%s",
+                        op_name, hsh, in_file)
+                return False
+        np.save(hsh_file, data)
+        os.symlink(hsh_file, in_file)
+        return True
+    def dump_op(op_name, attr, ins, outs):
+        ins = [_in.asnumpy().astype(out_dtype) for _in in ins]
+        hshes = [sha256(_in) for _in in ins]
+        hsh = hashlib.sha256("{}{}".format(hshes, attr)
+                    .encode()).hexdigest()
+        hsh_dir = "%s/%s/%s" % (datadir, op_name, hsh)
+        if os.path.exists(hsh_dir):
+            logger.info("Skip op:%-20s hashdir=%s",
+                op_name, hsh)
+            return
+        os.makedirs(hsh_dir, exist_ok=True)
+        attr_file = "%s/%s" % (hsh_dir, "attribute")
+        open(attr_file, "w").write(str(attr) + "\n")
+        for i, _in in enumerate(ins):
+            in_file = "%s/in_%d" % (hsh_dir, i)
+            if not dump_nd(hshes[i], in_file, _in):
+                shutil.rmtree(hsh_dir)
+                return
+        for i, _out in enumerate(outs):
+            out_file = "%s/out_%d" % (hsh_dir, i)
+            _out = _out.asnumpy().astype(out_dtype)
+            out_hsh = sha256(_out)
+            if not dump_nd(out_hsh, out_file, _out):
+                shutil.rmtree(hsh_dir)
+                return
+
+        idx_file = "%s/%s/%s" % (datadir, op_name, "index")
+        open(idx_file, "a").write(hsh + "\n")
 
     order, deps = topo_sort(symbol, logger=logger, with_deps=True)
     out_cache = {}
@@ -794,12 +823,14 @@ def sym_dump_ops(symbol, params, inputs_ext, datadir,
         if op_name == 'null':
             out = inputs_ext[name]['data'] if name in inputs_ext \
                   else params[name]
-        elif childs is None:
-            out = get_nd_op(op_name)(**attr)
-        elif get_attr(attr, 'op_type', 'null')=='cvm_clip' and \
+            out_cache[name] = [out.astype(dtype).as_in_context(ctx)]
+            continue
+
+        assert childs is not None
+        cinfos = [(c.attr('name'), get_entry_id(c)) for c in childs]
+        nd_inputs = [out_cache[n[0]][n[1]] for n in cinfos]
+        if get_attr(attr, 'op_type', 'null')=='cvm_clip' and \
                 dtype=="float64":
-            cinfos = [(c.attr('name'), get_entry_id(c)) for c in childs]
-            nd_inputs = [out_cache[n[0]][n[1]] for n in cinfos]
             np_inputs = [o.asnumpy() for o in nd_inputs]
             precision = get_attr(attr, 'precision')
             amax = (2 ** (precision - 1)) - 1
@@ -807,28 +838,18 @@ def sym_dump_ops(symbol, params, inputs_ext, datadir,
             np_out = np.clip(np_inputs[0], amin, amax)
             out = nd.array(np_out, dtype=dtype)
         else:
-            cinfos = [(c.attr('name'), get_entry_id(c)) for c in childs]
-            nd_inputs = [out_cache[n[0]][n[1]] for n in cinfos]
             out = get_nd_op(op_name)(*nd_inputs, **attr)
-            for n, _ in cinfos:
-                assert n in deps
-                deps[n].remove(name)
-                if len(deps[n]) == 0:
-                    del out_cache[n]
         out = [out] if len(sym) == 1 else out
         out_cache[name] = [o.astype(dtype).as_in_context(ctx) for o in out]
 
-        prefix = "parameters" if op_name=='null' else op_name
-        prefix = attr['op_type'] if op_name=='Custom' else prefix
-        dump_file = "%s/%s.%s" % (datadir, prefix, DUMP_SUFFIX)
-        with open(dump_file, "a+") as fout:
-            fout.write(name + ": ")
-            fout.write(_str_feature(out))
-            fout.write("\n")
-            for i, o in enumerate(out):
-                fout.write(_str_output(o, end=max_num))
-                fout.write("\n")
-        logger.debug("Dump %-20s name=%-40s", op_name, name)
+        op_name = attr['op_type'] if op_name=='Custom' else op_name
+        logger.debug("Dump op:%s attr=%s", op_name, attr)
+        dump_op(op_name, attr, nd_inputs, out)
+        for n, _ in cinfos:
+            assert n in deps
+            deps[n].remove(name)
+            if len(deps[n]) == 0:
+                del out_cache[n]
 
 def sym_dump_layer_outputs(symbol, params, inputs_ext,
         datadir, max_num=20,

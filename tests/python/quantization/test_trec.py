@@ -69,6 +69,15 @@ if False:
     spass.sym_dump_layer_outputs(qsym, qparams, inputs_ext,
             datadir='/tmp/trec/out', max_num=1000, data_dtype="int32")
 
+if True:
+    while True:
+        data, _ = next(data_iter)
+        data = sim.load_real_data(data, 'data', inputs_ext)
+        inputs_ext['data']['data'] = data
+        spass.sym_dump_ops(qsym, qparams, inputs_ext,
+                datadir="/data/wlt", ctx=mx.gpu(3))
+    exit()
+
 utils.multi_eval_accuracy(trec, data_iter_func,
         quantize,
         iter_num=1000)

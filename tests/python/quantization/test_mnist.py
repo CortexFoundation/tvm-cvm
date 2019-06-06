@@ -191,6 +191,12 @@ def test_nnvm_pass(iter_num=10):
     dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
     sym, params = mx.sym.load(dump_sym), nd.load(dump_params)
     (inputs_ext,) = sim.load_ext(dump_ext)
+    for data, _ in val_loader:
+       inputs_ext['data']['data'] = sim.load_real_data(data, 'data', inputs_ext)
+       spass.sym_dump_ops(sym, params, inputs_ext,
+               datadir="/data/wlt", ctx=mx.gpu(), cleanDir=False)
+    exit()
+
 
     dump_sym, dump_params = load_fname(version, "nnvm.compile")
     spass.mxnet_to_nnvm(sym, params, inputs_ext, dump_sym, dump_params)
@@ -198,5 +204,5 @@ def test_nnvm_pass(iter_num=10):
 print ("Test mnist", version)
 # train_mnist()
 utils.log_init()
-test_sym_pass(1000)
-# test_nnvm_pass(10)
+# test_sym_pass(1000)
+test_nnvm_pass(10)
