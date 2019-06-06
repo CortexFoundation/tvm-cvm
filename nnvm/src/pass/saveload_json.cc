@@ -162,6 +162,7 @@ struct JSONGraph {
   std::vector<uint32_t> arg_nodes;
   std::vector<uint32_t> node_row_ptr;
   std::vector<JSONNode::Entry> heads;
+  std::string version = "cvm_1.0.0";
   std::unordered_map<std::string, std::shared_ptr<any> > attrs;
 
   void Save(dmlc::JSONWriter *writer) const {
@@ -173,6 +174,7 @@ struct JSONGraph {
     if (attrs.size() != 0) {
       writer->WriteObjectKeyValue("attrs", attrs);
     }
+    writer->WriteObjectKeyValue("version", version);
     writer->EndObject();
   }
 
@@ -184,6 +186,7 @@ struct JSONGraph {
     helper.DeclareField("heads", &heads);
     helper.DeclareOptionalField("node_row_ptr", &node_row_ptr);
     helper.DeclareOptionalField("attrs", &attrs);
+    helper.DeclareOptionalField("version", &version);
     helper.ReadAllFields(reader);
   }
 };

@@ -309,7 +309,7 @@ class MRT():
         self.scales = {}
 
         self._fixed = set()
-        self._data = {}
+        self._datas = {}
         self._lgr = logging.getLogger('log.mrt')
         self._set_prerequisites()
 
@@ -337,11 +337,11 @@ class MRT():
         # TODO: multiple data calibration
         # if isinstance(data, nd.NDArray):
         #     data = [data]
-        self._data[name] = data
+        self._datas[name] = data
 
     def calibrate(self, ctx=mx.cpu()):
         for k in self.ins_ext:
-            assert k in self._data, "Input data `%s` not set"%k
+            assert k in self._datas, "Input data `%s` not set"%k
         self.th_dict = self._sym_calibrate(ctx=ctx)
         return self.th_dict
 
@@ -367,7 +367,7 @@ class MRT():
             name, op_name = sym.attr('name'), sym.attr('op_name')
             attr, childs = sym.list_attr(), sym_iter(sym.get_children())
             if op_name == 'null':
-                out = self._data[name] if name in self.ins_ext \
+                out = self._datas[name] if name in self.ins_ext \
                       else self.prm[name]
             elif childs is None:
                 out = get_nd_op(op_name)(**attr)

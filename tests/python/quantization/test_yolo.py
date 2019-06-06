@@ -314,7 +314,7 @@ if __name__ == '__main__':
     # open("./data/%s.json"%name, "w").write(sym.tojson())
     # exit()
 
-    if False:
+    if True:
         val_data = dataset.load_voc(1, 416)
         val_data_iter = iter(val_data)
         sym_file, param_file, ext_file = load_fname("_darknet53_voc", "all.quantize", True)
