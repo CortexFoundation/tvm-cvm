@@ -55,7 +55,7 @@ def test_mx_quantize(batch_size=10, iter_num=10):
         return data.data[0], data.label[0]
     data, _ = data_iter_func()
 
-    version = "1.0"
+    version = "1_0"
     net1 = utils.load_model(*load_fname(version), inputs, ctx=ctx)
     acc_top1 = mx.metric.Accuracy()
     acc_top5 = mx.metric.TopKAccuracy(5)

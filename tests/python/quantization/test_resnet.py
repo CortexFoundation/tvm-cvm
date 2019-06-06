@@ -190,8 +190,8 @@ if __name__ == "__main__":
 
     # save_data()
 
-    # test_sym_pass(batch_size=16, iter_num=10)
-    test_sym_nnvm(batch_size=1)
+    test_sym_pass(batch_size=16, iter_num=100)
+    # test_sym_nnvm(batch_size=1)
     # test_performance(16, 10)
 
 

@@ -751,6 +751,85 @@ def sym_attach_attrs(symbol, params, inputs_ext, **kwargs):
             logger=logger, inputs_ext=inputs_ext,
             callback=_attach_attr, **kwargs)
 
+def sym_dump_ops(symbol, params, inputs_ext, datadir,
+        dtype="float64", out_dtype="int32",
+        ctx=mx.gpu(), cleanDir=False):
+    logger = logging.getLogger('log.sym.dump.ops')
+    check_ext_deps(inputs_ext, 'data')
+
+    if cleanDir:
+        import shutil
+        shutil.rmtree(datadir, ignore_errors=True)
+
+    op_counts = {}
+    def get_op_count(op_name):
+        op_dir = "%s/%s" % (datadir, op_name)
+        op_count = 0
+        if op_name not in op_counts:
+            os.mkdirs(op_dir, exist_ok=True)
+            for count in os.listdir(op_dir):
+                op_count = max(op_count, count)
+            op_count += 1
+        op_counts[op_name] = op_count
+        count_dir = "%s/%s" % (op_dir, op_count)
+        os.mkdirs(count_dir, exist_ok=True)
+        return count_dir
+    def dump_op(op_name, attr, ins, outs):
+        count_dir = get_op_count(op_name)
+        attr_file = "%s/%s" % (count_dir, "attr")
+        open(attr_file, "w").write(attr)
+        for i, _in in enumerate(ins):
+            in_file = "%s/in_%d" % (count_dir, i)
+            np.save(in_file, _in.asnumpy().astype(out_dtype))
+        for i, _out in enumerate(outs):
+            out_file = "%s/out_%d" % (count_dir, i)
+            np.save(out_file, _out.asnumpy().astype(out_dtype))
+
+
+    order, deps = topo_sort(symbol, logger=logger, with_deps=True)
+    out_cache = {}
+    for sym in order:
+        name, op_name = sym.attr('name'), sym.attr('op_name')
+        attr, childs = sym.list_attr(), sym_iter(sym.get_children())
+        if op_name == 'null':
+            out = inputs_ext[name]['data'] if name in inputs_ext \
+                  else params[name]
+        elif childs is None:
+            out = get_nd_op(op_name)(**attr)
+        elif get_attr(attr, 'op_type', 'null')=='cvm_clip' and \
+                dtype=="float64":
+            cinfos = [(c.attr('name'), get_entry_id(c)) for c in childs]
+            nd_inputs = [out_cache[n[0]][n[1]] for n in cinfos]
+            np_inputs = [o.asnumpy() for o in nd_inputs]
+            precision = get_attr(attr, 'precision')
+            amax = (2 ** (precision - 1)) - 1
+            amin = -amax
+            np_out = np.clip(np_inputs[0], amin, amax)
+            out = nd.array(np_out, dtype=dtype)
+        else:
+            cinfos = [(c.attr('name'), get_entry_id(c)) for c in childs]
+            nd_inputs = [out_cache[n[0]][n[1]] for n in cinfos]
+            out = get_nd_op(op_name)(*nd_inputs, **attr)
+            for n, _ in cinfos:
+                assert n in deps
+                deps[n].remove(name)
+                if len(deps[n]) == 0:
+                    del out_cache[n]
+        out = [out] if len(sym) == 1 else out
+        out_cache[name] = [o.astype(dtype).as_in_context(ctx) for o in out]
+
+        prefix = "parameters" if op_name=='null' else op_name
+        prefix = attr['op_type'] if op_name=='Custom' else prefix
+        dump_file = "%s/%s.%s" % (datadir, prefix, DUMP_SUFFIX)
+        with open(dump_file, "a+") as fout:
+            fout.write(name + ": ")
+            fout.write(_str_feature(out))
+            fout.write("\n")
+            for i, o in enumerate(out):
+                fout.write(_str_output(o, end=max_num))
+                fout.write("\n")
+        logger.debug("Dump %-20s name=%-40s", op_name, name)
+
 def sym_dump_layer_outputs(symbol, params, inputs_ext,
         datadir, max_num=20,
         dtype="float64", out_dtype='int32', data_dtype="int8",
