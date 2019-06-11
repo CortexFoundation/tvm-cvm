@@ -174,7 +174,7 @@ def test_sym_pass(batch_size=10, iter_num=10):
     utils.load_parameters(top_graph, top_params, ctx=ctx)
 
     # quantize base graph
-    if True:
+    if False:
         qbase, qbase_params, qbase_prec, base_oscales = calib.sym_simulate(
                 base, base_params, base_inputs_ext, th_dict)
         qbase, qbase_params = calib.sym_realize(qbase, qbase_params, base_inputs_ext, qbase_prec)
@@ -200,7 +200,7 @@ def test_sym_pass(batch_size=10, iter_num=10):
            return "{:6.2%}".format(acc)
 
     # quantize top graph
-    if True:
+    if False:
         top_sym = base_graph(mx.sym.Group(base_inputs))
         top_names = [c.attr('name') for c in top_sym]
         in_bit, out_bit = 8, 24
@@ -319,7 +319,7 @@ if __name__ == '__main__':
         sym_file, param_file, ext_file = load_fname("_darknet53_voc", "all.quantize", True)
         sym, params = mx.sym.load(sym_file), nd.load(param_file)
         inputs_ext, _ = sim.load_ext(ext_file)
-        if True:
+        if False:
             for data, _ in val_data:
                 data = sim.load_real_data(data, 'data', inputs_ext)
                 inputs_ext['data']['data'] = data
@@ -336,5 +336,5 @@ if __name__ == '__main__':
         exit()
     # zoo.save_model("yolo3_mobilenet1.0_voc")
 
-    test_sym_pass(1, 10)
-    test_sym_nnvm(16, 0)
+    test_sym_pass(1, 100)
+    # test_sym_nnvm(16, 0)

@@ -47,7 +47,14 @@ def test_sym_nnvm(batch_size=10):
         v['shape'] = (batch_size, *v['shape'][1:])
 
     spass.mxnet_to_nnvm(sym, params, inputs_ext,
-            *load_fname(version, "nnvm.compile"))
+           *load_fname(version, "nnvm.compile"))
+
+    data_iter = utils.load_dataset(batch_size)
+    data = data_iter.next().data[0]
+    data = sim.load_real_data(data, 'data', inputs_ext)
+    inputs_ext['data']['data'] = data
+    spass.sym_dump_layer_outputs(sym, params, inputs_ext,
+            "/data/std_out/resnet"+version)
 
 def test_sym_pass(batch_size=10, iter_num=10):
     logger = logging.getLogger("log.test.sym.pass")
@@ -87,7 +94,6 @@ def test_sym_pass(batch_size=10, iter_num=10):
 
     if True:
         if True:
-            dump_sym, dump_params, dump_ext = load_fname(version, "mrt", True)
             mrt = _mrt.MRT(sym, params, inputs_ext)
             mrt.set_data('data', data)
             mrt.calibrate(ctx=calib_ctx)
@@ -125,60 +131,6 @@ def test_sym_pass(batch_size=10, iter_num=10):
             cvm_quantize,
             iter_num=iter_num, logger=logger)
 
-def test_performance(batch_size=10, iter_num=10):
-    logger = logging.getLogger("log.test.tvm.performance")
-
-    target = "cuda"
-    tvm_ctx = tvm.context(target, 1)
-    cvm_ctx = tvm.context(target, 2)
-    opt = 0
-    inputs_ext = { 'data': {
-            'shape': (batch_size, 3, 224, 224),
-        }, }
-    inputs = [mx.sym.var(name) for name in inputs_ext]
-    inputs_shape = {k:v['shape'] for k,v in inputs_ext.items()}
-
-    data_iter = utils.load_dataset(batch_size)
-    def data_iter_func():
-        data = data_iter.next()
-        return data.data[0], data.label[0]
-    data_iter_func()
-
-    sym_fname, param_fname = load_fname("mxg")
-    mx_sym, mx_params = mx.sym.load(sym_fname), nd.load(param_fname)
-    nnvm_sym, nnvm_params = nnvm.frontend.from_mxnet(mx_sym, mx_params)
-    with nnvm.compiler.build_config(opt_level=opt, runtime="tvm"):
-        graph, lib, nnvm_params = nnvm.compiler.build(
-            nnvm_sym, target=target, shape=inputs_shape,
-            params=nnvm_params)
-    net1 = graph_runtime.create(graph, lib, tvm_ctx)
-    net1.load_params(nnvm.compiler.save_param_dict(nnvm_params))
-    def graph_func(data):
-        net1.run(data=data.asnumpy())
-        return nd.array(net1.get_output(0).asnumpy())
-
-    sym_fname, param_fname = load_fname("mxg", "sym.quantize")
-    mx_sym, params = mx.sym.load(sym_fname), nd.load(param_fname)
-    sim.load_ins_ext(params, inputs_ext)
-    nnvm_sym, _ = nnvm.frontend.from_mxnet(mx_sym)
-    nnvm_sym, real_params = spass.nnvm_realize(nnvm_sym, params, inputs_ext)
-    use_dtype = "int32"
-    for key, value in list(real_params.items()):
-        real_params[key] = tvm.nd.array(value.asnumpy().astype(use_dtype), cvm_ctx)
-    with nnvm.compiler.build_config(opt_level=opt, runtime="tvm"):
-        graph, lib, real_params = nnvm.compiler.build(
-            nnvm_sym, target=target, shape=inputs_shape,
-            params=real_params, dtype=use_dtype)
-    net2 = graph_runtime.create(graph, lib, cvm_ctx)
-    net2.load_params(nnvm.compiler.save_param_dict(real_params))
-    def quantize(data):
-        data = sim.load_real_data(data, 'data', inputs_ext)
-        net2.run(data=data.asnumpy())
-        return nd.array(net2.get_output(0).asnumpy())
-
-    utils.eval_time_accuracy(graph_func, data_iter_func, quantize,
-            iter_num=iter_num, logger=logger)
-
 if __name__ == "__main__":
     utils.log_init()
 
@@ -189,7 +141,7 @@ if __name__ == "__main__":
     # zoo.save_model('resnet18_v1b_0.89')
 
     # save_data()
-    if True:
+    if False:
         version = "50_mxg"
         dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
         sym, params = mx.sym.load(dump_sym), nd.load(dump_params)

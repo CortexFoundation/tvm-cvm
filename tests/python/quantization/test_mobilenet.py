@@ -34,11 +34,10 @@ def test_sym_nnvm():
     dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
     sym, params = mx.sym.load(dump_sym), nd.load(dump_params)
     (inputs_ext,) = sim.load_ext(dump_ext)
-    for k, v in inputs_ext.items():
-        v['shape'] = (1, *v['shape'][1:])
+    data_iter = ds.load_imagenet_rec(1)
+    data = data_iter.next().data[0]
 
-    dump_sym, dump_params = load_fname(version, "nnvm.compile")
-    spass.mxnet_to_nnvm(sym, params, inputs_ext, dump_sym, dump_params)
+    _mrt.std_dump(sym, params, inputs_ext, data, "mobilenet1_0")
 
 def test_mx_quantize(batch_size=10, iter_num=10):
     logger = logging.getLogger("log.test.mx.quantize")
@@ -127,7 +126,7 @@ if __name__ == '__main__':
     # zoo.save_model('mobilenet1.0', 1000)
     # zoo.save_model('mobilenet1.0_int8', 1000)
 
-    test_mx_quantize(16, 1000)
-    # test_sym_nnvm()
+    # test_mx_quantize(16, 1000)
+    test_sym_nnvm()
     # test_sym_nnvm(16, 10)
     # test_performance(16, 10)

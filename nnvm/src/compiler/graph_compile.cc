@@ -86,12 +86,30 @@ nnvm::Graph DecorateMemoryPlan(
   return g;
 }
 
+// Get unique name
+std::string GetUniqeName(
+    std::unordered_map<std::string, int> &name_map, 
+    std::string name) {
+  auto it = name_map.find(name);
+  std::ostringstream os;
+  if (it == name_map.end()) {
+    name_map[name] = 0;
+    os << name << "_0";
+  } else {
+    ++(it->second);
+    os << name << "_" << it->second;
+  }
+  name = os.str();
+  return name;
+}
+
 nnvm::Graph GraphCompile(const nnvm::Graph& g) {
   // Get attributes from the graph.
   const ShapeVector& shape_vec = g.GetAttr<ShapeVector>("shape");
   const DTypeVector& dtype_vec = g.GetAttr<DTypeVector>("dtype");
   const GroupVec& group_vec = g.GetAttr<GroupVec>("group_root");
   const PatternVec& pattern_vec = g.GetAttr<PatternVec>("pattern");
+  std::unordered_map<std::string, int> name_map;
 
   CHECK(g.HasAttr("fused_entry")) << "Fusion hasn't been applied yet.";
   FuseEntryVec fuse_entries = g.GetAttr<FuseEntryVec>("fused_entry");
@@ -153,9 +171,10 @@ nnvm::Graph GraphCompile(const nnvm::Graph& g) {
     const IndexedGraph& subidx = fe.subgraph.indexed_graph();
     nnvm::NodePtr np = nnvm::Node::Create();
     np->attrs.op = cvm_op;
-    np->attrs.name = inode.source->attrs.op->name;
+    auto& op_name = inode.source->attrs.op->name;
+    np->attrs.name = GetUniqeName(name_map, op_name);
     CVMOpParam param;
-    param.func_name = inode.source->attrs.op->name;
+    param.func_name = op_name;
     param.num_inputs = static_cast<uint32_t>(fe.imap.size());
     param.num_outputs = static_cast<uint32_t>(fe.subgraph.outputs.size());
     param.flatten_data = fe.flatten_data;

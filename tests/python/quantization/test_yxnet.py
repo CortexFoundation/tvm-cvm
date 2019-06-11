@@ -14,6 +14,7 @@ import numpy as np
 import math
 import struct
 import inspect
+import os
 
 import utils
 import sym_pass as spass
@@ -27,9 +28,10 @@ const_var_dict = {}
 def mx_const(number):
     name = 'const_var' + str(number)
     if name not in const_var_dict:
-        const_var_dict[name] = {}
-        const_var_dict[name]['symbol'] = mx.sym.var(name, shape=(1,))
-        const_var_dict[name]['number'] = number
+        const_var_dict[name] = {
+            'symbol': mx.sym.var(name, shape=(1,)),
+            'number': number
+        }
 
     return const_var_dict[name]['symbol']
 
@@ -206,14 +208,20 @@ def load_parameters(graph, infer_shapes, params_name):
 def test_yxnet_mnist():
     mnist_sym = make_mnist_graph()
 
+    inputs_ext = { 'data': {
+        'shape': (1, 1, 28, 28),
+        'precision': 8,
+    } }
     in_shape = (1, 1, 28, 28)
     arg_shapes, _, aux_shapes = mnist_sym.infer_shape(data=in_shape)
     args, auxs = mnist_sym.list_arguments(), mnist_sym.list_auxiliary_states()
     infer_shapes = {args[i]:arg_shapes[i] for i in range(len(args))}
     infer_shapes.update({auxs[i]:aux_shapes[i] for i in range(len(auxs))})
 
+    root = "/home/serving/warehouse"
     _, bd = load_parameters(mnist_sym, infer_shapes,
-            "/home/wlt/warehouse/.tmp/ca3d0286d5758697cdef653c1375960a868ac08a/data/params")
+            root + "/ca3d0286d5758697cdef653c1375960a868ac08a/data/params")
+    mnist_sym, bd = spass.mx_set_precs(mnist_sym, bd, inputs_ext)
 
     dump_sym, dump_par = '/tmp/mnist_yxnet.symbol', '/tmp/mnist_yxnet.params'
     with open(dump_sym, 'w') as fout:
@@ -221,43 +229,22 @@ def test_yxnet_mnist():
     nd.save(dump_par, bd)
 
     inputs = [mx.sym.var('data')]
-    data = np.load('/home/wlt/warehouse/.tmp/ba9fedfc87ccb6064fcd437fd2287f5edef1bd84/data')
+    data = np.load(root + '/ba9fedfc87ccb6064fcd437fd2287f5edef1bd84/data')
     data = nd.array([data.astype(np.int8)])
 
-    if True:
+    if False:
         graph =  nn.SymbolBlock(mnist_sym, inputs)
         utils.load_parameters(graph, bd)
         res = graph.forward(data).astype('int32')
     else:
-        target = "cuda"
-        ctx = tvm.context(target, 1)
-        nnvm_sym, params = nnvm.frontend.from_mxnet(mnist_sym, bd)
-        nnvm_sym, params = spass.yxnet_realize(nnvm_sym, bd, {'data': {}})
-        nnvm_graph = nnvm.graph.create(nnvm_sym)
-
-        print (sutils.sym_collect_attr(nnvm_sym))
-
-        use_dtype = "int32"
-        with nnvm.compiler.build_config(opt_level=0): #, add_pass=["PrecomputePrune"]):
-         deploy_graph, lib, params = nnvm.compiler.build(
-             nnvm_sym, target=target, shape={"data": in_shape},
-             params=params, dtype=use_dtype)
-
-        dump_sym = '/tmp/mnist_yxnet_deploy.symbol'
-        with open(dump_sym, 'w') as fout:
-            fout.write(deploy_graph.json())
-        dump_params = '/tmp/mnist_yxnet_deploy.params'
-        with open(dump_params, 'wb') as fout:
-            param_bytes = nnvm.compiler.save_param_dict(params)
-            fout.write(param_bytes)
-
+        prefix = "/tmp/yxnet/mnist"
+        dump_sym, dump_params = prefix+".json", prefix+".params"
+        print (sutils.sym_collect_attr(mnist_sym))
+        spass.mxnet_to_nnvm(mnist_sym, bd, {
+            'data': {
+                'shape': (1, 1, 28, 28)
+        }}, dump_sym, dump_params)
         exit()
-
-        module = graph_runtime.create(deploy_graph, lib, ctx=tvm.context("cuda", 1))
-        module.load_params(param_bytes)
-        data = tvm.nd.array(data.asnumpy(), ctx)
-        module.run(data=data.asnumpy())
-        res = module.get_output(0)
     print (res.asnumpy().flatten()[:100])
 
 def test_naive():

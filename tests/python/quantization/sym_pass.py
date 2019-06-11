@@ -13,57 +13,26 @@ from tvm import relay
 from sym_utils import *
 from utils import *
 
-def yxnet_realize(symbol, params, inputs_ext):
-    logger = logging.getLogger("log.quant.nnvm.realize")
-    def _realize(sym, params, graph, inputs_ext):
-        name = sym.attr('name')
-        attr = sym.list_attr()
-        op_name = sym.attr('op_name')
-        childs = sym_iter(sym.get_children())
+def mx_set_precs(symbol, params, inputs_ext):
+    logger = logging.getLogger("log.pass.set.precisions")
+    def _set_prec(sym, params, graph, inputs_ext):
+        name, op_name = sym.attr('name'), sym.attr('op_name')
+        childs, attr = sym_iter(sym.get_children()), sym.list_attr()
+        if name in inputs_ext:
+            prec = inputs_ext[name]['precision']
+            sym = mx.sym.var(name, attr={ 'precision': str(prec) })
+        elif name in params:
+            alpha = params[name].abs().max().asscalar()
+            if alpha == 0:
+                prec = "1"
+            else:
+                prec = str(math.ceil(math.log2(alpha)) + 1)
+            sym = mx.sym.var(name, attr={ 'precision': str(prec) }, **attr)
+        return sym, params
 
-        node = sym
-        if 'scalar' in attr:
-            scalar = float(attr['scalar'])
-
-            msg = "name:%s, op_name:%s, scalar:%s"%(name, op_name, attr)
-            assert scalar >= INT32_MIN and scalar <= INT32_MAX, msg
-            assert float(int(scalar)) == scalar, msg
-
-            attr['scalar'] = int(scalar)
-            node = get_nnvm_op(op_name)(*childs, **attr)
-
-        # remove layer: floor in int8
-        if op_name in ['floor', 'ceil', 'fix']:
-            node = childs[0]
-        elif op_name == '__rpow_scalar__':
-            base = int(attr['scalar'])
-            if base == 2:
-                const_1, const_name = op_const(1, graph, var=nnvm.sym.Variable)
-                params[const_name] = nd.array([1])
-                node = nnvm.sym.broadcast_left_shift(const_1, childs[0])
-        elif op_name not in nnvm_identity_ext:
-            logger.critical(
-                "Unsupported op:%s(name=%s, attr=%s) in INT8 Inference network",
-                op_name, name, attr)
-            pass
-        return node, params
-
-    ops = sym_collect_attr(symbol)
-    print (ops)
-    ret_sym, params = topo_visit(symbol, params, get_op=get_nnvm_op,
-            logger=logger, inputs_ext=inputs_ext, callback=_realize)
-    args = ret_sym.list_input_names()
-    ret_params = {}
-    for key, value in params.items():
-        if key not in args:
-            logger.warn("key:%s not exists in graph", key)
-            ret_params[key] = value
-        else:
-            msg = "key:%s value:%s"%(key, value)
-            flat = value.asnumpy().flatten()
-            assert all(flat >= INT32_MIN) and all(flat <= INT32_MAX), msg
-            assert all(flat.astype('int32').astype('float32') == flat), msg
-            ret_params[key] = tvm.nd.array(value.astype('int32').asnumpy())
+    ret_sym, ret_params = topo_visit(symbol, params, inputs_ext,
+            get_op=get_mxnet_op, logger=logger,
+            callback=_set_prec)
     return ret_sym, ret_params
 
 def prepare_for_cvm(symbol, params, inputs_ext):
@@ -105,19 +74,7 @@ def prepare_for_cvm(symbol, params, inputs_ext):
             begin = [0 if s is None else s for s in begin]
             end = [cshape[i] if s is None else s for i,s in enumerate(end)]
             node = get_mxnet_op('slice')(X, begin=begin, end=end, name=name)
-        # elif op_name == 'slice_like':
-        #     A, B = childs[0], childs[1]
-        #     A_name, B_name = A.attr('name'), B.attr('name')
-        #     axes = get_attr(attr, 'axes')
-        #     A_shape, B_shape = infer_shapes[A_name], infer_shapes[B_name]
-        #     begin = [0 for s in A_shape]
-        #     end = [s for s in A_shape]
-        #     begin, end = [None] * len(A_shape), [None] * len(A_shape)
-        #     for ax in axes:
-        #         assert B_shape[ax] <= A_shape[ax]
-        #         begin[ax], end[ax] = 0, B_shape[ax]
-        #     node = mx.sym.slice(A, begin=begin, end=end)
-        elif op_name in ['floor', 'ceil', 'round']:
+        elif op_name in ['floor', 'ceil', 'round', 'fix']:
             node = childs[0]
         elif op_name == '__div_scalar__':
             scalar = int(attr['scalar'])
@@ -125,7 +82,7 @@ def prepare_for_cvm(symbol, params, inputs_ext):
             assert int(sb) == sb, "op(%s name=%s) scalar (%s vs. %s)" \
                 % (op_name, name, scalar, sb)
             X = childs[0]
-            sb_sym, sb_name = op_const(int(sb), graph, var=nnvm.sym.Variable)
+            sb_sym, sb_name = op_const(int(sb), graph, var=mx.sym.var)
             params[sb_name] = nd.array([int(sb)])
             node = nnvm.sym.broadcast_right_shift(X, sb_sym)
         infer_shapes[node.attr('name')] = infer_shapes[name]
@@ -142,6 +99,7 @@ def mxnet_to_nnvm(sym, params, inputs_ext, dump_sym, dump_params,
 
     sym, params = prepare_for_cvm(sym, params, inputs_ext)
     nnvm_sym, _ = nnvm.frontend.from_mxnet(sym)
+    nnvm_sym, params = nnvm_realize(nnvm_sym, params, inputs_ext)
 
     args = nnvm_sym.list_input_names()
     real_params = {}
@@ -168,8 +126,8 @@ def mxnet_to_nnvm(sym, params, inputs_ext, dump_sym, dump_params,
     open(dump_params, "wb").write(param_bytes)
     return deploy_graph, real_params
 
-def mxnet_to_cvm(sym, params, inputs_ext, dump_sym, dump_params,
-        batch_size=1, logger=logging):
+def mxnet_to_tvm(sym, params, inputs_ext, dump_sym, dump_params,
+        logger=logging):
     inputs_shape = {k:v['shape'] for k,v in inputs_ext.items()}
     sym, params = prepare_for_cvm(sym, params, inputs_ext)
     relay_sym, relay_params = relay.frontend.from_mxnet(sym, inputs_shape,
@@ -188,27 +146,14 @@ def mxnet_to_cvm(sym, params, inputs_ext, dump_sym, dump_params,
     open(dump_params, "wb").write(param_bytes)
 
 def nnvm_realize(symbol, params, inputs_ext):
-    """Transform Sim-Quant(Float32 Simulate Int8) to Int8-Inference Graph
-        Works:
-        *) Remove floor|ceil|round layer in Int8 graph
-        *) Cast __div_scalar__ op to right shift
-        *) Remove unused params in graph
-        *) Check&cast params type from Float32 to Int8|Int32
-        *) Check supported op in cvm engine
-        *) Cast broadcast_div to broadcast_right_shift
-
-
-    Parameters:
-    ===========
-    symbol: nnvm.Symbol
-    params: mxnet.ndarray.NDArray
-
-    Returns:
-    ========
-    symbol: nnvm.Symbol
-    params: tvm.nd.Array
-    """
     logger = logging.getLogger("log.quant.nnvm.realize")
+    def nnvm_const(number, graph, params):
+        name = 'const_var_' + str(number)
+        prec = math.ceil(math.log2(number)) + 1
+        if name not in graph:
+            graph[name] = nnvm.sym.Variable(name, shape=(1,), precision=str(prec))
+            params[name] = nd.array([number])
+        return graph[name]
 
     def _realize(sym, params, graph, inputs_ext):
         name, op_name = sym.attr('name'), sym.attr('op_name')
@@ -216,51 +161,20 @@ def nnvm_realize(symbol, params, inputs_ext):
         node = sym
         if op_name == 'null':
             return node, params
-
-        if 'scalar' in attr:
-            scalar = float(attr['scalar'])
-            msg = "name:%s, op_name:%s, scalar:%s"%(name, op_name, attr)
-            assert scalar >= INT32_MIN and scalar <= INT32_MAX, msg
-            assert float(int(scalar)) == scalar, msg
-            attr['scalar'] = int(scalar)
-        if 'overlap_thresh' in attr:
-            thresh = float(attr['overlap_thresh']) * 100
-            attr['overlap_thresh'] = int(thresh)
-        node = get_nnvm_op(op_name)(*childs, **attr)
-
-        if op_name in ['floor', 'ceil', 'round']:
-            node = childs[0]
-        elif op_name == '__div_scalar__':
-            scalar = int(attr['scalar'])
-            sb = math.log2(scalar)
-            assert int(sb) == sb, "op(%s name=%s) scalar (%s vs. %s)" \
-                % (op_name, name, scalar, sb)
-            X = childs[0]
-            sb_sym, sb_name = op_const(int(sb), graph, var=nnvm.sym.Variable)
-            params[sb_name] = nd.array([int(sb)])
-            node = nnvm.sym.broadcast_right_shift(X, sb_sym)
+        elif op_name in ['__rpow_scalar__']:
+            base = int(attr['scalar'])
+            assert base == 2
+            var = nnvm_const(1, graph, params)
+            node = nnvm.sym.broadcast_left_shift(var, childs[0])
         elif op_name not in nnvm_identity_ext:
             logger.critical(
                 "Unsupported op:%s(name=%s, attr=%s) in INT8 Inference network",
                 op_name, name, attr)
         return node, params
-
     print (sym_collect_attr(symbol))
     ret_sym, params = topo_visit(symbol, params, get_op=get_nnvm_op,
             logger=logger, inputs_ext=inputs_ext, callback=_realize)
-
-    args = ret_sym.list_input_names()
-    ret_params = {}
-    for key, value in params.items():
-        if key not in args:
-            logger.warn("key:%s not exists in graph", key)
-        else:
-            msg = "key:%s value:%s"%(key, value)
-            flat = value.asnumpy().flatten()
-            assert all(flat >= INT32_MIN) and all(flat <= INT32_MAX), msg
-            assert all(flat.astype('int32').astype('float32') == flat), msg
-            ret_params[key] = tvm.nd.array(value.astype('int32').asnumpy())
-    return ret_sym, ret_params
+    return ret_sym, params
 
 def tvm_params_reduce(symbol, params, inputs_ext, ctx):
     for sym in topo_sort(symbol):

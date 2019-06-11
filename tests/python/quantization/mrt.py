@@ -165,11 +165,6 @@ def _simulate(sym, params, graph, inputs_ext, self):
             return _requant_parameter(X.attr('name'), arg)
         else:
             return _requant_operator(X, arg, exactly)
-    def _default_process_op(new_childs, oscale):
-        orange = th_dict[name] * oscale
-        def_prec = PREC(_get_bit(orange))
-        oprec = _get_prec(precs[name], out_key, def_prec)
-        return get_mxnet_op(op_name)(*new_childs, **attr, name=name)
 
     cns = [c.attr('name') for c in childs] if childs else []
     cprecs = [precs[n] for n in cns]
@@ -191,7 +186,6 @@ def _simulate(sym, params, graph, inputs_ext, self):
         # ip = precs[cns[0]][out_key]
         # oprec = _get_bit(scales[name] * th_dict[name])
         # precs[name][out_key] = PREC(oprec, ip.l)
-        return sym, params
     elif op_name in ['sigmoid', 'exp']:
         X, xs = _requant_operator(childs[0], PREC(8, L5), True)
         iprec = _get_prec(cprecs[0], name).p
@@ -252,15 +246,16 @@ def _simulate(sym, params, graph, inputs_ext, self):
         print (name, op_name, attr)
         assert False
 
-    orange = th_dict[name] * oscale
-    def_prec = PREC(_get_bit(orange))
-    oprec = _get_prec(precs[name], out_key, def_prec)
-
     if name in precs[name]:
         oprec = precs[name][name]
         sym, os = _requant_operator(sym, PREC(oprec))
         scales[sym.attr('name')] = os
 
+    if op_name in disable_requant_ops:
+        return sym, params
+    orange = th_dict[name] * oscale
+    def_prec = PREC(_get_bit(orange))
+    oprec = _get_prec(precs[name], out_key, def_prec)
     oname = sym.attr('name')
     infer_shapes[oname] = infer_shapes[name]
     th_dict[oname] = th_dict[name]
@@ -396,7 +391,6 @@ class MRT():
         out_cache.clear()
         return self.th_dict
 
-
     def _get_ext(self):
         self.qext = {}
         for k, v in self.ins_ext.items():
@@ -410,6 +404,7 @@ class MRT():
         self.qsym, self.qprm = topo_visit(self.sym, self.prm, self.ins_ext,
                 get_op=get_mxnet_op, logger=self._lgr,
                 callback=_simulate, self=self)
+
         return self.qsym, self.qprm
 
     def _realize(self):
@@ -454,6 +449,19 @@ class MRT():
             else:
                 bit = self.precs[name][out_key].p
             self.th_dict[name] = _get_range(bit)
+
+def std_dump(sym, params, inputs_ext, data, model_name,
+        batch=False):
+    if not batch:
+        for k, v in inputs_ext.items():
+            v['shape'] = (1, *v['shape'][1:])
+    datadir = "/data/std_out/" + model_name
+    data = sim.load_real_data(data, 'data', inputs_ext)
+    inputs_ext['data']['data'] = data
+    spass.sym_dump_layer_outputs(sym, params, inputs_ext, datadir)
+
+    spass.mxnet_to_nnvm(sym, params, inputs_ext,
+            datadir+"/symbol", datadir+"/params")
 
 
 

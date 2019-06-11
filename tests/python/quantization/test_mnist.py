@@ -36,7 +36,7 @@ def data_xform(data):
 train_data = mx.gluon.data.vision.MNIST(train=True).transform_first(data_xform)
 val_data = mx.gluon.data.vision.MNIST(train=False).transform_first(data_xform)
 
-batch_size = 128
+batch_size = 1
 train_loader = mx.gluon.data.DataLoader(train_data, shuffle=True, batch_size=batch_size)
 val_loader = mx.gluon.data.DataLoader(val_data, shuffle=False, batch_size=batch_size)
 
@@ -150,6 +150,7 @@ def test_sym_pass(iter_num=10):
         mrt.set_output_prec(8)
         qsym, qparams, inputs_ext = mrt.quantize()
     else:
+        inputs_ext['data']['data'] = data
         th_dict = calib.sym_calibrate(sym, params, inputs_ext, ctx=ctx)
         qsym, qparams, precs, _ = calib.sym_simulate(sym, params, inputs_ext, th_dict)
         qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, precs, "cvm")
@@ -159,7 +160,6 @@ def test_sym_pass(iter_num=10):
     open(dump_sym, "w").write(qsym.tojson())
 
     dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
-    sym, params = mx.sym.load(dump_sym), nd.load(dump_params)
     (inputs_ext,) = sim.load_ext(dump_ext)
     inputs = [mx.sym.var(n) for n in inputs_ext]
     net2 = utils.load_model(dump_sym, dump_params, inputs, ctx=ctx)
@@ -167,21 +167,8 @@ def test_sym_pass(iter_num=10):
         data = sim.load_real_data(data, 'data', inputs_ext)
         return net2.forward(data.as_in_context(ctx))
 
-    # sym_file, param_file = load_fname(version)
-    # sym, params = mx.sym.load(sym_file), nd.load(param_file)
-    # print (sutils.sym_collect_attr(sym))
-    # sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
-    # inputs_ext['data']['data'] = data
-    # qsym, qparams, _ = anno.mixed_precision(sym, params, inputs_ext,
-    #         ctx=[mx.gpu(7)])
-    net3 = nn.SymbolBlock(qsym, inputs)
-    utils.load_parameters(net3, qparams, ctx=ctx)
-    def mixed_precision(data):
-        data = sim.load_real_data(data, 'data', inputs_ext)
-        return net3.forward(data.as_in_context(ctx))
-
     utils.multi_eval_accuracy(graph_func, data_iter_func,
-            mixed_precision, # cvm_quantize,
+            cvm_quantize,
             iter_num=iter_num)
 
 def test_nnvm_pass(iter_num=10):
@@ -191,15 +178,9 @@ def test_nnvm_pass(iter_num=10):
     dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
     sym, params = mx.sym.load(dump_sym), nd.load(dump_params)
     (inputs_ext,) = sim.load_ext(dump_ext)
-    for data, _ in val_loader:
-       inputs_ext['data']['data'] = sim.load_real_data(data, 'data', inputs_ext)
-       spass.sym_dump_ops(sym, params, inputs_ext,
-               datadir="/data/wlt", ctx=mx.gpu(), cleanDir=False)
-    exit()
-
-
-    dump_sym, dump_params = load_fname(version, "nnvm.compile")
-    spass.mxnet_to_nnvm(sym, params, inputs_ext, dump_sym, dump_params)
+    data_iter = iter(val_loader)
+    data, _ = next(data_iter)
+    _mrt.std_dump(sym, params, inputs_ext, data, "cvm_mnist")
 
 print ("Test mnist", version)
 # train_mnist()
