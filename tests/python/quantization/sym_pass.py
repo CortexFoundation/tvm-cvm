@@ -99,7 +99,7 @@ def mxnet_to_nnvm(sym, params, inputs_ext, dump_sym, dump_params,
 
     sym, params = prepare_for_cvm(sym, params, inputs_ext)
     nnvm_sym, _ = nnvm.frontend.from_mxnet(sym)
-    nnvm_sym, params = nnvm_realize(nnvm_sym, params, inputs_ext)
+    # nnvm_sym, params = nnvm_realize(nnvm_sym, params, inputs_ext)
 
     args = nnvm_sym.list_input_names()
     real_params = {}
@@ -667,7 +667,7 @@ def sym_attach_attrs(symbol, params, inputs_ext, **kwargs):
 
 import hashlib
 import shutil
-def sym_dump_ops(symbol, params, inputs_ext, datadir,
+def sym_dump_ops(symbol, params, inputs_ext, datadir="/data/op_std_out",
         dtype="float64", out_dtype="int32",
         ctx=mx.gpu(), cleanDir=False):
     logger = logging.getLogger('log.sym.dump.ops')
@@ -712,7 +712,8 @@ def sym_dump_ops(symbol, params, inputs_ext, datadir,
             return
         os.makedirs(hsh_dir, exist_ok=True)
         attr_file = "%s/%s" % (hsh_dir, "attribute")
-        open(attr_file, "w").write(str(attr) + "\n")
+        attr_str = str(attr).replace("'", "\"")
+        open(attr_file, "w").write(attr_str + "\n")
         for i, _in in enumerate(ins):
             in_file = "%s/in_%d" % (hsh_dir, i)
             if not dump_nd(hshes[i], in_file, _in):

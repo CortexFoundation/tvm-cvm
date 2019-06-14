@@ -466,16 +466,16 @@ def _realize_layer(sym, params, graph, inputs_ext, runtime):
         logger.debug("layer %-40s Y(INT%s >> %s) X(%s >> %s) B(%s vs. %s %s >> %s)",
                 name, out_prec, Y_sb, in_prec, A_sb, scale, frac, sb, B_sb)
 
-    if childs[0].attr('name') in [
-        'yolov30_yolooutputv30_tile0',
-        'yolov30_yolooutputv31_tile0',
-        'yolov30_yolooutputv32_tile0',
-        'yolov30_yolooutputv30_expand_dims0',
-        'yolov30_yolooutputv31_expand_dims0',
-        'yolov30_yolooutputv32_expand_dims0',
-    ]:
-        sb = out_prec - 16
-        node = _realize_func(node, sb, 16, params, graph)
+    #  if childs[0].attr('name') in [
+        #  'yolov30_yolooutputv30_tile0',
+        #  'yolov30_yolooutputv31_tile0',
+        #  'yolov30_yolooutputv32_tile0',
+        #  'yolov30_yolooutputv30_expand_dims0',
+        #  'yolov30_yolooutputv31_expand_dims0',
+        #  'yolov30_yolooutputv32_expand_dims0',
+    #  ]:
+        #  sb = out_prec - 16
+        #  node = _realize_func(node, sb, 16, params, graph)
     return node, params
 
 def _realize_parameters(sym, params, graph, inputs_ext, precs):
@@ -638,7 +638,7 @@ def post_quantize(symbol, params, inputs_ext, extra_ext):
             score_scale = extra_ext['score']
             bbox_scale = extra_ext['bbox']
             valid_thresh = get_attr(attr, 'valid_thresh', 0)
-            attr['valid_thresh'] = int(valid_thresh * score_scale / (2 **8))
+            attr['valid_thresh'] = int(valid_thresh * score_scale) # / (2 **8))
             node = get_mxnet_op(op_name)(*childs, **attr, name=name)
         return node, params
     qsym, qparams = topo_visit(symbol, params, inputs_ext,

@@ -19,7 +19,7 @@ def load_fname(suffix=None, with_ext=False):
     prefix = "./data/trec%s" % (suffix)
     return utils.extend_fname(prefix, with_ext=with_ext)
 
-batch_size = 32
+batch_size = 16
 ctx = mx.gpu()
 inputs_ext = { 'data': {
     'shape': (38, batch_size)
@@ -63,11 +63,12 @@ def quantize(data):
 quant_sym, quant_params, quant_ext = load_fname("sym.quantize", with_ext=True)
 open(quant_sym, "w").write(qsym.tojson())
 
-if False:
-    spass.mxnet_to_nnvm(qsym, qparams, inputs_ext, *load_fname("nnvm.compile"))
-    inputs_ext['data']['data'] = data
-    spass.sym_dump_layer_outputs(qsym, qparams, inputs_ext,
-            datadir='/tmp/trec/out', max_num=1000, data_dtype="int32")
+if True:
+    inputs_ext['data']['shape'] = (38, 1)
+    data = data[:, 0].reshape(38, 1)
+    _mrt.std_dump(qsym, qparams, inputs_ext, data, "trec",
+            batch=True, data_dtype="int32")
+    exit()
 
 if True:
     while True:
@@ -75,7 +76,7 @@ if True:
         data = sim.load_real_data(data, 'data', inputs_ext)
         inputs_ext['data']['data'] = data
         spass.sym_dump_ops(qsym, qparams, inputs_ext,
-                datadir="/data/wlt", ctx=mx.gpu(3))
+                ctx=mx.gpu(3))
     exit()
 
 utils.multi_eval_accuracy(trec, data_iter_func,

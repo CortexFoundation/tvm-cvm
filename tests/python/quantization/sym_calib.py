@@ -207,14 +207,14 @@ def _annotate_layer(sym, params, graph, inputs_ext,
     else:
         logger.critical('Unrecognized op:%s(%s) attrs(%s)', op_name, name, attr)
 
-    if requant_scale != 1:
-        r = (2**(default_target_bit-1)-1) / requant_scale
-        target_bits[node.attr('name')] = math.ceil(math.log2(r)) + 1
-        node = _sim_requantize_op(node, requant_scale, params, graph)
-        logger.debug("layer %-40s requant scale=%-16.8f  out=%-16.8f in=%s",
-                name, requant_scale, scale_helper[name],
-                [scale_helper[c.attr('name')] for c in childs] \
-                if childs else [])
+    # if requant_scale != 1:
+    r = (2**(default_target_bit-1)-1) / requant_scale
+    target_bits[node.attr('name')] = math.ceil(math.log2(r)) + 1
+    node = _sim_requantize_op(node, requant_scale, params, graph)
+    logger.debug("layer %-40s requant scale=%-16.8f  out=%-16.8f in=%s",
+            name, requant_scale, scale_helper[name],
+            [scale_helper[c.attr('name')] for c in childs] \
+            if childs else [])
     scale_helper[node.attr('name')] = scale_helper[name]
     target_bits[node.attr('name')] = default_target_bit
     infer_shapes[node.attr('name')] = infer_shapes[name]
@@ -266,31 +266,36 @@ def _realize_symbol(sym, params, graph, inputs_ext,
         Y_sb = (-sb) - A_sb - B_sb
         return A_sb, A_target_bit, B_sb, B_target_bit, Y_sb
 
-    frac, sb = sim.extract_float(params[B_name].asscalar())
-    shape = params[B_name].shape
+    scale = params[B_name].asscalar()
+    if scale == 1:
+        node = _realize_func(X, nd.array([0]), params, graph,
+                nd.array([target_bits[name]]))
+    else:
+        frac, sb = sim.extract_float(params[B_name].asscalar())
+        shape = params[B_name].shape
 
-    B_range = frac
-    Y_tb = target_bits[name]
-    Y_range = 2 ** (Y_tb - 1) - 1
-    A_range = Y_range / params[B_name].asscalar()
-    A_bit = target_bits[X_name]
-    B_bit = math.ceil(math.log2(B_range)) + 1
-    A_sb, A_tb, B_sb, B_tb, Y_sb = cal_bit(A_bit, B_bit, sb)
+        B_range = frac
+        Y_tb = target_bits[name]
+        Y_range = 2 ** (Y_tb - 1) - 1
+        A_range = Y_range / params[B_name].asscalar()
+        A_bit = target_bits[X_name]
+        B_bit = math.ceil(math.log2(B_range)) + 1
+        A_sb, A_tb, B_sb, B_tb, Y_sb = cal_bit(A_bit, B_bit, sb)
 
-    X = _realize_func(X, nd.array(A_sb).reshape(shape), params, graph,
-            nd.array(A_tb).reshape(shape))
-    params[B_name] = nd.array([round(frac / (2 ** B_sb))])
-    B_range = 2 ** (B_tb - 1) - 1
-    params[B_name] = nd.clip(params[B_name],
-            a_min=-B_range, a_max=B_range)
-    attr = { 'precision': str(B_tb) }
-    graph[B_name] = B = mx.sym.var(B_name, shape=shape, attr=attr)
-    node = mx.sym.broadcast_mul(X, B)
-    node = _realize_func(node, nd.array(Y_sb).reshape(shape), params, graph,
-            nd.array(Y_tb).reshape(shape))
-    logger.debug("layer %s Y(INT%s >> %s) X(%s|%s >> %s) B(%s|%s vs. %s %s >> %s)",
-           name, Y_tb, Y_sb, A_range, A_bit, A_sb, B_range,
-           B_bit, frac, sb, B_sb)
+        X = _realize_func(X, nd.array(A_sb).reshape(shape), params, graph,
+                nd.array(A_tb).reshape(shape))
+        params[B_name] = nd.array([round(frac / (2 ** B_sb))])
+        B_range = 2 ** (B_tb - 1) - 1
+        params[B_name] = nd.clip(params[B_name],
+                a_min=-B_range, a_max=B_range)
+        attr = { 'precision': str(B_tb) }
+        graph[B_name] = B = mx.sym.var(B_name, shape=shape, attr=attr)
+        node = mx.sym.broadcast_mul(X, B)
+        node = _realize_func(node, nd.array(Y_sb).reshape(shape), params, graph,
+                nd.array(Y_tb).reshape(shape))
+        logger.debug("layer %s Y(INT%s >> %s) X(%s|%s >> %s) B(%s|%s vs. %s %s >> %s)",
+               name, Y_tb, Y_sb, A_range, A_bit, A_sb, B_range,
+               B_bit, frac, sb, B_sb)
     target_bits[node.attr('name')] = target_bits[name]
     return node, params
 def _realize_parameters(sym, params, graph, inputs_ext,

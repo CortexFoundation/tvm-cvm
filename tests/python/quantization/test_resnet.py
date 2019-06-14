@@ -43,23 +43,15 @@ def test_sym_nnvm(batch_size=10):
     dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
     sym, params = mx.sym.load(dump_sym), nd.load(dump_params)
     (inputs_ext,) = sim.load_ext(dump_ext)
-    for k, v in inputs_ext.items():
-        v['shape'] = (batch_size, *v['shape'][1:])
-
-    spass.mxnet_to_nnvm(sym, params, inputs_ext,
-           *load_fname(version, "nnvm.compile"))
-
     data_iter = utils.load_dataset(batch_size)
     data = data_iter.next().data[0]
-    data = sim.load_real_data(data, 'data', inputs_ext)
-    inputs_ext['data']['data'] = data
-    spass.sym_dump_layer_outputs(sym, params, inputs_ext,
-            "/data/std_out/resnet"+version)
+
+    _mrt.std_dump(sym, params, inputs_ext, data, "resnet50_mxg")
 
 def test_sym_pass(batch_size=10, iter_num=10):
     logger = logging.getLogger("log.test.sym.pass")
     calib_ctx = mx.gpu(2)
-    ctx = [mx.gpu(int(i)) for i in "1,2,3,4,5,6,7".split(',') if i.strip()]
+    ctx = [mx.gpu(int(i)) for i in "1,2,3,4,5,6".split(',') if i.strip()]
     inputs_ext = { 'data': {
             'shape': (batch_size, 3, 224, 224),
     } }

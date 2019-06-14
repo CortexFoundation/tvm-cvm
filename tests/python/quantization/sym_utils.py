@@ -311,6 +311,7 @@ nnvm_identity_ext = {
     'reshape': OpExt('reshape', [INT8_TYPE, INT32_TYPE], [INT8_TYPE, INT32_TYPE]),
     'flatten': OpExt('flatten', [INT8_TYPE, INT32_TYPE], [INT8_TYPE, INT32_TYPE]),
     'strided_slice': OpExt('strided_slice', [INT8_TYPE], [INT8_TYPE]),
+    'slice_like': {},
 
     'broadcast_right_shift': OpExt('broadcast_right_shift', [INT32_TYPE], [INT8_TYPE]),
     'broadcast_left_shift': OpExt('broadcast_left_shift', [INT32_TYPE], [INT8_TYPE]),
