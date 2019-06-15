@@ -203,7 +203,7 @@ def test_sym_pass(batch_size=10, iter_num=10):
     if True:
         top_sym = base_graph(mx.sym.Group(base_inputs))
         top_names = [c.attr('name') for c in top_sym]
-        in_bit, out_bit = 8, 24
+        in_bit, out_bit = 8, 30
         outputs_ext = {
            'yolov30_yolooutputv30_expand_dims0': { 'threshold': 1, 'type': 'score' },
            'yolov30_yolooutputv31_expand_dims0': { 'threshold': 1, 'type': 'score' },
@@ -219,8 +219,6 @@ def test_sym_pass(batch_size=10, iter_num=10):
                top_inputs_ext, th_dict, in_bit=in_bit, out_bit=out_bit,
                out_ext=outputs_ext, runtime="cvm")
         out_scales = [type_ext['ids'], type_ext['score'], type_ext['bbox']]
-        # out_scales[1] = out_scales[1] / (2 ** (out_bit - 16))
-        # out_scales[2] = out_scales[2] / (2 ** (out_bit - 16))
         dump_sym, dump_params, dump_ext = load_fname("_darknet53_voc", "top.quantize", True)
         open(dump_sym, "w").write(qsym.tojson())
         sim.save_ext(dump_ext, top_inputs_ext, out_scales)

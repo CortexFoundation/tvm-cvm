@@ -1,4 +1,5 @@
 from mxnet import nd
+import mxnet as mx
 import numpy as np
 import topi.testing
 import tvm
@@ -9,7 +10,7 @@ from ops_generator import std_int_constraint, iter_constraint, \
     rand_constraint, shape_constraint
 from ops_generator import IntIter, NoneIter, ConstantIter, ConcatIter, \
     VectorIter, PermutationIter, ShapeIter, AllOverIter, BoolIter, \
-    RepeatIter
+    RepeatIter, RandomBoolIter, RandomVectorIter
 import utils
 
 INT32 = "int32"
@@ -279,7 +280,6 @@ def verify_sum():
 
 # ====== nn ======
 def verify_conv2d():
-    # TODO(kaihuo)
     batch = IntIter(list_constraint([1, 4, 8, 16]))
     channel = IntIter(list_constraint([1, 3, 4]))
     h = IntIter(range_constraint(1, 9, 3))
@@ -289,7 +289,7 @@ def verify_conv2d():
     for i in range(len(dshp)):
         size = np.product(dshp[i])
         arr1 = ConstantIter(rand_constraint(-127, 127, size), shape=dshp[i])
-        arr2 = ConstantIter(rand_constraint(-127, 127, size), shape=dshp[i])
+        arr2 = ConstantIter(rand_constraint(0, 127, size), shape=dshp[i])
         datas.extend([arr1, arr2])
     data = ConcatIter(*datas)
     print (len(data))
@@ -305,15 +305,117 @@ def verify_conv2d():
             IntIter(list_constraint([1, 2])),
             size=2,
             name="dilation")
-    groups = IntIter(list_constraint([1]), name="groups")
-    use_bias = BoolIter(const=False)
-    def conv2d(data, num_filter, kernel, strides, padding, dilation, groups, use_bias):
-        data_nd = nd.array(data)
-        nd.Convolution()
+    groups = IntIter(list_constraint([1, 2]), name="groups")
+    use_bias = RandomBoolIter(name="use_bias")
     op_units = opg.OpUnitIter(
             [data, num_filter, kernel, strides,
             padding, dilation, groups, use_bias], 1)
-    #  op_units.eval_data(op_name, _reduce, is_dump=True)
+    for i in range(len(op_units)):
+        data, num_filter, kernel, strides, padding, \
+            dilation, groups, use_bias = op_units[i]
+        data_nd = nd.array(data)
+        batch, ic, h, w = data_nd.shape
+        groups = 1 if groups == 1 else ic
+        wshp = (num_filter, ic // groups, *kernel)
+        wsize = np.product(wshp)
+        weight = ConstantIter(rand_constraint(-127, 127, wsize), shape=wshp)
+        weight_nd = nd.array(weight[0])
+        bshp = (num_filter,)
+        bias = ConstantIter(rand_constraint(-127, 127, num_filter), shape=bshp)
+        bias_nd = nd.array(bias[0])
+        attr = {
+            'channels': num_filter,
+            'kernel_size': kernel,
+            'strides': strides,
+            'padding': padding,
+            'dilation': dilation,
+            'groups': groups,
+            'layout': "NCHW",
+            'kernel_layout': "OIHW",
+            'use_bias': use_bias,
+        }
+        ins = [data_nd, weight_nd, bias_nd] if use_bias else [data_nd, weight_nd]
+        outs, err = None, None
+        try:
+            if use_bias:
+                out = nd.Convolution(data_nd, weight_nd, bias_nd, kernel,
+                        strides, dilation, padding, num_filter, groups,
+                        no_bias=False)
+            else:
+                out = nd.Convolution(data_nd, weight_nd, None, kernel,
+                        strides, dilation, padding, num_filter, groups,
+                        no_bias=True)
+            outs = [out]
+        except Exception as e:
+            err = "Error:\n" + str(e)
+        print (data_nd.shape, wshp, bshp, attr,
+                outs[0].shape if outs else None,
+                err.replace("\n", "") if err else None)
+        opg.dump("conv2d", attr, ins, outs, err)
+
+    # attr = {'num_filter': 64, 'kernel': [3, 3], 'stride': [2, 1], 'pad': [1, 3], 'dilate': [2, 2], 'num_group': 3, 'no_bias': True}
+    # dshp = (8, 3, 4, 4)
+    # data = mx.sym.var("data", shape=dshp)
+    # weight = mx.sym.var("weight")
+    # bias = mx.sym.var("bias") 
+    # out = mx.sym.Convolution(data, weight, None, **attr)
+    # print (out.infer_shape())
+
+def verify_dense():
+    batch = IntIter(list_constraint([1, 4, 8, 16]))
+    channel = IntIter(list_constraint([1, 3, 32, 64]))
+    dshp = opg.ExtendIter(batch, channel)
+    datas = []
+    for i in range(len(dshp)):
+        size = np.product(dshp[i])
+        arr1 = ConstantIter(rand_constraint(-127, 127, size), shape=dshp[i])
+        arr2 = ConstantIter(rand_constraint(0, 127, size), shape=dshp[i])
+        arr3 = ConstantIter(rand_constraint(1, 127, size), shape=dshp[i])
+        datas.extend([arr1, arr2, arr3])
+    data = ConcatIter(*datas,
+            ConstantIter(rand_constraint(-127, 127, 112), shape=(4, 4, 7)))
+    print (len(data))
+
+    units = IntIter(list_constraint([1, 32, 64]), name="units")
+    use_bias = BoolIter(name="use_bias")
+    op_units = opg.OpUnitIter([data, units, use_bias], 1)
+    for i in range(len(op_units)):
+        data, units, use_bias = op_units[i]
+        data_nd = nd.array(data)
+        batch, ic = data_nd.shape[:2]
+        wshp = (units, ic)
+        wsize = np.product(wshp)
+        weight = ConstantIter(rand_constraint(-127, 127, wsize), shape=wshp)
+        weight_nd = nd.array(weight[0])
+        bshp = (units,)
+        bias = ConstantIter(rand_constraint(-127, 127, units), shape=bshp)
+        bias_nd = nd.array(bias[0])
+        attr = {
+            'units': units,
+            'use_bias': use_bias,
+        }
+        ins = [data_nd, weight_nd, bias_nd] if use_bias else [data_nd, weight_nd]
+        outs, err = None, None
+        try:
+            if use_bias:
+                out = nd.FullyConnected(data_nd, weight_nd, bias_nd,
+                        units, (not use_bias))
+            else:
+                out = nd.FullyConnected(data_nd, weight_nd, None,
+                        units, (not use_bias))
+            outs = [out]
+        except Exception as e:
+            err = "Error:\n" + str(e)
+        print (data_nd.shape, wshp, bshp, attr,
+                outs[0].shape if outs else None,
+                err.replace("\n", "") if err else None)
+        opg.dump("dense", attr, ins, outs, err)
+
+def verify_max_pool2d():
+    pass
+
+def verify_upsampling():
+    pass
 
 
 
@@ -403,6 +505,7 @@ if __name__ == "__main__":
     # verify_sum()
 
     verify_conv2d()
+    # verify_dense()
 
     # verify_get_valid_counts()
     # verify_non_max_suppression()

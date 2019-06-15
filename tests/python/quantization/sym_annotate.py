@@ -206,7 +206,7 @@ def _sym_annotate(sym, params, graph, inputs_ext, precs, th_dict):
         out_tb, out_bit = precs[name][target_key], precs[name][out_key]
         if out_tb < out_bit:
             node = _annotate(node, graph, precs, out_bit, out_tb,
-                    ANNO_TYPE.REQUANT, logger)
+                    ANNO_TYPE.IN_PREC_SCALE, logger)
             precs[node.attr('name')][name] = out_tb
             precs[tmp.attr('name')][out_key] = out_tb
             th_dict[node.attr('name')] = th_dict[name]
@@ -356,14 +356,6 @@ def _simulate_layer(sym, params, graph, inputs_ext, scales, precs):
         node = mx.sym.Custom(X, W, in_dim=2*alpha,
                 name=name, op_type='cvm_lut')
 
-    # if target_key in precs[name]:
-    #     out_tb, out_bit = precs[name][target_key], precs[name][out_key]
-    #     if out_tb < out_bit:
-    #         rescale = 1 / (2 ** (out_bit - out_tb))
-    #         node = _simulate(node, rescale, out_bit, out_tb, name+"_out")
-    #         # node = _annotate(node, graph, precs, out_bit, out_tb,
-    #         #         ANNO_TYPE.REQUANT, logger)
-    #         # th_dict[node.attr('name')] = th_dict[name]
     scales[node.attr('name')] = scales[name]
     precs[node.attr('name')] = precs[name]
     return node, params
