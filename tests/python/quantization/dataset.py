@@ -10,6 +10,7 @@ import os
 import math
 import pickle
 
+# max value: 2.64
 def load_voc(batch_size, input_size=416):
     width, height = input_size, input_size
     val_dataset = gdata.VOCDetection(splits=[('2007', 'test')])
@@ -62,7 +63,6 @@ def load_imagenet_rec(batch_size, input_size=224):
 	std_b               = std_rgb[2],
     )
     return val_data
-
 
 def load_trec(batch_size, is_train = False):
     if is_train:

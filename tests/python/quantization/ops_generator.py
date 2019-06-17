@@ -57,6 +57,17 @@ class BoolIter(AttrName):
             return self._const
         return (key == 0)
 
+class RandomIter(AttrName):
+    def __init__(self, start, end, **kwargs):
+        super(RandomIter, self).__init__(**kwargs)
+        self._diter = rand_constraint(start, end, 1)
+    def __len__(self):
+        return 1
+    def __getitem__(self, key):
+        assert key == 0
+        return self._diter()[0]
+
+
 
 class IntIter(AttrName):
     def __init__(self, *cstrs, **kwargs):
@@ -109,7 +120,7 @@ class PermutationIter(AttrName):
         return self._iter[key]
 
 class RandomBoolIter(AttrName):
-    def __init__(self, size=1, **kwargs):
+    def __init__(self, **kwargs):
         super(RandomBoolIter, self).__init__(**kwargs)
         self._diter = rand_constraint(0, 2, 1)
     def __len__(self):
@@ -172,9 +183,11 @@ class RepeatIter(AttrName):
         return vec
 
 class ShapeIter(AttrName):
-    def __init__(self, d_cstr, shape, attrs, **kwargs):
+    def __init__(self, iter, shape, attrs=None, **kwargs):
         super(ShapeIter, self).__init__(**kwargs)
-        self._arr = IntIter(d_cstr)
+        self._arr = iter
+        if attrs is None:
+            attrs = [VectorIter for _ in range(len(shape))]
         assert len(shape) == len(attrs)
         ndim = len(shape)
         for i in range(ndim):
@@ -347,6 +360,14 @@ def npy_txt(data):
         " ".join([str(s) for s in data.flatten()]),
     )
     return txt
+
+def txt_npy(data):
+    ndim, shp, nums = data.split("\n")
+    shp = [int(s) for s in shp.strip().split(' ')]
+    assert len(shp) == eval(ndim)
+    arr = nums.strip().split(' ')
+    npy = np.array([int(a) for a in arr]).reshape(shp)
+    return npy
 
 def txt_npy(data):
     dim, shp, data_str = data.strip().split("\n")

@@ -3,6 +3,8 @@ import mxnet as mx
 import numpy as np
 import topi.testing
 import tvm
+import os
+import math
 
 import ops_generator as opg
 from ops_generator import std_int_constraint, iter_constraint, \
@@ -10,7 +12,7 @@ from ops_generator import std_int_constraint, iter_constraint, \
     rand_constraint, shape_constraint
 from ops_generator import IntIter, NoneIter, ConstantIter, ConcatIter, \
     VectorIter, PermutationIter, ShapeIter, AllOverIter, BoolIter, \
-    RepeatIter, RandomBoolIter, RandomVectorIter
+    RepeatIter, RandomBoolIter, RandomVectorIter, RandomIter
 import utils
 
 INT32 = "int32"
@@ -313,16 +315,16 @@ def verify_conv2d():
     for i in range(len(op_units)):
         data, num_filter, kernel, strides, padding, \
             dilation, groups, use_bias = op_units[i]
-        data_nd = nd.array(data)
-        batch, ic, h, w = data_nd.shape
+        a_np = np.array(data)
+        batch, ic, h, w = a_np.shape
         groups = 1 if groups == 1 else ic
         wshp = (num_filter, ic // groups, *kernel)
         wsize = np.product(wshp)
         weight = ConstantIter(rand_constraint(-127, 127, wsize), shape=wshp)
-        weight_nd = nd.array(weight[0])
+        w_np = np.array(weight[0])
         bshp = (num_filter,)
         bias = ConstantIter(rand_constraint(-127, 127, num_filter), shape=bshp)
-        bias_nd = nd.array(bias[0])
+        b_np = np.array(bias[0])
         attr = {
             'channels': num_filter,
             'kernel_size': kernel,
@@ -334,21 +336,22 @@ def verify_conv2d():
             'kernel_layout': "OIHW",
             'use_bias': use_bias,
         }
-        ins = [data_nd, weight_nd, bias_nd] if use_bias else [data_nd, weight_nd]
+        ins = [a_np, w_np, b_np] if use_bias else [a_np, w_np]
         outs, err = None, None
         try:
+            b_nd = nd.array(b_np) if use_bias else None
+            _ = nd.Convolution(nd.array(a_np), nd.array(w_np), b_nd, kernel,
+                    strides, dilation, padding, num_filter, groups,
+                    no_bias=(not use_bias))
+
+            dw_np = topi.testing.dilate_python(w_np, (1, 1, *dilation))
+            c_np = topi.testing.conv2d_nchw_python(a_np, dw_np, strides, padding)
             if use_bias:
-                out = nd.Convolution(data_nd, weight_nd, bias_nd, kernel,
-                        strides, dilation, padding, num_filter, groups,
-                        no_bias=False)
-            else:
-                out = nd.Convolution(data_nd, weight_nd, None, kernel,
-                        strides, dilation, padding, num_filter, groups,
-                        no_bias=True)
-            outs = [out]
+                c_np += b_np.reshape(num_filter, 1, 1)
+            outs = [c_np]
         except Exception as e:
             err = "Error:\n" + str(e)
-        print (data_nd.shape, wshp, bshp, attr,
+        print (a_np.shape, wshp, bshp, attr,
                 outs[0].shape if outs else None,
                 err.replace("\n", "") if err else None)
         opg.dump("conv2d", attr, ins, outs, err)
@@ -412,10 +415,121 @@ def verify_dense():
         opg.dump("dense", attr, ins, outs, err)
 
 def verify_max_pool2d():
-    pass
+    batch = IntIter(list_constraint([1, 4]))
+    channel = IntIter(list_constraint([1, 4]))
+    h = IntIter(range_constraint(1, 9, 3))
+    w = IntIter(range_constraint(1, 9, 3))
+    dshp = opg.ExtendIter(batch, channel, h, w)
+    datas = []
+    for i in range(len(dshp)):
+        size = np.product(dshp[i])
+        arr1 = ConstantIter(rand_constraint(-127, 127, size), shape=dshp[i])
+        arr2 = ConstantIter(rand_constraint(0, 127, size), shape=dshp[i])
+        datas.extend([arr1, arr2, arr3, arr4])
+    data = ConcatIter(*datas)
+    print (len(data))
+
+    iattr = IntIter(range_constraint(1, 4))
+    pool_size = ConcatIter(
+            VectorIter(iattr, 2),
+            name="pool_size")
+    strides = RandomVectorIter(1, 5, 2, 4, name="strides")
+    iattr = IntIter(iter_constraint(2))
+    padding = ConcatIter(
+            VectorIter(iattr, 1),
+            VectorIter(iattr, 2),
+            name="padding")
+    ceil_mode = BoolIter(name="ceil_mode")
+    def max_pool2d(data, pool_size, strides, padding, ceil_mode):
+        if ceil_mode:
+            raise ValueError("ceil_mode must be false")
+        data_nd = nd.array(data)
+        pad = padding
+        if len(padding) == 1:
+            pad = (padding[0], padding[0])
+        out = nd.Pooling(data_nd, pool_size, pool_type="max",
+                global_pool=False, stride=strides, pad=pad)
+
+        data_npy = np.array(data)
+        ashape = data_npy.shape
+        n, ic, ih, iw = data_npy.shape
+        sh, sw = strides
+        kh, kw = pool_size
+        bshape = [n, ic, ih, iw]
+        if len(padding) == 1:
+            pt = pl = pb = pr = padding[0]
+        else:
+            pt = pb = padding[0]
+            pl = pr = padding[1]
+        pad_np = np.zeros(shape=(n, ic, ih+pt+pb, iw+pl+pr)).astype(INT32)
+        no_zero = (range(n), range(ic), (range(pt, ih+pt)), (range(pl, iw+pl)))
+        pad_np[np.ix_(*no_zero)] = data_npy
+        if ceil_mode:
+            bshape[2] = int(math.ceil(float(ashape[2] - kh + pt + pb) / sh) + 1)
+            bshape[3] = int(math.ceil(float(ashape[3] - kw + pl + pr) / sw) + 1)
+        else:
+            bshape[2] = int(math.floor(float(ashape[2] - kh + pt + pb) / sh) + 1)
+            bshape[3] = int(math.floor(float(ashape[3] - kw + pl + pr) / sw) + 1)
+        _, oc, oh, ow = bshape
+        b_np = np.zeros(shape=(n, oc, oh, ow)).astype(INT32)
+        for i in range(oh):
+            for j in range(ow):
+                b_np[:,:,i,j] = np.max(pad_np[:, :, i*sh:i*sh+kh, j*sw:j*sw+kw], axis=(2,3))
+        return [b_np]
+
+    op_units = opg.OpUnitIter(
+            [data, pool_size, strides, padding, ceil_mode], 1)
+    op_units.eval_data("max_pool2d", max_pool2d, is_dump=True)
 
 def verify_upsampling():
-    pass
+    batch = IntIter(list_constraint([1, 4, 8, 16]))
+    channel = IntIter(list_constraint([1, 3, 4]))
+    h = IntIter(range_constraint(1, 9, 3))
+    w = IntIter(range_constraint(1, 9, 3))
+    dshp = opg.ExtendIter(batch, channel, h, w)
+    datas = []
+    for i in range(len(dshp)):
+        size = np.product(dshp[i])
+        arr1 = ConstantIter(rand_constraint(-127, 127, size), shape=dshp[i])
+        arr2 = ConstantIter(rand_constraint(0, 127, size), shape=dshp[i])
+        datas.extend([arr1, arr2])
+    data = ConcatIter(*datas)
+
+    scale = IntIter(iter_constraint(3), name="scale")
+    def upsampling(data, scale):
+        if scale == 0:
+            raise ValueError("scale must > 0 vs. " + str(scale))
+        a_np = np.array(data)
+        b_np = topi.testing.upsampling_python(a_np, scale, "NCHW")
+        return [b_np]
+
+    op_units = opg.OpUnitIter([data, scale], 1)
+    op_units.eval_data("upsampling", upsampling, is_dump=True)
+
+# ====== broadcast ======
+# def verify_broadcast(op_name="broadcast_add"):
+#     iattr = IntIter(shape_constraint(3))
+#     dattr = RandomIter(-127, 127)
+#     datas = []
+#     for i in range(1, 5):
+#         dshp = VectorIter(iattr, i)
+#         for j in range(len(dshp)):
+#             data = ShapeIter(dattr, shape=dshp[j])
+#             datas.append(data[0])
+#             print (dshp[j], data[0])
+# 
+#     for shp in [(4096, 256), (50, 7, 37, 42)]:
+#         data = ShapeIter(dattr, shape=shp)
+#         datas.append(data[0])
+#         print (np.array(data[0]).shape)
+# 
+#     data = ConcatIter(*datas)
+#     def broadcast(data):
+#         data_npy = np.array(data)
+#         dshp = data_npy.shape
+
+# ====== elemwise ======
+
 
 
 
@@ -462,32 +576,80 @@ def verify_get_valid_counts():
     op_units = opg.OpUnitIter([data, score], 1)
     op_units.eval_data("get_valid_counts", get_valid_counts, is_dump=True)
 
-def verify_non_max_suppression():
-    return
-    attr = {
-        'iou_threshold': 0,
-        'force_suppress': False,
-        'top_k': -1,
-        'id_index': 0,
-        'score_index': 1,
-        'coord_start': 2,
-        'max_output_size': -1,
-        'return_indices': False,
-        'invalid_to_bottom': True,
-    }
-    elem = RandomVectorIter(-10, 10, 6)
-    dshp = (10, 20, 6)
-    data = ShapeIter(rand_constraint(-10, 10, 1200), shape=dshp)
+# def verify_non_max_suppression():
+#     return
+#     attr = {
+#         'iou_threshold': 0,
+#         'force_suppress': False,
+#         'top_k': -1,
+#         'id_index': 0,
+#         'score_index': 1,
+#         'coord_start': 2,
+#         'max_output_size': -1,
+#         'return_indices': False,
+#         'invalid_to_bottom': True,
+#     }
+#     elem = RandomVectorIter(-10, 10, 6)
+#     dshp = (10, 20, 6)
+#     data = ShapeIter(rand_constraint(-10, 10, 1200), shape=dshp)
+# 
+#     def non_max_suppression(data, valid_count):
+#         ctx = tvm.context("llvm")
+#         device = "llvm"
+#         tvm_data = tvm.nd.array(data, ctx=ctx)
+#         tvm_valid_count = tvm.nd.array(valid_count, ctx=ctx)
+#         with tvm.target.create(device):
+#             out = topi.vision.non_max_suppression(data, valid_count,
+#                     -1, nms_threshold, force_suppress, nms_topk, return_indices=False)
+#             indices_out = non_max_suppression(data, valid_count, -1, nms_threshold, force_suppress, nms_topk)
 
-    def non_max_suppression(data, valid_count):
-        ctx = tvm.context("llvm")
-        device = "llvm"
-        tvm_data = tvm.nd.array(data, ctx=ctx)
-        tvm_valid_count = tvm.nd.array(valid_count, ctx=ctx)
-        with tvm.target.create(device):
-            out = topi.vision.non_max_suppression(data, valid_count,
-                    -1, nms_threshold, force_suppress, nms_topk, return_indices=False)
-            indices_out = non_max_suppression(data, valid_count, -1, nms_threshold, force_suppress, nms_topk)
+# ====== test ======
+def test_load(op_name, hsh, datadir="/data/ops_generator"):
+    hsh_dir = "%s/%s/%s" % (datadir, op_name, hsh)
+    files = os.listdir(hsh_dir)
+
+    ins, outs = [], []
+    attr, err = None, None
+    for fname in files:
+        fpath = hsh_dir + "/" + fname
+        if fname == 'attr.txt':
+            attr_str = open(fpath, "r").read()
+            attr = eval(attr_str)
+            print (fname, attr)
+        elif fname.startswith('in_'):
+            npy_str = open(fpath, "r").read()
+            npy = opg.txt_npy(npy_str)
+            ins.append(npy)
+            print(fname, npy.shape)
+        elif fname.startswith('out_'):
+            npy_str = open(fpath, "r").read()
+            npy = opg.txt_npy(npy_str)
+            outs.append(npy)
+            print(fname, npy.shape)
+        else:
+            assert fname == 'err.txt'
+            err = open(fpath, "r").read()
+            print (fname, err)
+
+    a_np = ins[0]
+    w_np = ins[1]
+    dilation = (1, 1, *eval(attr['dilation']))
+    stride = eval(attr['strides'])
+    padding = eval(attr['padding'])
+    print (a_np.shape, w_np.shape, dilation, stride, padding)
+    #  attr = {
+        #  'no_bias': (not eval(attr['use_bias'])),
+        #  'kernel': attr['kernel_size'],
+        #  'num_filter': attr['channels'],
+        #  'stride': attr['strides'],
+        #  'pad': attr['padding'],
+        #  'dilate': attr['dilation'],
+        #  'num_group': attr['groups'],
+    #  }
+    dw_np = topi.testing.dilate_python(w_np, dilation)
+    c_np = topi.testing.conv2d_nchw_python(a_np, dw_np, stride, padding)
+    print (c_np.flatten(), outs[0].flatten())
+
 
 
 if __name__ == "__main__":
@@ -504,8 +666,15 @@ if __name__ == "__main__":
     # verify_max()
     # verify_sum()
 
-    verify_conv2d()
+    #  verify_conv2d()
     # verify_dense()
+
+    # verify_max_pool2d()
+    # verify_upsampling()
+
+    # verify_broadcast()
+
+    # test_load("conv2d", "ffd9ad6afc62dd7541778a81d6529c9a2735fc0a")
 
     # verify_get_valid_counts()
     # verify_non_max_suppression()

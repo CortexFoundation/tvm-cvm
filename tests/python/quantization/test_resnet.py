@@ -138,7 +138,7 @@ if __name__ == "__main__":
         dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
         sym, params = mx.sym.load(dump_sym), nd.load(dump_params)
         (inputs_ext,) = sim.load_ext(dump_ext)
-        data_iter = utils.load_dataset(16)
+        data_iter = utils.load_dataset(1)
         while(1000):
             data = data_iter.next().data[0]
             inputs_ext['data']['data'] = sim.load_real_data(data, 'data', inputs_ext)
@@ -146,8 +146,8 @@ if __name__ == "__main__":
                     datadir="/data/wlt", ctx=mx.gpu(2))
         exit()
 
-    # test_sym_pass(batch_size=16, iter_num=100)
-    test_sym_nnvm(batch_size=1)
+    test_sym_pass(batch_size=16, iter_num=100)
+    # test_sym_nnvm(batch_size=1)
     # test_performance(16, 10)
 
 
