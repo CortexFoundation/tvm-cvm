@@ -126,7 +126,7 @@ def test_mrt_quant(batch_size=1, iter_num=10):
         data, label = next(val_data_iter)
         return data, label
 
-    if True:
+    if False:
         sym_file, param_file = load_fname("_darknet53_voc")
         sym, params = mx.sym.load(sym_file), nd.load(param_file)
         sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
@@ -169,8 +169,10 @@ def test_mrt_quant(batch_size=1, iter_num=10):
     metric.reset()
     def yolov3(data, label):
        def net(data):
-           outs = base_graph(data.as_in_context(ctx))
-           return top_graph(*outs)
+           tmp = base_graph(data.as_in_context(ctx))
+           outs = top_graph(*tmp)
+           # print ([o[0][0][:] for o in outs])
+           return outs
        acc = validate_data(net, data, label, metric)
        return "{:6.2%}".format(acc)
 
@@ -183,27 +185,10 @@ def test_mrt_quant(batch_size=1, iter_num=10):
         _, _, dump_ext = load_fname("_darknet53_voc", "mrt.dict", True)
         sim.save_ext(dump_ext, th_dict)
 
-    keys = [
-        'yolov30_yolooutputv30_conv0_fwd',
-        'yolov30_yolooutputv31_conv0_fwd',
-        'yolov30_yolooutputv32_conv0_fwd',
-    ]
-    b1, b1_params, b1_inputs_ext, b2, b2_params, b2_inputs_ext \
-            = split_model(base, base_params, inputs_ext, keys, logger)
-
-    b1_names = [s.attr('name') for s in b1]
-    b1_inputs = [mx.sym.var(n) for n in inputs_ext]
-    b1_graph = mx.gluon.nn.SymbolBlock(b1, b1_inputs)
-    utils.load_parameters(b1_graph, b1_params, ctx=ctx)
-
-    b2_inputs = [mx.sym.var(n) for n in b2_inputs_ext]
-    b2_graph = mx.gluon.nn.SymbolBlock(b2, b2_inputs)
-    utils.load_parameters(b2_graph, b2_params, ctx=ctx)
-
     _, _, dump_ext = load_fname("_darknet53_voc", "mrt.dict", True)
     (th_dict,) = sim.load_ext(dump_ext)
     if True:
-        mrt = _mrt.MRT(b2, b2_params, b2_inputs_ext)
+        mrt = _mrt.MRT(base, base_params, base_inputs_ext)
         mrt.set_th_dict(th_dict)
         mrt.set_threshold('data', 2.64)
         mrt.set_threshold('yolov30_yolooutputv30_expand_dims0', 1)
@@ -215,10 +200,9 @@ def test_mrt_quant(batch_size=1, iter_num=10):
         # mrt.set_fixed('yolov30_yolooutputv30_broadcast_add1')
         # mrt.set_fixed('yolov30_yolooutputv31_broadcast_add1')
         # mrt.set_fixed('yolov30_yolooutputv32_broadcast_add1')
-        mrt.set_output_prec(24)
+        mrt.set_output_prec(30)
         qbase, qbase_params, qbase_inputs_ext = mrt.quantize()
         oscales = mrt.get_output_scales()
-        print (oscales)
         dump_sym, dump_params, dump_ext = load_fname("_darknet53_voc", "mrt.quantize", True)
         open(dump_sym, "w").write(qbase.tojson())
         nd.save(dump_params, qbase_params)
@@ -233,14 +217,13 @@ def test_mrt_quant(batch_size=1, iter_num=10):
         net2_metric.reset()
         def mrt_quantize(data, label):
             def net(data):
-                data = b1_graph(data.as_in_context(ctx))
-                # data = sim.load_real_data(data, 'data', net2_inputs_ext)
-                data = [sim.load_real_data(data[i], n, net2_inputs_ext) for i,n in enumerate(b1_names)]
-                data = [d.as_in_context(qctx) for d in data]
-                outs = list(net2(*data))
+                data = sim.load_real_data(data, 'data', net2_inputs_ext)
+                outs = net2(data.as_in_context(qctx))
+
                 outs = [o.as_in_context(ctx) / oscales[i] for i, o in enumerate(outs)]
                 # outs = b2_graph(*data)
-                return top_graph(*outs)
+                outs = top_graph(*outs)
+                return outs
             acc = validate_data(net, data, label, net2_metric)
             return "{:6.2%}".format(acc)
 
@@ -268,7 +251,7 @@ def test_sym_pass(batch_size=10, iter_num=10):
     sym_file, param_file = load_fname("_darknet53_voc")
     sym, params = mx.sym.load(sym_file), nd.load(param_file)
     sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
-    if True:
+    if False:
         th_dict = {}
         for i in range(16):
           data, _ = data_iter_func()
@@ -288,7 +271,9 @@ def test_sym_pass(batch_size=10, iter_num=10):
     metric.reset()
     def yolov3(data, label):
        def net(data):
-           return net1(data.as_in_context(ctx))
+           out = net1(data.as_in_context(ctx))
+           print ([o[0][0][:] for o in out])
+           return out
        acc = validate_data(net, data, label, metric)
        return "{:6.2%}".format(acc)
 
@@ -315,7 +300,7 @@ def test_sym_pass(batch_size=10, iter_num=10):
     utils.load_parameters(top_graph, top_params, ctx=ctx)
 
     # quantize base graph
-    if True:
+    if False:
         qbase, qbase_params, qbase_prec, base_oscales = calib.sym_simulate(
                 base, base_params, base_inputs_ext, th_dict)
         qbase, qbase_params = calib.sym_realize(qbase, qbase_params, base_inputs_ext, qbase_prec)
@@ -324,7 +309,7 @@ def test_sym_pass(batch_size=10, iter_num=10):
         sim.save_ext(dump_ext, base_inputs_ext, base_oscales)
         nd.save(dump_params, qbase_params)
 
-    if True:
+    if False:
         qb_sym, qb_params, qb_ext = load_fname("_darknet53_voc", "base.quantize", True)
         net2_inputs_ext, base_oscales = sim.load_ext(qb_ext)
         net2_inputs = [mx.sym.var(n) for n in net2_inputs_ext]
@@ -364,7 +349,7 @@ def test_sym_pass(batch_size=10, iter_num=10):
         sim.save_ext(dump_ext, top_inputs_ext, out_scales)
         nd.save(dump_params, qparams)
 
-    if False:
+    if True:
         sym_file, param_file, ext_file = load_fname("_darknet53_voc", "top.quantize", True)
         net3_inputs_ext, net3_scales = sim.load_ext(ext_file)
         top_sym = base_graph(mx.sym.Group(base_inputs))
@@ -380,6 +365,7 @@ def test_sym_pass(batch_size=10, iter_num=10):
                 tmp = [sim.load_real_data(tmp[i], n, net3_inputs_ext) for i,n in enumerate(top_names)]
                 out = net3(*tmp)
                 out = [(t / net3_scales[i]) for i,t in enumerate(out)]
+                print ([o[0][0][:] for o in out])
                 return out
             acc = validate_data(net, data, label, top_qmetric)
             return "{:6.2%}".format(acc)
@@ -436,7 +422,7 @@ def test_sym_pass(batch_size=10, iter_num=10):
         exit()
 
     utils.multi_validate(yolov3, data_iter_func,
-            base_quantize,
+            top_quantize,
             # base_quantize, # top_quantize, all_quantize,
             iter_num=iter_num, logger=logger)
 
@@ -484,6 +470,6 @@ if __name__ == '__main__':
         exit()
     # zoo.save_model("yolo3_mobilenet1.0_voc")
 
-    # test_sym_pass(1, 100)
-    test_mrt_quant(1, 10)
+    # test_sym_pass(1, 1)
+    test_mrt_quant(1, 100)
     # test_sym_nnvm(16, 0)

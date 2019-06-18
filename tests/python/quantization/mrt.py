@@ -9,8 +9,6 @@ from utils import *
 import sym_pass as spass
 import sim_quant_helper as sim
 
-# TODO: op's requant_type: rPassThrough, rInjective
-
 disable_requant_ops = [
     'Activation', 'relu',
     'Pooling',
@@ -83,9 +81,12 @@ def scale(threshold, precision):
     return alpha / threshold
 
 def _mrt_sim_quantize(sym, sb, params, graph, prec):
-    requant_op = _uniq_name("mrt_quantize")
+    name = "%s_%d_%d" % (sym.attr('name'), sb, prec)
+    if name in graph:
+        return graph[name]
+
     return mx.sym.Custom(sym, sb=sb, prec=prec,
-                name=requant_op, op_type='mrt_sim_quant')
+                name=name, op_type='mrt_sim_quant')
 
 MAX_BIT = 32
 id_counts = {}
@@ -141,9 +142,29 @@ def _simulate(sym, params, graph, inputs_ext, self):
         iscale = scales[xn]
         iprec = precs[xn][out_key]
         oprec = rtypes[name](iprec, oprec)
+        if exactly:
+            in_prec = _get_bit(th_dict[xn] * iscale)
+            out_prec = oprec.p
+            sb = in_prec - out_prec if in_prec > out_prec else 0
+            if sb > 1:
+                iprec = PREC(iprec.p - sb)
+                X = _mrt_sim_quantize(X, sb, params, graph, iprec.p)
+                iscale = iscale / (2 ** sb)
+                logger.debug(
+                    "Operator  %-20s name=%-40s exactly quantize with sb=%s" +
+                    " scale=%s, prec=%s",
+                        xopn, xn, sb, iscale, iprec)
+
         if exactly or (iprec > oprec and iscale > oscale):
             rescale = oscale / iscale
             frac, exp = sim.cvm_float(rescale, MAX_BIT - iprec.p)
+            sim_scale = frac * (2 ** exp)
+            scale_err = abs((sim_scale - rescale) / rescale)
+            if exactly and scale_err > 0.001:
+                logger.warn(
+                    "Operator  %-20s name=%-40s requantize to scale=%s " +
+                    "with <%s, %d, %d>, error=%s",
+                        xopn, xn, rescale, sim_scale, frac, exp, scale_err)
             oscale = iscale * frac * (2 ** exp)
             if frac > 1:
                 X = _mrt_sim_quantize(X, 0, params, graph, iprec.p)
@@ -195,11 +216,12 @@ def _simulate(sym, params, graph, inputs_ext, self):
         out = get_nd_op(op_name)(data / xs)
         oprec = _get_prec(precs[name], out_key, PREC(16, L0))
         opt = out.abs().max().asscalar()
+        # opt = th_dict[name]
         oscale = scales[name] = scale(opt, oprec.p)
+
         W_name = _uniq_name("cvm_lut_weight")
         weight = (out * oscale).round().reshape(2*alpha, 1)
         params[W_name] = weight
-        #  precs[W_name] = { out_key: oprec.p }
         wattr = { 'precision': str(oprec.p)}
         W = graph[W_name] = mx.sym.var(W_name, shape=weight.shape, attr=wattr)
         var = mx_const(alpha, graph, params)
@@ -208,7 +230,6 @@ def _simulate(sym, params, graph, inputs_ext, self):
         sym = mx.sym.Custom(X, W, in_dim=2*alpha,
                 name=name, op_type='cvm_lut')
         precs[name][out_key] = oprec
-        # precs[name][out_key] = PREC(_get_bit(th_dict[name] * oscale))
     elif op_name in ['Convolution', 'FullyConnected']:
         iprec = op_input_precs[op_name]
         X, xprec, xs = _requant_operator(childs[0], iprec)
@@ -240,6 +261,7 @@ def _simulate(sym, params, graph, inputs_ext, self):
         iprec = op_input_precs[op_name]
         in_th = max([th_dict[n] for n in cns])
         oscale = scales[name] = scale(in_th, iprec.p)
+        #  print ([th_dict[n] for n in cns], iprec, oscale)
         new_childs = []
         for c in childs:
             c, cprec, _ = _requant(c, iprec, oscale=oscale)
@@ -260,8 +282,8 @@ def _simulate(sym, params, graph, inputs_ext, self):
         print (name, op_name, attr)
         assert False
 
-    # logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
-    #         op_name, name, scales[name], cns)
+    logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
+           op_name, name, scales[name], cns)
 
     # Requantize output symbol
     if name in precs[name]:
@@ -482,11 +504,11 @@ class MRT():
         op_precs = {}
         for n in ['Convolution', 'FullyConnected', 'sigmoid', 'exp']:
             op_precs[n] = PREC(8, L5)
-        for n in ['sum']:
-            op_precs[n] = PREC(8, L4)
-        for n in ['broadcast_add', 'broadcast_sub', 'elemwise_add', 'elemwise_sub',
-                'broadcast_mul', 'Concat']:
+        op_precs['sum'] = PREC(8, L4)
+        for n in ['broadcast_add', 'broadcast_sub', 'elemwise_add', 'elemwise_sub']:
             op_precs[n] = PREC(16, L4)
+        op_precs['broadcast_mul'] = PREC(16, L4)
+        op_precs['Concat'] = PREC(16, L4)
         return op_precs
 
     def _check_fixed(self):
@@ -543,6 +565,53 @@ def std_dump(sym, params, inputs_ext, data, model_name,
     spass.mxnet_to_nnvm(sym, params, inputs_ext,
             datadir+"/symbol", datadir+"/params")
 
+def split_model(symbol, params, inputs_ext, keys):
+    infer_shapes = spass.sym_infer_shape(symbol, params, inputs_ext)
+    bases = [s for s in sutils.topo_sort(symbol) if s.attr('name') in keys]
+    base = mx.sym.Group(bases)
+    base_params = {k:params[k] for k in base.list_inputs() if k in params}
+    base_inputs_ext = inputs_ext
+
+    graph = {}
+    inputs = {k:v for k,v in inputs_ext.items()}
+    for sym in sutils.topo_sort(symbol):
+        name, op_name = sym.attr('name'), sym.attr('op_name')
+        childs, attr = sutils.sym_iter(sym.get_children()), sym.list_attr()
+        node = sym
+        if childs is not None:
+            childs = [graph[c.attr('name')] for c in childs]
+            node = sutils.get_mxnet_op(op_name)(*childs, **attr, name=name)
+        if name in keys:
+            node = mx.sym.var(name)
+            inputs[name] = {'shape': infer_shapes[name]}
+        graph[name] = node
+    nodes = [graph[sym.attr('name')] for sym in symbol]
+    top = nodes[0] if len(nodes) == 1 else mx.sym.Group(nodes)
+    top_params = {k:params[k] for k in top.list_inputs() if k in params}
+    top_inputs_ext = {k:v for k,v in inputs.items() if k not in inputs_ext}
+
+    return base, base_params, base_inputs_ext, top, top_params, top_inputs_ext
+
+def merge_model(base, base_params, top, top_params, base_maps, callback=None):
+    graph = {maps[c.attr('name')]:c for c in base}
+    for sym in sutils.topo_sort(top):
+        name, op_name = sym.attr('name'), sym.attr('op_name')
+        childs, attr = sutils.sym_iter(sym.get_children()), sym.list_attr()
+        node = sym
+        if childs is not None:
+            childs = [graph[c.attr('name')] for c in childs]
+            node = sutils.get_mxnet_op(op_name)(*childs, **attr, name=name)
+        if name in graph:
+            node = graph[name]
+        if callback is not None:
+            node = callback(node, params, graph)
+        graph[name] = node
+    symbols = [graph[s.attr('name')] for s in top]
+    symbol = symbols[0] if len(symbols) == 1 else mx.sym.Group(symbols)
+    params = base_params
+    params.update(top_params)
+    params = {k:params[k] for k in symbol.list_inputs() if k in params}
+    return symbol, params
 
 
 
