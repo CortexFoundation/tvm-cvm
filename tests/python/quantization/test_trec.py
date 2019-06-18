@@ -63,14 +63,14 @@ def quantize(data):
 quant_sym, quant_params, quant_ext = load_fname("sym.quantize", with_ext=True)
 open(quant_sym, "w").write(qsym.tojson())
 
-if True:
+if False:
     inputs_ext['data']['shape'] = (38, 1)
     data = data[:, 0].reshape(38, 1)
     _mrt.std_dump(qsym, qparams, inputs_ext, data, "trec",
             batch=True, data_dtype="int32")
     exit()
 
-if True:
+if False:
     while True:
         data, _ = next(data_iter)
         data = sim.load_real_data(data, 'data', inputs_ext)

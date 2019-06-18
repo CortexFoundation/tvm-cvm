@@ -509,6 +509,7 @@ class MRT():
             op_precs[n] = PREC(16, L4)
         op_precs['broadcast_mul'] = PREC(16, L4)
         op_precs['Concat'] = PREC(16, L4)
+        op_precs['Embedding'] = PREC(16, L0)
         return op_precs
 
     def _check_fixed(self):
