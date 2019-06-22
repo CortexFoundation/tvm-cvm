@@ -38,15 +38,16 @@ def load_fname(version, suffix=None, with_ext=False):
     fname = "./data/resnet%s%s"%(version, suffix)
     return utils.extend_fname(fname, with_ext)
 
+version = "50_v2"
+
 def test_sym_nnvm(batch_size=10):
-    version = "50_mxg"
     dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
     sym, params = mx.sym.load(dump_sym), nd.load(dump_params)
     (inputs_ext,) = sim.load_ext(dump_ext)
     data_iter = utils.load_dataset(batch_size)
     data = data_iter.next().data[0]
 
-    _mrt.std_dump(sym, params, inputs_ext, data, "resnet50_mxg")
+    _mrt.std_dump(sym, params, inputs_ext, data, "resnet"+version)
 
 def test_sym_pass(batch_size=10, iter_num=10):
     logger = logging.getLogger("log.test.sym.pass")
@@ -64,7 +65,6 @@ def test_sym_pass(batch_size=10, iter_num=10):
         return data.data[0], data.label[0]
     data, _ = data_iter_func()
 
-    version = "50_mxg"
     net1 = utils.load_model(*load_fname(version), inputs, ctx=ctx)
     acc_top1 = mx.metric.Accuracy()
     acc_top5 = mx.metric.TopKAccuracy(5)
@@ -85,8 +85,9 @@ def test_sym_pass(batch_size=10, iter_num=10):
     sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
 
     if True:
-        if True:
+        if False:
             mrt = _mrt.MRT(sym, params, inputs_ext)
+            #  mrt.set_pure_int8()
             mrt.set_data('data', data)
             mrt.calibrate(ctx=calib_ctx)
             mrt.set_output_prec(8)
@@ -131,10 +132,11 @@ if __name__ == "__main__":
     # zoo.save_model('resnet18_v1')
     # zoo.save_model('resnet50_v1d_0.86')
     # zoo.save_model('resnet18_v1b_0.89')
+    #  zoo.save_model("resnet50_v2")
+    #  exit()
 
     # save_data()
     if False:
-        version = "50_mxg"
         dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
         sym, params = mx.sym.load(dump_sym), nd.load(dump_params)
         (inputs_ext,) = sim.load_ext(dump_ext)
@@ -146,8 +148,8 @@ if __name__ == "__main__":
                     datadir="/data/wlt", ctx=mx.gpu(2))
         exit()
 
-    test_sym_pass(batch_size=16, iter_num=100)
-    # test_sym_nnvm(batch_size=1)
+    # test_sym_pass(batch_size=16, iter_num=100)
+    test_sym_nnvm(batch_size=1)
     # test_performance(16, 10)
 
 

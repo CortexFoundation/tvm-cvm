@@ -355,14 +355,14 @@ def _sym_rewrite(sym, params, graph, inputs_ext, infer_shapes):
     if op_name == 'Convolution':
         X, W = childs[0], childs[1]
         X_name, W_name = X.attr('name'), W.attr('name')
-        X_name, W_name = childs[0].attr('name'), childs[1].attr('name')
+        # X_name, W_name = childs[0].attr('name'), childs[1].attr('name')
         layout = get_attr(attr, 'layout', "NCHW")
-        no_bias = get_attr(attr, 'no_bias', False)
-        dilate, kernel = get_attr(attr, 'dilate'), get_attr(attr, 'kernel')
-        pad, stride = get_attr(attr, 'pad'), get_attr(attr, 'stride')
-        num_filter = get_attr(attr, 'num_filter')
-        num_group = get_attr(attr, 'num_group', 1)
         if layout == "NCW":
+            no_bias = get_attr(attr, 'no_bias', False)
+            dilate, kernel = get_attr(attr, 'dilate'), get_attr(attr, 'kernel')
+            pad, stride = get_attr(attr, 'pad'), get_attr(attr, 'stride')
+            num_filter = get_attr(attr, 'num_filter')
+            num_group = get_attr(attr, 'num_group', 1)
             attr = {
                 'layout': "NCHW", 'no_bias': no_bias,
                 'dilate': (*dilate, 1), 'kernel': (*kernel, 1),
@@ -380,8 +380,8 @@ def _sym_rewrite(sym, params, graph, inputs_ext, infer_shapes):
                            % (op_name, name, attr)
     elif op_name == 'Pooling':
         pool_type = attr['pool_type']
-        is_global = attr["global_pool"]
-        if pool_type == 'avg' and is_global == 'True':
+        is_global = get_attr(attr, "global_pool", False)
+        if pool_type == 'avg' and is_global:
             input_name = childs[0].attr('name')
             input_shape = infer_shapes[input_name]
             assert len(input_shape) == 4
@@ -897,7 +897,7 @@ def sym_calculate_ops(symbol, params, inputs_ext):
         elif op_name in ['broadcast_mul', 'broadcast_add', 'broadcast_sub', 'Flatten',
             'elemwise_add', 'elemwise_sub', 'relu', 'slice', 'clip', 'negative',
             'slice_like', 'slice_axis', 'repeat', 'tile', 'expand_dims',
-            'Reshape', 'transpose', 'Flatten', 'Concat']:
+            'Reshape', 'transpose', 'Flatten', 'Concat', 'UpSampling']:
             # base op is 1, do nothing
             pass
         elif op_name in ['Dropout']:

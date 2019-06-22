@@ -31,7 +31,7 @@ utils.log_init()
 data_iter = ds.load_trec(batch_size)
 def data_iter_func():
     return next(data_iter)
-data, _ = data_iter_func()
+data, label = data_iter_func()
 
 sym_file, param_file = load_fname()
 net1 = utils.load_model(sym_file, param_file, inputs, ctx=ctx)

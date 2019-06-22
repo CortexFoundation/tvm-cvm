@@ -307,7 +307,7 @@ class OpUnitIter():
             logger.debug("Inputs: %s, Attr: %-30s, Outputs: %s, Error: %s",
                     inputs[:self.attr_idx], attrs,
                     str(out_npys).replace("\n", "").replace(" ", ""),
-                    str(err).split("\n")[:2])
+                    str(err).split("\n"))
             if is_dump:
                 dump(op_name, attrs, inputs[:self.attr_idx], out_npys, err)
 

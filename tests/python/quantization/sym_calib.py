@@ -26,6 +26,7 @@ disable_requant_ops = [
     'repeat', 'tile', 'expand_dims', 'squeeze',
     'Reshape', 'transpose', 'Flatten',
     'max',
+    'UpSampling',
 ]
 
 def sym_calibrate(symbol, params, inputs_ext, old_ths={}, ctx=mx.cpu()):
@@ -158,7 +159,7 @@ def _collect_scale_helper(sym, params, graph, inputs_ext,
     target_bits[name] = default_target_bit
     if op_name in ['Convolution', 'FullyConnected']:
         X_name, W_name = childs[0].attr('name'), childs[1].attr('name')
-        if attr['no_bias'] == 'False':
+        if not get_attr(attr, 'no_bias', False):
             B_name = childs[2].attr('name')
             scale_helper[B_name] = scale_helper[X_name] * scale_helper[W_name]
             target_bits[B_name] = bias_target_bit
@@ -184,7 +185,7 @@ def _annotate_layer(sym, params, graph, inputs_ext,
     elif op_name in ['Convolution', 'FullyConnected', 'broadcast_mul']:
         requant_scale = scale_helper[name] / (cscales[0] * cscales[1])
     elif op_name in ['elemwise_add', 'elemwise_sub',
-            'broadcast_add', 'broadcast_sub', 'Concat']:
+            'broadcast_add', 'broadcast_sub', 'Concat'] or (op_name == 'add_n' and len(childs) == 2):
         new_childs = []
         in_scale = min(cscales)
         for idx, c in enumerate(childs):

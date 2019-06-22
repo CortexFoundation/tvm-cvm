@@ -5,6 +5,7 @@ import topi.testing
 import tvm
 import os
 import math
+import random
 
 import ops_generator as opg
 from ops_generator import std_int_constraint, iter_constraint, \
@@ -576,32 +577,108 @@ def verify_get_valid_counts():
     op_units = opg.OpUnitIter([data, score], 1)
     op_units.eval_data("get_valid_counts", get_valid_counts, is_dump=True)
 
-# def verify_non_max_suppression():
-#     return
-#     attr = {
-#         'iou_threshold': 0,
-#         'force_suppress': False,
-#         'top_k': -1,
-#         'id_index': 0,
-#         'score_index': 1,
-#         'coord_start': 2,
-#         'max_output_size': -1,
-#         'return_indices': False,
-#         'invalid_to_bottom': True,
-#     }
-#     elem = RandomVectorIter(-10, 10, 6)
-#     dshp = (10, 20, 6)
-#     data = ShapeIter(rand_constraint(-10, 10, 1200), shape=dshp)
-# 
-#     def non_max_suppression(data, valid_count):
-#         ctx = tvm.context("llvm")
-#         device = "llvm"
-#         tvm_data = tvm.nd.array(data, ctx=ctx)
-#         tvm_valid_count = tvm.nd.array(valid_count, ctx=ctx)
-#         with tvm.target.create(device):
-#             out = topi.vision.non_max_suppression(data, valid_count,
-#                     -1, nms_threshold, force_suppress, nms_topk, return_indices=False)
-#             indices_out = non_max_suppression(data, valid_count, -1, nms_threshold, force_suppress, nms_topk)
+def verify_non_max_suppression():
+        # batch = np.random.randint(low=1, high=10)
+        # n = np.random.randint(low=10, high=11)
+        # k = 6
+        # dshape = (batch, n, k)
+        # data = tvm.placeholder(dshape, name="data")
+        # valid_count = tvm.placeholder((dshape[0],), dtype="int32", name="valid_count")
+        # nms_threshold = np.random.randint(low=1, high=10)
+        # force_suppress = True if np.random.randint(low=0, high=1) == 1 else False
+        # nms_topk = np.random.randint(low=1, high=9)
+        # params = {'iou_threshold':nms_threshold*10, 'coord_start':2, 'score_index':1, 'id_index':0,
+        #         'force_suppress':force_suppress, 'top_k': nms_topk, 'return_indices':False}
+        # save_dict(params, case_dir + '/attr.txt')
+
+        # np_data = np.random.randint(low=-(2**31-1), high=(2**31-1), size=dshape).astype(data.dtype)
+        # np_valid_count = np.random.randint(low=1, high=10, size=(batch)).astype(valid_count.dtype)
+
+        # device = 'llvm'
+        # ctx = tvm.context(device, 0)
+        # with tvm.target.create(device):
+        #     out = non_max_suppression(data, valid_count, -1, nms_threshold, force_suppress, nms_topk, return_indices=False)
+        #     s = topi.generic.schedule_nms(out)
+
+        # tvm_data = tvm.nd.array(np_data, ctx)
+        # tvm_valid_count = tvm.nd.array(np_valid_count, ctx)
+        # save_txt(tvm_data, case_dir + "/in_0.txt")
+        # save_txt(tvm_valid_count, case_dir + "/in_1.txt")
+
+        # tvm_out = tvm.nd.array(np.zeros(dshape, dtype=data.dtype), ctx)
+        # f = tvm.build(s, [data, valid_count, out], device)
+        # f(tvm_data, tvm_valid_count, tvm_out)
+
+        # save_txt(tvm_out, case_dir + "/out_0.txt")
+
+    batch = IntIter(range_constraint(1, 2))
+    n = IntIter(rand_constraint(1, 32, 40))
+    k = IntIter(list_constraint([6]))
+    dshp = opg.ExtendIter(batch, n, k)
+    datas = []
+    for i in range(len(dshp)):
+        shp = dshp[i]
+        data = []
+        for n in range(shp[1]):
+            elem = rand_constraint(-20, 20, 6)()
+            elem[0] = random.randint(-1, 10)
+            data.append(elem)
+        datas.append([[data]])
+    data = ConcatIter(*datas)
+    valid_count = RandomVectorIter(1, 32, 1, 10)
+    iou = ConcatIter(
+            IntIter(rand_constraint(0, 100, 20)),
+            IntIter(list_constraint([110])),
+            name="iou_threshold")
+    force_suppress = BoolIter(name="force_suppress")
+    top_k = ConcatIter(
+            IntIter(list_constraint([-1])),
+            IntIter(rand_constraint(1, 32, 6)),
+            name="top_k")
+    id_index = IntIter(list_constraint([0]), name="id_index")
+    score_index = IntIter(list_constraint([1]), name="score_index")
+    coord_start = IntIter(list_constraint([2]), name="coord_start")
+    max_output_size = ConcatIter(
+            IntIter(list_constraint([-1])),
+            IntIter(rand_constraint(1, 32, 6)),
+            name="max_output_size")
+    return_indices = BoolIter(const=False, name="return_indices")
+    invalid_to_bottom = BoolIter(const=True, name="invalid_to_bottom")
+    inputs = [data, valid_count, iou, force_suppress, top_k,
+            id_index, score_index, coord_start,
+            max_output_size, return_indices, invalid_to_bottom]
+    def cstr_func(data, valid_count, *args):
+        data_np = np.array([data])
+        count = valid_count[0]
+        if count > data_np.shape[1]:
+            return False
+        return True
+    op_units = opg.OpUnitIter([data, valid_count, iou, force_suppress, top_k,
+            id_index, score_index, coord_start,
+            max_output_size, return_indices, invalid_to_bottom], 2, [cstr_func])
+    def non_max_suppression(data, valid_count, iou, force_suppress, top_k,
+            id_index, score_index, coord_start,
+            max_output_size, return_indices, invalid_to_bottom):
+        device = 'llvm'
+        ctx = tvm.context(device, 0)
+        data_np, valid_count_np = np.array(data, dtype="float32"), np.array(valid_count, dtype="int32")
+        data_nd, valid_count_nd = tvm.nd.array(data_np, ctx), tvm.nd.array(valid_count_np, ctx)
+        dshp = data_nd.shape
+        data_tvm = tvm.placeholder(dshp, name="data", dtype="float32")
+        valid_count_tvm = tvm.placeholder((dshp[0],), dtype="int32", name="valid_count")
+        with tvm.target.create(device):
+            out = topi.vision.non_max_suppression(data_tvm, valid_count_tvm,
+                    max_output_size, iou/100, force_suppress, top_k,
+                    coord_start, score_index, id_index,
+                    return_indices, invalid_to_bottom)
+            s = topi.generic.schedule_nms(out)
+
+        out_nd = tvm.nd.array(np.zeros(dshp, dtype=data_tvm.dtype), ctx)
+        f = tvm.build(s, [data_tvm, valid_count_tvm, out], device)
+        f(data_nd, valid_count_nd, out_nd)
+        return [out_nd.asnumpy()]
+
+    op_units.eval_data("non_max_suppression", non_max_suppression, True)
 
 # ====== test ======
 def test_load(op_name, hsh, datadir="/data/ops_generator"):
@@ -677,4 +754,4 @@ if __name__ == "__main__":
     # test_load("conv2d", "ffd9ad6afc62dd7541778a81d6529c9a2735fc0a")
 
     # verify_get_valid_counts()
-    # verify_non_max_suppression()
+    verify_non_max_suppression()

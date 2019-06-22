@@ -19,7 +19,7 @@ disable_requant_ops = [
     'slice', 'slice_like', 'slice_axis',
     'clip', 'negative',
     'repeat', 'tile', 'expand_dims',
-    'Reshape', 'transpose', 'Flatten',
+    'Reshape', 'transpose', 'Flatten', 'UpSampling'
 ]
 class ANNO_TYPE():
     REQUANT = '_requant'

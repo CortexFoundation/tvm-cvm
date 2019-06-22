@@ -177,14 +177,15 @@ def _simulate(sym, params, graph, inputs_ext, self):
                 " iprec=%s, iscale=%-10.5f, oprec=%s, oscale=%-10.5f",
                     xopn, xn, rescale, frac, exp, iprec, iscale,
                     oprec, oscale)
-        elif (iprec > oprec and iscale <= oscale):
+        # elif (iprec > oprec and iscale <= oscale):
+        else:
             X = _mrt_sim_quantize(X, 0, params, graph, oprec.p)
             oscale = iscale
             logger.debug(
                 "Operator  %-20s name=%-40s clip with iprec=%s, oprec=%s",
                     xopn, xn, iprec, oprec)
-        else:
-            oscale = iscale
+        # else:
+            # oscale = iscale
         return X, oprec, oscale
     def _requant(X, def_prec, oscale=None):
         if is_params(X, params, inputs_ext):
@@ -362,6 +363,10 @@ class MRT():
         for sym in self.sym:
             name = sym.attr('name')
             self.precs[name][name] = PREC(prec, level)
+
+    def set_pure_int8(self):
+        for k,v in self._op_input_precs.items():
+            v.p = 8
 
     def set_fixed(self, fixes):
         if isinstance(fixes, list):
