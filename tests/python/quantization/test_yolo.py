@@ -109,8 +109,8 @@ def merge_model(base, base_params, base_inputs_ext, top, top_params, maps):
 def test_sym_pass(batch_size=10, iter_num=10):
     logger = logging.getLogger("log.test.sym.pass")
 
-    base_ctx = mx.gpu(7)
-    ctx = mx.gpu(7)
+    base_ctx = mx.gpu(4)
+    ctx = mx.gpu(4)
     input_size = 416
     h, w = input_size, input_size
     inputs_ext = {
@@ -297,5 +297,5 @@ if __name__ == '__main__':
 
     # zoo.save_model('yolo3_darknet53_voc')
 
-    # test_sym_pass(16, 10)
-    test_sym_nnvm(16, 0)
+    test_sym_pass(16, 10)
+    # test_sym_nnvm(16, 0)

@@ -344,7 +344,6 @@ def nnvm_realize(symbol, params, inputs_ext):
 def tvm_params_reduce(symbol, params, inputs_ext, ctx):
     for sym in topo_sort(symbol):
         name, attr = sym.attr('name'), sym.list_attr()
-        print (name, attr, inputs_ext)
         if sym.attr('op_name') == 'null' and name not in inputs_ext:
             precision = get_attr(attr, "precision")
             val = params[name]

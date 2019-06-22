@@ -307,7 +307,7 @@ nnvm_identity_ext = {
     'null': OpExt(out_types=[INT8_TYPE, INT32_TYPE]),
 
     'relu': OpExt('relu', [INT8_TYPE], [INT8_TYPE]),
-    'upsampling': OpExt('upsampling', [INT8_TYPE], [INT8_TYPE]),
+    'upsampling': {},
     'max_pool2d': OpExt('max_pool2d', [INT8_TYPE], [INT8_TYPE]),
 
     'conv2d': OpExt('conv2d', [INT8_TYPE], [INT32_TYPE]),
