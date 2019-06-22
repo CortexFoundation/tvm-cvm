@@ -168,13 +168,7 @@ def multi_validate(base_func, data_iter, *comp_funcs,
 
     total = 0
     for i in range(iter_num):
-        try:
-            data, label = data_iter()
-        except TypeError:
-            try:
-                data, label = next(data_iter)
-            except StopIteration:
-                break
+        data, label = data_iter()
         base_acc = base_func(data, label)
         comp_acc = [func(data, label) for func in comp_funcs]
         total += data.shape[0]
