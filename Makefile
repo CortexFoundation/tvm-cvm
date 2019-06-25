@@ -34,16 +34,16 @@ PKG_LDFLAGS =
 
 
 all:
-	@mkdir -p build && cd build && cmake .. && $(MAKE)
+	@mkdir -p build && cd build && cmake .. -DCMAKE_BUILD_TYPE=Debug && $(MAKE)
 
 runtime:
-	@mkdir -p build && cd build && cmake .. && $(MAKE) runtime
+	@mkdir -p build && cd build && cmake .. -DCMAKE_BUILD_TYPE=Debug && $(MAKE) runtime
 
 vta:
-	@mkdir -p build && cd build && cmake .. && $(MAKE) vta
+	@mkdir -p build && cd build && cmake .. -DCMAKE_BUILD_TYPE=Debug && $(MAKE) vta
 
 cpptest:
-	@mkdir -p build && cd build && cmake .. && $(MAKE) cpptest
+	@mkdir -p build && cd build && cmake .. -DCMAKE_BUILD_TYPE=Debug && $(MAKE) cpptest
 
 # EMCC; Web related scripts
 EMCC_FLAGS= -std=c++11 -DDMLC_LOG_STACK_TRACE=0\
