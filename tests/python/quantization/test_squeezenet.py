@@ -21,7 +21,7 @@ def load_fname(version, suffix=None, with_ext=False):
     prefix = "./data/squeezenet%s%s" % (version, suffix)
     return utils.extend_fname(prefix, with_ext=with_ext)
 
-batch_size = 600
+batch_size = 60
 input_size = 224
 inputs_ext = { 'data': {
     'shape': (batch_size, 3, input_size, input_size)
@@ -61,7 +61,7 @@ def squeezenet(data, label):
     _, top5 = acc_top5.get()
     return "top1={:6.2%} top5={:6.2%}".format(top1, top5)
 
-if False:
+if True:
     sym, params = mx.sym.load(sym_file), nd.load(param_file)
     sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
     if True:
@@ -74,7 +74,7 @@ if False:
         inputs_ext['data']['data'] = data
         th_dict = calib.sym_calibrate(sym, params, inputs_ext, ctx=calib_ctx)
         qsym, qparams, precs, _ = calib.sym_simulate(sym, params, inputs_ext, th_dict)
-        qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, precs, "tvm")
+        qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, precs, "cvm")
     dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
     sim.save_ext(dump_ext, inputs_ext)
     nd.save(dump_params, qparams)

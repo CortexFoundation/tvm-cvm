@@ -11,6 +11,7 @@ import sym_pass as spass
 import dataset as ds
 import sym_calib as calib
 import sim_quant_helper as sim
+import ops_generator as opg
 import utils
 import mrt as _mrt
 
@@ -41,7 +42,7 @@ def trec(data):
 
 sym, params = mx.sym.load(sym_file), nd.load(param_file)
 sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
-if True:
+if False:
     mrt = _mrt.MRT(sym, params, inputs_ext)
     mrt.set_data('data', data)
     mrt.calibrate(ctx=ctx)
@@ -63,11 +64,18 @@ def quantize(data):
 quant_sym, quant_params, quant_ext = load_fname("sym.quantize", with_ext=True)
 open(quant_sym, "w").write(qsym.tojson())
 
-if False:
+
+if True:
     inputs_ext['data']['shape'] = (38, 1)
     data = data[:, 0].reshape(38, 1)
     _mrt.std_dump(qsym, qparams, inputs_ext, data, "trec",
-            batch=True, data_dtype="int32")
+            batch=True, data_dtype="int32", max_num=1000,
+            dump_ops=["sentimentnet0_embedding0_fwd"])
+    opg.dump_file("take",
+            ["/data/std_out/trec/sentimentnet0_embedding0_fwd_0.mrt.dump.in.npy",
+             "/data/std_out/trec/sentimentnet0_embedding0_fwd_1.mrt.dump.in.npy"],
+            ["/data/std_out/trec/sentimentnet0_embedding0_fwd_0.mrt.dump.out.npy"],
+            "/data/std_out/trec/sentimentnet0_embedding0_fwd.attr")
     exit()
 
 if False:

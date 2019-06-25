@@ -267,6 +267,7 @@ class OpUnitIter():
         size = np.product([len(c) for c in self.inputs])
 
         self._iter = []
+        print ("OpUnitIter size: ", size)
         for i in range(size):
             idxes, ins = [], []
             for c in self.inputs:
@@ -442,4 +443,13 @@ def dump(op_name, attr, ins, outs, err=None,
         if not _dump_txt(hsh_file, out_file, _out):
             shutil.rmtree(hsh_dir)
             return
+
+def dump_file(op_name, in_file, out_file, attr_file, root="./"):
+    attr = open(root+"/"+attr_file, "r").read()
+    print (attr)
+    attr = eval(attr.strip())
+    ins = [np.load(root+"/"+f) for f in in_file]
+    outs = [np.load(root+"/"+f) for f in out_file]
+    dump(op_name, attr, ins, outs, None)
+
 

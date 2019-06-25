@@ -557,18 +557,38 @@ class MRT():
             else:
                 assert False, "%s name=%s"%(op_name, name)
 
+import os
+from tvm.contrib import graph_runtime
+import tvm
 def std_dump(sym, params, inputs_ext, data, model_name,
-        batch=False, data_dtype="int8"):
+        is_mxnet=True,
+        batch=False, data_dtype="int8", max_num=20, dump_ops=[]):
     if not batch:
         for k, v in inputs_ext.items():
             v['shape'] = (1, *v['shape'][1:])
     datadir = "/data/std_out/" + model_name
-    data = sim.load_real_data(data, 'data', inputs_ext)
-    inputs_ext['data']['data'] = data
-    spass.sym_dump_layer_outputs(sym, params, inputs_ext, datadir,
-            data_dtype=data_dtype)
+    os.makedirs(datadir, exist_ok=True)
+    if is_mxnet:
+        data = sim.load_real_data(data, 'data', inputs_ext)
+        inputs_ext['data']['data'] = data
+        spass.sym_dump_layer_outputs(sym, params, inputs_ext, datadir,
+                data_dtype=data_dtype, max_num=max_num,
+                dump_ops=dump_ops)
+        sym, params = spass.mxnet_to_nnvm(sym, params)
+    else:
+        tvm_graph, tvm_params, lib = spass.cvm_build(sym, params, inputs_ext,
+                "/dev/null", "/dev/null", runtime="tvm",
+                target="llvm", dtype="int32")
+        model = graph_runtime.create(tvm_graph, lib, tvm.cpu())
+        model.set_input(**params)
+        model.set_input("data", data)
+        model.run()
+        np.save(datadir+"/data.npy", data.asnumpy().astype('int8'))
+        for i in range(len(sym.list_output_names())):
+            out = model.get_output(i).asnumpy()
+            np.save("%s/result_%d.npy" % (datadir, i), out)
 
-    spass.mxnet_to_nnvm(sym, params, inputs_ext,
+    return spass.cvm_build(sym, params, inputs_ext,
             datadir+"/symbol", datadir+"/params")
 
 def split_model(symbol, params, inputs_ext, keys):

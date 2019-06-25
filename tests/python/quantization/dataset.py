@@ -83,8 +83,8 @@ def load_cifar10(batch_size, input_size=224, num_workers=4):
     return data_iter()
 
 def load_quickdraw10(batch_size, num_workers=4):
-    X = nd.array(np.load('/home/tian/cortex_ml_data/quickdraw_X_test.npy'))
-    y = nd.array(np.load('/home/tian/cortex_ml_data/quickdraw_y_test.npy'))
+    X = nd.array(np.load('/home/serving/cortex_ml_data/quickdraw_X_test.npy'))
+    y = nd.array(np.load('/home/serving/cortex_ml_data/quickdraw_y_test.npy'))
     val_data = gluon.data.DataLoader(
              mx.gluon.data.dataset.ArrayDataset(X, y),
             batch_size=batch_size, shuffle=False, num_workers=num_workers)

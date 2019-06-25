@@ -9,13 +9,13 @@ import sym_calib as calib
 import sim_quant_helper as sim
 import utils
 
-gz.save_model("cifar_resnet110_v1")
-#exit(0)
+version = "20_v1"
+gz.save_model("cifar_resnet"+version)
+exit(0)
 
-version = "v1"
 def load_fname(version, suffix=None, with_ext=False):
     suffix = "."+suffix if suffix is not None else ""
-    prefix = "./data/cifar_resnet110_%s%s" % (version, suffix)
+    prefix = "./data/cifar_resnet%s%s" % (version, suffix)
     return utils.extend_fname(prefix, with_ext=with_ext)
 
 batch_size = 16

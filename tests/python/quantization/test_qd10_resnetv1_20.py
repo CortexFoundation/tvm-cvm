@@ -7,16 +7,18 @@ import sym_pass as spass
 import dataset as ds
 import sym_calib as calib
 import sim_quant_helper as sim
+import ops_generator as opg
 import utils
+import mrt as _mrt
 
-version = "v2"
-#gz.save_model("cifar_resnext29_" + version )
-#exit(0)
+version = "20_v2"
+#  gz.save_model("cifar_resnet" + version )
+#  exit(0)
 
 def load_fname(version, suffix=None, with_ext=False):
     suffix = "."+suffix if suffix is not None else ""
     #prefix = "./data/cifar_resnext29_%s%s" % (version, suffix)
-    prefix = "./data/quick_raw_qd_animal10_2_cifar_resnet20_%s%s" % (version, suffix)
+    prefix = "./data/quick_raw_qd_animal10_2_cifar_resnet%s%s" % (version, suffix)
     return utils.extend_fname(prefix, with_ext=with_ext)
 
 batch_size = 16
@@ -26,7 +28,7 @@ inputs_ext = { 'data': {
 }}
 inputs = [mx.sym.var(n) for n in inputs_ext]
 calib_ctx = mx.gpu(2)
-ctx = [mx.cpu()]# [mx.gpu(int(i)) for i in "1,2,3,4,5,6,7".split(',') if i.strip()]
+ctx = [mx.gpu(int(i)) for i in "1,2,3,4,5,6".split(',') if i.strip()]
 
 utils.log_init()
 
@@ -52,30 +54,41 @@ def squeezenet(data, label):
     acc_top5.update(label, res)
     _, top5 = acc_top5.get()
     return "top1={:6.2%} top5={:6.2%}".format(top1, top5)
+if False:
+    sym, params = mx.sym.load(sym_file), nd.load(param_file)
+    infer_shapes = (spass.sym_infer_shape(sym, params, inputs_ext))
+    sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
+    inputs_ext['data']['data'] = data
+    th_dict = calib.sym_calibrate(sym, params, inputs_ext, ctx=calib_ctx)
+    qsym, qparams, precs, _ = calib.sym_simulate(sym, params, inputs_ext, th_dict)
+    qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, precs, "cvm")
+    dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
+    sim.save_ext(dump_ext, inputs_ext)
+    nd.save(dump_params, qparams)
+    open(dump_sym, "w").write(qsym.tojson())
+
+dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
+sym, params = mx.sym.load(dump_sym), nd.load(dump_params)
+(inputs_ext,) = sim.load_ext(dump_ext)
 if True:
-  sym, params = mx.sym.load(sym_file), nd.load(param_file)
-  infer_shapes = (spass.sym_infer_shape(sym, params, inputs_ext))
-  sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
-  qsym, qparams, precs, _ = calib.sym_simulate(sym, params, inputs_ext, data, calib_ctx)
-  qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, precs, "cvm")
-  dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
-  sim.save_ext(dump_ext, inputs_ext)
-  nd.save(dump_params, qparams)
-  open(dump_sym, "w").write(qsym.tojson())
-  dump_sym, dump_params, dump_ext = load_fname(version, "nnvm.compile", True)
-  dump_ext = { 'data': {
-      'shape': (1, 1, input_size, input_size)
-   }}
-  spass.mxnet_to_nnvm(qsym, qparams, dump_ext, dump_sym, dump_params)
-  dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
-  sym, params = mx.sym.load(dump_sym), nd.load(dump_params)
-  (inputs_ext,) = sim.load_ext(dump_ext)
-  inputs = [mx.sym.var(n) for n in inputs_ext]
-  net2 = utils.load_model(dump_sym, dump_params, inputs, ctx=ctx)
-  qacc_top1 = mx.metric.Accuracy()
-  qacc_top5 = mx.metric.TopKAccuracy(5)
-  qacc_top1.reset()
-  qacc_top5.reset()
+    #  data = data[0, :].reshape((1, 1, input_size, input_size))
+    _mrt.std_dump(sym, params, inputs_ext, data, "qd10_resnet20_v2",
+            batch=True,
+            dump_ops=["cifarresnetv215_stage1_bn_conv2_fwd"])
+    opg.dump_file("conv2d",
+            ["cifarresnetv215_stage1_bn_conv2_fwd_0.mrt.dump.in.npy",
+             "cifarresnetv215_stage1_bn_conv2_fwd_1.mrt.dump.in.npy",
+             "cifarresnetv215_stage1_bn_conv2_fwd_2.mrt.dump.in.npy"],
+            ["cifarresnetv215_stage1_bn_conv2_fwd_0.mrt.dump.out.npy"],
+            "cifarresnetv215_stage1_bn_conv2_fwd.attr",
+            root="/data/std_out/qd10_resnet20_v2")
+    exit()
+inputs = [mx.sym.var(n) for n in inputs_ext]
+net2 = utils.load_model(dump_sym, dump_params, inputs, ctx=ctx)
+qacc_top1 = mx.metric.Accuracy()
+qacc_top5 = mx.metric.TopKAccuracy(5)
+qacc_top1.reset()
+qacc_top5.reset()
 def cvm_quantize(data, label):
     data = sim.load_real_data(data, 'data', inputs_ext)
     data = gluon.utils.split_and_load(data, ctx_list=ctx, batch_axis=0, even_split=False)
@@ -86,30 +99,6 @@ def cvm_quantize(data, label):
     qacc_top5.update(label, res)
     _, top5 = qacc_top5.get()
     return "top1={:6.2%} top5={:6.2%}".format(top1, top5)
-
-import tvm
-from tvm.contrib import graph_runtime
-import nnvm
-# target = "cuda"
-# tvm_ctx = tvm.context(target, 2)
-# inputs_shape = {k:v['shape'] for k,v in inputs_ext.items()}
-# nnvm_sym, _ = nnvm.frontend.from_mxnet(sym)
-# nnvm_sym, real_params = spass.nnvm_realize(nnvm_sym, params, inputs_ext)
-# use_dtype = "int32"
-# for key, value in list(real_params.items()):
-#    real_params[key] = tvm.nd.array(value.asnumpy().astype(use_dtype), tvm_ctx)
-# with nnvm.compiler.build_config(opt_level=0, runtime="tvm"):
-#    deploy_graph, lib, real_params = nnvm.compiler.build(
-#        nnvm_sym, target=target, shape=inputs_shape,
-#        params=real_params, dtype=use_dtype)
-# param_bytes = nnvm.compiler.save_param_dict(real_params)
-# module = graph_runtime.create(deploy_graph, lib, tvm_ctx)
-# module.load_params(param_bytes)
-# def nnvm_real(data):
-#     data = sim.load_real_data(data, 'data', inputs_ext)
-#     module.run(data=data.asnumpy())
-#     return nd.array(module.get_output(0).asnumpy())
-
 
 utils.multi_validate(squeezenet, data_iter_func,
         cvm_quantize,

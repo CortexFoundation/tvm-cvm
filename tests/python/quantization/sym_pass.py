@@ -1,4 +1,3 @@
-import logging
 import math
 import numpy as np
 import os
@@ -92,11 +91,13 @@ def prepare_for_cvm(symbol, params, inputs_ext):
             callback=_mx_prepare)
     return psym, pparams
 
-def mxnet_to_nnvm(sym, params, inputs_ext, dump_sym, dump_params,
+def mxnet_build(sym, params, inputs_ext, dump_sym, dump_params,
         runtime="cvm", target="cuda", logger=logging):
-    tvm_ctx = tvm.context(target, 1)
-    inputs_shape = {k:v['shape'] for k,v in inputs_ext.items()}
+    nnvm_sym, nnvm_params = mxnet_to_nnvm(sym, params, logger=logging)
+    return cvm_build(nnvm_sym, nnvm_params, inputs_ext, dump_sym, dump_params,
+            runtime=runtime, target=target, logger=logger)
 
+def mxnet_to_nnvm(sym, params, inputs_ext, logger=logging):
     sym, params = prepare_for_cvm(sym, params, inputs_ext)
     nnvm_sym, _ = nnvm.frontend.from_mxnet(sym)
     # nnvm_sym, params = nnvm_realize(nnvm_sym, params, inputs_ext)
@@ -113,18 +114,29 @@ def mxnet_to_nnvm(sym, params, inputs_ext, dump_sym, dump_params,
             assert all(flat >= INT32_MIN) and all(flat <= INT32_MAX), msg
             assert all(flat.astype('int32').astype('float32') == flat), msg
             real_params[key] = tvm.nd.array(value.astype(use_dtype).asnumpy(), tvm_ctx)
+    return nnvm_sym, real_params
 
-    logger.debug("Compile mxnet graph to NNVM json")
+def cvm_build(nnvm_sym, nnvm_params, inputs_ext, dump_sym, dump_params,
+        runtime="cvm", target="cuda", logger=logging, dtype="int32"):
+    logger.debug("Compile nnvm graph to", runtime)
+    tvm_ctx = tvm.context(target, 0)
+    inputs_shape = {k:v['shape'] for k,v in inputs_ext.items()}
+    print (inputs_shape)
+
     with nnvm.compiler.build_config(opt_level=0, runtime=runtime):
         deploy_graph, lib, real_params = nnvm.compiler.build(
             nnvm_sym, target=target, shape=inputs_shape,
-            params=real_params, dtype=use_dtype)
+            params=nnvm_params, dtype=dtype)
     if runtime == "cvm":
         real_params = tvm_params_reduce(nnvm_sym, real_params, inputs_ext, tvm_ctx)
     open(dump_sym, "w").write(deploy_graph.json())
     param_bytes = nnvm.compiler.save_param_dict(real_params)
     open(dump_params, "wb").write(param_bytes)
-    return deploy_graph, real_params
+    if runtime == "cvm":
+        return deploy_graph, real_params
+    else:
+        return deploy_graph, real_params, lib
+
 
 def mxnet_to_tvm(sym, params, inputs_ext, dump_sym, dump_params,
         logger=logging):
@@ -381,6 +393,11 @@ def _sym_rewrite(sym, params, graph, inputs_ext, infer_shapes):
     elif op_name == 'Pooling':
         pool_type = attr['pool_type']
         is_global = get_attr(attr, "global_pool", False)
+        # if get_attr(attr, 'pooling_convention', 'valid') != 'valid':
+        #     logger.warn("operator %-20s name=%-40s pooling_convention set to be valid",
+        #             op_name, name)
+        #     attr['pooling_convention'] = 'valid'
+        node = get_mxnet_op(op_name)(*childs, **attr, name=name)
         if pool_type == 'avg' and is_global:
             input_name = childs[0].attr('name')
             input_shape = infer_shapes[input_name]
@@ -785,10 +802,12 @@ def sym_dump_layer_outputs(symbol, params, inputs_ext,
 
     DUMP_SUFFIX = "mrt.dump"
     NPY_SUFFIX = "npy"
+    ATTR_SUFFIX = "attr"
     logger.info("Clean datadir: %s", datadir)
     os.makedirs(datadir, exist_ok=True)
     for fname in os.listdir(datadir):
-        if fname.endswith(DUMP_SUFFIX) or fname.endswith(NPY_SUFFIX):
+        if fname.endswith(DUMP_SUFFIX) or fname.endswith(NPY_SUFFIX) or \
+        fname.endswith(ATTR_SUFFIX):
             os.remove(datadir + '/' + fname)
 
     for k, v in inputs_ext.items():
@@ -806,6 +825,8 @@ def sym_dump_layer_outputs(symbol, params, inputs_ext,
                 dump_in = "%s/%s_%d.%s.in" % (datadir, name, i, DUMP_SUFFIX)
                 out = out_cache[c.attr('name')][get_entry_id(c)].asnumpy().astype(out_dtype)
                 np.save(dump_in, out)
+            dump_attr = "%s/%s.%s" % (datadir, name, ATTR_SUFFIX)
+            open(dump_attr, "w").write(str(attr))
 
         if op_name == 'null':
             out = inputs_ext[name]['data'] if name in inputs_ext \

@@ -24,24 +24,37 @@ def verify_expand_dims():
     pass
 
 def verify_transpose():
-    dshp = (1, 2, 3)
-    data = opg.ConstantIter(iter_constraint(6), shape=dshp)
-    axes = opg.PermutationIter(list_constraint([0, 1, 2]),
-                               list_constraint([-1, 0, 1]),
-                               list_constraint([-3, -2, -1]),
-                               list_constraint([-3, 1, 2]))
-    axes = opg.ConcatIter(axes,
-                opg.NoneIter(),
-                opg.RepeatIter(IntIter(std_int_constraint(2)), 3),
-                opg.ConstantIter(list_constraint([-4, 0, 1])),
-                opg.ConstantIter(list_constraint([-1, 0, 4])),
-                opg.ConstantIter(list_constraint([0, 1])),
-                opg.ConstantIter(list_constraint([1])),
-                name="axes")
-    op_units = opg.OpUnitIter([data, axes], attr_index=1)
     def transpose(data, axes):
-        data_npy = np.array(data, dtype=INT32)
-        return [np.transpose(data_npy, axes)]
+       data_npy = np.array(data, dtype=INT32)
+       return [np.transpose(data_npy, axes)]
+    # dshp = (1, 2, 3)
+    # data = opg.ConstantIter(iter_constraint(6), shape=dshp)
+    # axes = opg.PermutationIter(list_constraint([0, 1, 2]),
+    #                            list_constraint([-1, 0, 1]),
+    #                            list_constraint([-3, -2, -1]),
+    #                            list_constraint([-3, 1, 2]))
+    # axes = opg.ConcatIter(axes,
+    #             opg.NoneIter(),
+    #             opg.RepeatIter(IntIter(std_int_constraint(2)), 3),
+    #             opg.ConstantIter(list_constraint([-4, 0, 1])),
+    #             opg.ConstantIter(list_constraint([-1, 0, 4])),
+    #             opg.ConstantIter(list_constraint([0, 1])),
+    #             opg.ConstantIter(list_constraint([1])),
+    #             name="axes")
+    # op_units = opg.OpUnitIter([data, axes], attr_index=1)
+    # op_units.eval_data("transpose", transpose, is_dump=True)
+
+
+    dshp = opg.PermutationIter(list_constraint([5, 4, 3]))
+    datas = []
+    for i in range(len(dshp)):
+        shp = dshp[i]
+        size = np.product(shp)
+        data = ConstantIter(iter_constraint(size), shape=shp)
+        datas.append(data)
+    data = ConcatIter(*datas)
+    axes = ConcatIter([[1, 2, 0]], name="axes")
+    op_units = opg.OpUnitIter([data, axes], attr_index=1)
     op_units.eval_data("transpose", transpose, is_dump=True)
 
 def verify_reshape():
@@ -78,29 +91,39 @@ def verify_concatenate():
     op_units.eval_data("concatenate", concatenate, is_dump)
 
 def verify_take():
-    dshp = (1, 2, 3)
-    data = opg.ConstantIter(opg.iter_constraint(6), shape=dshp)
-    iattr = opg.RandomVectorIter(-1, 7, 5)
-    iattr2 = opg.VectorIter(iattr, 2)
-    indices = opg.ConcatIter(iattr, iattr2)
-    axis = opg.IntIter(opg.range_constraint(-4, 4), opg.gen_non_constraint(),
-            name="axis")
-    print (len(data), len(indices), len(axis))
-    def take_func(data, indices, axis):
-        if axis == None:
-            return True
-        dim = dshp[axis % 3]
-        np_idx = np.array(indices).flatten()
-        if (np_idx > dim).any():
-            return True
-        return False
-    op_units = opg.OpUnitIter([data, indices, axis], 2, [take_func])
     def take(data, indices, axis):
         data_npy = np.array(data, dtype=INT32)
         if axis is None:
             return [np.take(data_npy, indices, mode="clip")]
         else:
             return [np.take(data_npy, indices, axis=axis, mode="clip")]
+    # dshp = (1, 2, 3)
+    # data = opg.ConstantIter(opg.iter_constraint(6), shape=dshp)
+    # iattr = opg.RandomVectorIter(-1, 7, 5)
+    # iattr2 = opg.VectorIter(iattr, 2)
+    # indices = opg.ConcatIter(iattr, iattr2)
+    # axis = opg.IntIter(opg.range_constraint(-4, 4), opg.gen_non_constraint(),
+    #         name="axis")
+    # print (len(data), len(indices), len(axis))
+    # def take_func(data, indices, axis):
+    #     if axis == None:
+    #         return True
+    #     dim = dshp[axis % 3]
+    #     np_idx = np.array(indices).flatten()
+    #     if (np_idx > dim).any():
+    #         return True
+    #     return False
+    # op_units = opg.OpUnitIter([data, indices, axis], 2, [take_func])
+    # op_units.eval_data("take", take, is_dump=True)
+
+    dshp = (2, 3)
+    data = opg.ConstantIter(opg.iter_constraint(6), shape=dshp)
+    iattr = opg.RandomVectorIter(-1, 7, 5)
+    iattr2 = opg.VectorIter(iattr, 2)
+    indices = opg.ConcatIter(iattr, iattr2)
+    axis = opg.IntIter(opg.range_constraint(-2, 2), opg.gen_non_constraint(),
+            name="axis")
+    op_units = opg.OpUnitIter([data, indices, axis], 2)
     op_units.eval_data("take", take, is_dump=True)
 
 def verify_strided_slice():
@@ -426,7 +449,7 @@ def verify_max_pool2d():
         size = np.product(dshp[i])
         arr1 = ConstantIter(rand_constraint(-127, 127, size), shape=dshp[i])
         arr2 = ConstantIter(rand_constraint(0, 127, size), shape=dshp[i])
-        datas.extend([arr1, arr2, arr3, arr4])
+        datas.extend([arr1, arr2])
     data = ConcatIter(*datas)
     print (len(data))
 
@@ -442,8 +465,8 @@ def verify_max_pool2d():
             name="padding")
     ceil_mode = BoolIter(name="ceil_mode")
     def max_pool2d(data, pool_size, strides, padding, ceil_mode):
-        if ceil_mode:
-            raise ValueError("ceil_mode must be false")
+        # if ceil_mode:
+        #     raise ValueError("ceil_mode must be false")
         data_nd = nd.array(data)
         pad = padding
         if len(padding) == 1:
@@ -462,15 +485,14 @@ def verify_max_pool2d():
         else:
             pt = pb = padding[0]
             pl = pr = padding[1]
+        if ceil_mode:
+            pb += sh - 1
+            pr += sw - 1
         pad_np = np.zeros(shape=(n, ic, ih+pt+pb, iw+pl+pr)).astype(INT32)
         no_zero = (range(n), range(ic), (range(pt, ih+pt)), (range(pl, iw+pl)))
         pad_np[np.ix_(*no_zero)] = data_npy
-        if ceil_mode:
-            bshape[2] = int(math.ceil(float(ashape[2] - kh + pt + pb) / sh) + 1)
-            bshape[3] = int(math.ceil(float(ashape[3] - kw + pl + pr) / sw) + 1)
-        else:
-            bshape[2] = int(math.floor(float(ashape[2] - kh + pt + pb) / sh) + 1)
-            bshape[3] = int(math.floor(float(ashape[3] - kw + pl + pr) / sw) + 1)
+        bshape[2] = int(math.floor(float(ashape[2] - kh + pt + pb) / sh) + 1)
+        bshape[3] = int(math.floor(float(ashape[3] - kw + pl + pr) / sw) + 1)
         _, oc, oh, ow = bshape
         b_np = np.zeros(shape=(n, oc, oh, ow)).astype(INT32)
         for i in range(oh):
@@ -508,26 +530,83 @@ def verify_upsampling():
     op_units.eval_data("upsampling", upsampling, is_dump=True)
 
 # ====== broadcast ======
-# def verify_broadcast(op_name="broadcast_add"):
-#     iattr = IntIter(shape_constraint(3))
-#     dattr = RandomIter(-127, 127)
-#     datas = []
-#     for i in range(1, 5):
-#         dshp = VectorIter(iattr, i)
-#         for j in range(len(dshp)):
-#             data = ShapeIter(dattr, shape=dshp[j])
-#             datas.append(data[0])
-#             print (dshp[j], data[0])
-# 
-#     for shp in [(4096, 256), (50, 7, 37, 42)]:
-#         data = ShapeIter(dattr, shape=shp)
-#         datas.append(data[0])
-#         print (np.array(data[0]).shape)
-# 
-#     data = ConcatIter(*datas)
-#     def broadcast(data):
-#         data_npy = np.array(data)
-#         dshp = data_npy.shape
+def verify_broadcast(op_name="broadcast_add"):
+    # iattr = IntIter(shape_constraint(3))
+    # dattr = RandomIter(-127, 127)
+    # datas = []
+    # for i in range(1, 4):
+    #     dshp = VectorIter(iattr, i)
+    #     for j in range(len(dshp)):
+    #         data = ShapeIter(dattr, shape=dshp[j])
+    #         datas.append(data)
+    # data = ConcatIter(*datas)
+
+    def cstr_func(a, b):
+        a_np, b_np = np.array(a), np.array(b)
+        ashp, bshp = a_np.shape, b_np.shape
+        adim, bdim = len(a_np.shape), len(b_np.shape)
+        tdim = min(adim, bdim)
+        for i in range(tdim):
+            ash, bsh = ashp[adim-1-i], bshp[bdim-1-i]
+            if ash > 1 and bsh > 1 and ash != bsh:
+                return False
+        return True
+
+    def broadcast(a, b):
+        a_np, b_np = np.array(a), np.array(b)
+        a_nd, b_nd = nd.array(a), nd.array(b)
+        out = getattr(nd, op_name)(a_nd, b_nd)
+        return [out]
+
+    # print (len(data))
+    # op_units = opg.OpUnitIter([data, data], 2, [cstr_func])
+    # print (len(op_units))
+    # op_units.eval_data(op_name, broadcast, is_dump=True)
+
+    attr = {}
+    dattr = RandomIter(-127, 127)
+    count = 0
+    for i in range(100):
+        # dim = random.randint(2, 4)
+        dim = 5
+        shp = [random.randint(64, 256) for _ in range(dim)]
+        while np.product(shp) > (2 ** 23):
+            rand_idx = random.randint(0, dim-1)
+            shp[rand_idx] = max(shp[rand_idx] // 2, 1)
+        while np.product(shp) < (2 ** 20):
+            rand_idx = random.randint(0, dim-1)
+            shp[rand_idx] = shp[rand_idx] * 2
+
+        adim = random.randint(1, dim)
+        bdim = random.randint(1, dim)
+        ashp = [shp[dim-adim+i] for i in range(adim)]
+        bshp = [shp[dim-bdim+i] for i in range(bdim)]
+        min_dim = min(adim, bdim)
+        for i in range(min_dim):
+            aidx, bidx = adim - min_dim + i, bdim - min_dim + i
+            rand = random.randint(0, 4)
+            if rand == 0:
+                ashp[aidx] = 1
+            elif rand == 1:
+                bshp[bidx] = 1
+        if np.product(ashp) < (2 ** 20) and np.product(bshp) < (2 ** 20):
+            tmp = shp[:dim-adim]
+            tmp.extend(ashp)
+            ashp = tmp
+
+        if np.product(ashp) < (2 ** 20) and np.product(bshp) < (2 ** 20):
+            continue
+        if count > 10:
+            break
+
+        print (shp, ashp, bshp, np.product(ashp), np.product(bshp))
+
+        a = ShapeIter(dattr, ashp)[0]
+        b = ShapeIter(dattr, bshp)[0]
+        out = broadcast(a, b)
+        opg.dump(op_name, attr, [a, b], out, None)
+        count += 1
+
 
 # ====== elemwise ======
 
@@ -749,9 +828,12 @@ if __name__ == "__main__":
     # verify_max_pool2d()
     # verify_upsampling()
 
-    # verify_broadcast()
+    verify_broadcast('broadcast_add')
+    verify_broadcast('broadcast_sub')
+    verify_broadcast('broadcast_mul')
+    verify_broadcast('broadcast_maximum')
 
     # test_load("conv2d", "ffd9ad6afc62dd7541778a81d6529c9a2735fc0a")
 
     # verify_get_valid_counts()
-    verify_non_max_suppression()
+    # verify_non_max_suppression()

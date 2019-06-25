@@ -346,6 +346,8 @@ class GraphRuntime : public ModuleNode {
         } else if (key == "attrs") {
           reader->Read(&attrs_);
           bitmask |= 16;
+        } else if (key == "version") {
+          reader->Read(&version_);
         } else if (key == "metadata") {
           break;
         } else {
@@ -400,6 +402,8 @@ class GraphRuntime : public ModuleNode {
   std::vector<NDArray> data_entry_;
   /*! \brief Operator on each node. */
   std::vector<std::function<void()> > op_execs_;
+  
+  std::string version_{std::string("cvm_1.0.0")};
 };
 
 std::vector<TVMContext> GetAllContext(const TVMArgs& args);

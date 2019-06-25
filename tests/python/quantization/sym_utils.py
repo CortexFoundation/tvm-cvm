@@ -361,7 +361,6 @@ mx_identity_ext = {
     'Pooling': {
         'pool_type': [False, 'max', 'avg'],
         'count_include_pad': [True, 'True'],
-        # 'pooling_convention': [True, 'valid'],
     },
     'Flatten': {},
     'FullyConnected': {},
