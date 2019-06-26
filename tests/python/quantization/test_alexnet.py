@@ -8,6 +8,7 @@ import dataset as ds
 import sym_calib as calib
 import sim_quant_helper as sim
 import utils
+import mrt as _mrt
 
 # gz.save_model("alexnet")
 
@@ -32,7 +33,7 @@ data_iter = ds.load_imagenet_rec(batch_size, input_size)
 def data_iter_func():
     data = data_iter.next()
     return data.data[0], data.label[0]
-#  data, _ = data_iter_func()
+data, _ = data_iter_func()
 
 sym_file, param_file = load_fname("")
 net1 = utils.load_model(sym_file, param_file, inputs, ctx=ctx)
@@ -62,6 +63,10 @@ def alexnet(data, label):
 dump_sym, dump_params, dump_ext = load_fname("", "sym.quantize", True)
 sym, params = mx.sym.load(dump_sym), nd.load(dump_params)
 (inputs_ext,) = sim.load_ext(dump_ext)
+if True:
+    _mrt.std_dump(sym, params, inputs_ext, data, "alexnet",
+            is_mxnet=True)
+    exit()
 inputs = [mx.sym.var(n) for n in inputs_ext]
 net2 = utils.load_model(dump_sym, dump_params, inputs, ctx=ctx)
 qacc_top1 = mx.metric.Accuracy()

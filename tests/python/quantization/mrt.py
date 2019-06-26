@@ -573,8 +573,8 @@ def std_dump(sym, params, inputs_ext, data, model_name,
         inputs_ext['data']['data'] = data
         spass.sym_dump_layer_outputs(sym, params, inputs_ext, datadir,
                 data_dtype=data_dtype, max_num=max_num,
-                dump_ops=dump_ops)
-        sym, params = spass.mxnet_to_nnvm(sym, params)
+                dump_ops=dump_ops, ctx=mx.gpu(0))
+        sym, params = spass.mxnet_to_nnvm(sym, params, inputs_ext)
     else:
         tvm_graph, tvm_params, lib = spass.cvm_build(sym, params, inputs_ext,
                 "/dev/null", "/dev/null", runtime="tvm",

@@ -40,7 +40,7 @@ batch_size = 1
 train_loader = mx.gluon.data.DataLoader(train_data, shuffle=True, batch_size=batch_size)
 val_loader = mx.gluon.data.DataLoader(val_data, shuffle=False, batch_size=batch_size)
 
-version = ''
+version = 'lenet'
 ctx = mx.gpu(2)
 def train_mnist():
     # Select a fixed random seed for reproducibility

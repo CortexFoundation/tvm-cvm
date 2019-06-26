@@ -105,6 +105,7 @@ def mxnet_to_nnvm(sym, params, inputs_ext, logger=logging):
     args = nnvm_sym.list_input_names()
     real_params = {}
     use_dtype = "int32"
+    tvm_ctx = tvm.context("llvm", 0)
     for key, value in params.items():
         if key not in args:
             logger.warn("key:%s not exists in graph", key)
@@ -118,7 +119,7 @@ def mxnet_to_nnvm(sym, params, inputs_ext, logger=logging):
 
 def cvm_build(nnvm_sym, nnvm_params, inputs_ext, dump_sym, dump_params,
         runtime="cvm", target="cuda", logger=logging, dtype="int32"):
-    logger.debug("Compile nnvm graph to", runtime)
+    logger.debug("Compile nnvm graph to %s", runtime)
     tvm_ctx = tvm.context(target, 0)
     inputs_shape = {k:v['shape'] for k,v in inputs_ext.items()}
     print (inputs_shape)
