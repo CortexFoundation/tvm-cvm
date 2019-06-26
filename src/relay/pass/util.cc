@@ -1,3 +1,22 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ * 
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ * 
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 /*!
  * Copyright (c) 2018 by Contributors
  *
@@ -7,6 +26,8 @@
  */
 #include <tvm/relay/pass.h>
 #include <tvm/relay/expr_functor.h>
+#include <tvm/relay/pattern_functor.h>
+#include "pass_util.h"
 #include "../ir/type_functor.h"
 
 namespace tvm {
@@ -29,7 +50,7 @@ class TypeVarTVisitor : public TypeVisitor {
   TypeVarTVisitor(
       InsertionSet<TypeVar>* type_vars,
       InsertionSet<TypeVar>* bound_type_vars)
-      : type_vars_(type_vars), bound_type_vars_(bound_type_vars) { }
+    : type_vars_(type_vars), bound_type_vars_(bound_type_vars) { }
 
   void VisitType_(const TypeVarNode* tp) final {
     TypeVar var = GetRef<TypeVar>(tp);
@@ -51,6 +72,8 @@ class TypeVarTVisitor : public TypeVisitor {
 
 class TypeVarEVisitor : private ExprVisitor {
  public:
+  explicit TypeVarEVisitor(const Module& mod) : mod_(mod) {}
+
   Array<TypeVar> CollectFree() {
     Array<TypeVar> ret;
     for (const auto& v : type_vars_.data) {
@@ -115,6 +138,16 @@ class TypeVarEVisitor : private ExprVisitor {
     ExprVisitor::VisitExpr_(f);
   }
 
+  void VisitExpr_(const ConstructorNode* cn) final {
+    // for constructors, type vars will be bound in the module
+    auto data = mod_->LookupDef(cn->belong_to);
+    for (const auto& tv : data->type_vars) {
+      type_vars_.Insert(tv);
+      bound_type_vars_.Insert(tv);
+    }
+    ExprVisitor::VisitExpr_(cn);
+  }
+
   void VisitType(const Type& t) final {
     TypeVarTVisitor(&type_vars_, &bound_type_vars_)
         .VisitType(t);
@@ -123,9 +156,10 @@ class TypeVarEVisitor : private ExprVisitor {
  private:
   InsertionSet<TypeVar> type_vars_;
   InsertionSet<TypeVar> bound_type_vars_;
+  const Module& mod_;
 };
 
-class VarVisitor : protected ExprVisitor {
+class VarVisitor : protected ExprVisitor, protected PatternVisitor {
  public:
   Array<Var> Free(const Expr& expr) {
     this->VisitExpr(expr);
@@ -138,13 +172,22 @@ class VarVisitor : protected ExprVisitor {
     return ret;
   }
 
-  Array<Var> Bound(const Expr& expr) {
-    this->VisitExpr(expr);
+  Array<Var> Collect() {
     Array<Var> ret;
     for (const auto& v : bound_vars_.data) {
       ret.push_back(v);
     }
     return ret;
+  }
+
+  Array<Var> Bound(const Expr& expr) {
+    this->VisitExpr(expr);
+    return Collect();
+  }
+
+  Array<Var> Bound(const Pattern& pat) {
+    this->VisitPattern(pat);
+    return Collect();
   }
 
   Array<Var> All(const Expr& expr) {
@@ -178,33 +221,41 @@ class VarVisitor : protected ExprVisitor {
     VisitExpr(op->body);
   }
 
+  void VisitPattern(const Pattern& p) final {
+    PatternVisitor::VisitPattern(p);
+  }
+
+  void VisitPattern_(const PatternVarNode* op) final {
+    MarkBounded(op->var);
+  }
+
  private:
   InsertionSet<Var> vars_;
   InsertionSet<Var> bound_vars_;
 };
 
-tvm::Array<TypeVar> FreeTypeVars(const Expr& expr) {
-  return TypeVarEVisitor().Free(expr);
+tvm::Array<TypeVar> FreeTypeVars(const Expr& expr, const Module& mod) {
+  return TypeVarEVisitor(mod).Free(expr);
 }
 
-tvm::Array<TypeVar> FreeTypeVars(const Type& type) {
-  return TypeVarEVisitor().Free(type);
+tvm::Array<TypeVar> FreeTypeVars(const Type& type, const Module& mod) {
+  return TypeVarEVisitor(mod).Free(type);
 }
 
-tvm::Array<TypeVar> BoundTypeVars(const Expr& expr) {
-  return TypeVarEVisitor().Bound(expr);
+tvm::Array<TypeVar> BoundTypeVars(const Expr& expr, const Module& mod) {
+  return TypeVarEVisitor(mod).Bound(expr);
 }
 
-tvm::Array<TypeVar> BoundTypeVars(const Type& type) {
-  return TypeVarEVisitor().Bound(type);
+tvm::Array<TypeVar> BoundTypeVars(const Type& type, const Module& mod) {
+  return TypeVarEVisitor(mod).Bound(type);
 }
 
-tvm::Array<TypeVar> AllTypeVars(const Expr& expr) {
-  return TypeVarEVisitor().All(expr);
+tvm::Array<TypeVar> AllTypeVars(const Expr& expr, const Module& mod) {
+  return TypeVarEVisitor(mod).All(expr);
 }
 
-tvm::Array<TypeVar> AllTypeVars(const Type& type) {
-  return TypeVarEVisitor().All(type);
+tvm::Array<TypeVar> AllTypeVars(const Type& type, const Module& mod) {
+  return TypeVarEVisitor(mod).All(type);
 }
 
 tvm::Array<Var> FreeVars(const Expr& expr) {
@@ -215,52 +266,60 @@ tvm::Array<Var> BoundVars(const Expr& expr) {
   return VarVisitor().Bound(expr);
 }
 
+tvm::Array<Var> BoundVars(const Pattern& pat) {
+  return VarVisitor().Bound(pat);
+}
+
 tvm::Array<Var> AllVars(const Expr& expr) {
   return VarVisitor().All(expr);
 }
 
 TVM_REGISTER_API("relay._ir_pass.free_vars")
-.set_body([](TVMArgs args, TVMRetValue* ret) {
-    *ret = FreeVars(args[0]);
-  });
+.set_body_typed(FreeVars);
 
 TVM_REGISTER_API("relay._ir_pass.bound_vars")
   .set_body([](TVMArgs args, TVMRetValue* ret) {
-      *ret = BoundVars(args[0]);
+      NodeRef x = args[0];
+      if (x.as_derived<ExprNode>()) {
+        *ret = BoundVars(Downcast<Expr>(x));
+      } else {
+        *ret = BoundVars(Downcast<Pattern>(x));
+      }
     });
 
 TVM_REGISTER_API("relay._ir_pass.all_vars")
-  .set_body([](TVMArgs args, TVMRetValue* ret) {
-      *ret = AllVars(args[0]);
-    });
+.set_body_typed(AllVars);
 
 TVM_REGISTER_API("relay._ir_pass.free_type_vars")
 .set_body([](TVMArgs args, TVMRetValue* ret) {
     NodeRef x = args[0];
+    Module mod = args[1];
     if (x.as_derived<TypeNode>()) {
-      *ret = FreeTypeVars(Downcast<Type>(x));
+      *ret = FreeTypeVars(Downcast<Type>(x), mod);
     } else {
-      *ret = FreeTypeVars(Downcast<Expr>(x));
+      *ret = FreeTypeVars(Downcast<Expr>(x), mod);
     }
   });
 
 TVM_REGISTER_API("relay._ir_pass.bound_type_vars")
   .set_body([](TVMArgs args, TVMRetValue* ret) {
       NodeRef x = args[0];
+      Module mod = args[1];
       if (x.as_derived<TypeNode>()) {
-        *ret = BoundTypeVars(Downcast<Type>(x));
+        *ret = BoundTypeVars(Downcast<Type>(x), mod);
       } else {
-        *ret = BoundTypeVars(Downcast<Expr>(x));
+        *ret = BoundTypeVars(Downcast<Expr>(x), mod);
       }
     });
 
 TVM_REGISTER_API("relay._ir_pass.all_type_vars")
   .set_body([](TVMArgs args, TVMRetValue* ret) {
       NodeRef x = args[0];
+      Module mod = args[1];
       if (x.as_derived<TypeNode>()) {
-        *ret = AllTypeVars(Downcast<Type>(x));
+        *ret = AllTypeVars(Downcast<Type>(x), mod);
       } else {
-        *ret = AllTypeVars(Downcast<Expr>(x));
+        *ret = AllTypeVars(Downcast<Expr>(x), mod);
       }
     });
 
@@ -342,6 +401,34 @@ bool IsAllPositiveConstant(const Expr& expr) {
   } else {
     return false;
   }
+}
+
+Type TypeSubst(const Type& type, const TypeVar& tvar, const Type& subst) {
+  return TypeSubst(type, tvm::Map<TypeVar, Type>({{tvar, subst}}));
+}
+
+Expr TypeSubst(const Expr& expr, const TypeVar& tvar, const Type& subst) {
+  return TypeSubst(expr, tvm::Map<TypeVar, Type>({{tvar, subst}}));
+}
+
+Type TypeSubst(const Type& type, const tvm::Map<TypeVar, Type>& subst_map) {
+  return Bind(type, subst_map);
+}
+
+Expr TypeSubst(const Expr& expr, const tvm::Map<TypeVar, Type>& subst_map) {
+  class TypeSubstMutator : public ExprMutator, public PatternMutator {
+   public:
+    explicit TypeSubstMutator(const tvm::Map<TypeVar, Type>& subst_map) : subst_map_(subst_map) { }
+    Type VisitType(const Type& t) final {
+      return TypeSubst(t, subst_map_);
+    }
+    Var VisitVar(const Var& v) final {
+      return Downcast<Var>(VisitExpr(v));
+    }
+   private:
+    const tvm::Map<TypeVar, Type>& subst_map_;
+  };
+  return TypeSubstMutator(subst_map).VisitExpr(expr);
 }
 
 }  // namespace relay

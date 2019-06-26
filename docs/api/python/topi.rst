@@ -1,3 +1,20 @@
+..  Licensed to the Apache Software Foundation (ASF) under one
+    or more contributor license agreements.  See the NOTICE file
+    distributed with this work for additional information
+    regarding copyright ownership.  The ASF licenses this file
+    to you under the Apache License, Version 2.0 (the
+    "License"); you may not use this file except in compliance
+    with the License.  You may obtain a copy of the License at
+
+..    http://www.apache.org/licenses/LICENSE-2.0
+
+..  Unless required by applicable law or agreed to in writing,
+    software distributed under the License is distributed on an
+    "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+    KIND, either express or implied.  See the License for the
+    specific language governing permissions and limitations
+    under the License.
+
 TOPI
 ----
 .. automodule:: topi
@@ -11,6 +28,7 @@ List of operators
    topi.negative
    topi.floor
    topi.ceil
+   topi.sign
    topi.trunc
    topi.round
    topi.abs
@@ -18,6 +36,7 @@ List of operators
    topi.tanh
    topi.log
    topi.sqrt
+   topi.rsqrt
    topi.sigmoid
    topi.clip
    topi.cast
@@ -38,9 +57,11 @@ List of operators
    topi.nn.dilate
    topi.nn.pool
    topi.nn.global_pool
+   topi.nn.adaptive_pool
    topi.nn.upsampling
    topi.nn.softmax
    topi.nn.dense
+   topi.nn.batch_matmul
    topi.nn.log_softmax
    topi.nn.conv2d_nchw
    topi.nn.conv2d_hwcn
@@ -67,6 +88,16 @@ List of operators
    topi.not_equal
    topi.greater_equal
    topi.less_equal
+   topi.all
+   topi.logical_and
+   topi.logical_or
+   topi.logical_not
+   topi.arange
+   topi.stack
+   topi.repeat
+   topi.tile
+   topi.shape
+   topi.layout_transform
    topi.image.resize
 
 
@@ -86,6 +117,7 @@ topi
 .. autofunction:: topi.identity
 .. autofunction:: topi.floor
 .. autofunction:: topi.ceil
+.. autofunction:: topi.sign
 .. autofunction:: topi.trunc
 .. autofunction:: topi.round
 .. autofunction:: topi.abs
@@ -93,6 +125,7 @@ topi
 .. autofunction:: topi.tanh
 .. autofunction:: topi.log
 .. autofunction:: topi.sqrt
+.. autofunction:: topi.rsqrt
 .. autofunction:: topi.sigmoid
 .. autofunction:: topi.clip
 .. autofunction:: topi.cast
@@ -108,6 +141,7 @@ topi
 .. autofunction:: topi.gather_nd
 .. autofunction:: topi.full
 .. autofunction:: topi.full_like
+.. autofunction:: topi.all
 .. autofunction:: topi.max
 .. autofunction:: topi.sum
 .. autofunction:: topi.min
@@ -123,6 +157,12 @@ topi
 .. autofunction:: topi.power
 .. autofunction:: topi.greater
 .. autofunction:: topi.less
+.. autofunction:: topi.arange
+.. autofunction:: topi.stack
+.. autofunction:: topi.repeat
+.. autofunction:: topi.tile
+.. autofunction:: topi.shape
+.. autofunction:: topi.layout_transform
 
 topi.nn
 ~~~~~~~
@@ -134,6 +174,7 @@ topi.nn
 .. autofunction:: topi.nn.upsampling
 .. autofunction:: topi.nn.softmax
 .. autofunction:: topi.nn.dense
+.. autofunction:: topi.nn.batch_matmul
 .. autofunction:: topi.nn.log_softmax
 .. autofunction:: topi.nn.conv2d_nchw
 .. autofunction:: topi.nn.conv2d_hwcn

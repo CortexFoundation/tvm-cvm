@@ -1,3 +1,22 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ * 
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ * 
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 /*!
  * Copyright (c) 2018 by Contributors
  *
@@ -91,8 +110,10 @@ class BranchGroupFinder : private ExprVisitor {
     CHECK(attrs_b);
     const auto* tweight_a = a->args[1]->type_as<TensorTypeNode>();
     const auto* tweight_b = b->args[1]->type_as<TensorTypeNode>();
-    const auto shape_a = ConvertLayout(tweight_a->shape, attrs_a->kernel_layout, kOIHW);
-    const auto shape_b = ConvertLayout(tweight_b->shape, attrs_b->kernel_layout, kOIHW);
+    const auto shape_a = BijectiveLayoutNode::make(
+      Layout(attrs_a->kernel_layout), kOIHW).ForwardShape(tweight_a->shape);
+    const auto shape_b = BijectiveLayoutNode::make(
+      Layout(attrs_b->kernel_layout), kOIHW).ForwardShape(tweight_b->shape);
 
     return eq(attrs_a->strides, attrs_b->strides) && eq(attrs_a->padding, attrs_b->padding) &&
            eq(attrs_a->dilation, attrs_b->dilation) && eq(attrs_a->groups, attrs_b->groups) &&
@@ -138,10 +159,15 @@ class BranchGroupFinder : private ExprVisitor {
 
 class ParallelConv2DCombiner {
  public:
+  explicit ParallelConv2DCombiner(uint64_t min_num_branches) : min_num_branches_(min_num_branches) {
+  }
+
   Expr Combine(const Expr& expr) {
     auto groups = BranchGroupFinder().Find(expr);
     for (const Group& group : groups) {
-      if (group.size() < 2) continue;
+      if (group.size() < min_num_branches_) {
+        continue;
+      }
       CombineBranches(group);
     }
     return ExprSubst(expr, std::move(subst_map_));
@@ -149,6 +175,7 @@ class ParallelConv2DCombiner {
 
  private:
   std::unordered_map<Expr, Expr, NodeHash, NodeEqual> subst_map_;
+  uint64_t min_num_branches_;
 
   std::tuple<Expr, IndexExpr> TransformWeight(const Group& branches) {
     int64_t num_filters = 0;  // number of filters of the transformed weight
@@ -322,12 +349,13 @@ class ParallelConv2DCombiner {
   }
 };
 
-Expr CombineParallelConv2D(const Expr& expr) { return ParallelConv2DCombiner().Combine(expr); }
+/*! \brief Combine parallel conv2d if number of branches >= min_num_branches */
+Expr CombineParallelConv2D(const Expr& expr, uint64_t min_num_branches) {
+  return ParallelConv2DCombiner(min_num_branches).Combine(expr);
+}
 
 TVM_REGISTER_API("relay._ir_pass.CombineParallelConv2D")
-.set_body([](TVMArgs args, TVMRetValue* ret) {
-  *ret = CombineParallelConv2D(args[0]);
-});
+.set_body_typed(CombineParallelConv2D);
 
 }  // namespace relay
 }  // namespace tvm

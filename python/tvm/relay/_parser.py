@@ -1,3 +1,19 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 # pylint: disable=invalid-name, unused-import
 """A parser for Relay's text format."""
@@ -43,8 +59,8 @@ try:
     from antlr4.tree.Tree import TerminalNode
 except ImportError:
     raise ParseError("Couldn't find ANTLR runtime." +
-                     "Try running `pip{} install antlr4-python{}-runtime`."
-                     .format(PYTHON_VERSION, PYTHON_VERSION))
+                     "Try running `pip{version} install antlr4-python{version}-runtime`."
+                     .format(version=PYTHON_VERSION))
 
 BINARY_OPS = {
     RelayParser.MUL: op.multiply,
@@ -179,33 +195,31 @@ class ParseTreeToRelayIR(RelayVisitor):
         # variables
         if node_type == RelayLexer.GLOBAL_VAR:
             return lookup(deque([self.global_var_scope]), node_text[1:])
-        elif node_type == RelayLexer.LOCAL_VAR:
+        if node_type == RelayLexer.LOCAL_VAR:
             # Remove the leading '%' and lookup the name.
             var = lookup(self.var_scopes, name)
             if var is None:
                 raise ParseError("Couldn't resolve `{}`.".format(name))
             return var
-        elif node_type == RelayLexer.GRAPH_VAR:
+        if node_type == RelayLexer.GRAPH_VAR:
             try:
                 return self.graph_expr[int(name)]
             except IndexError:
                 raise ParseError("Couldn't resolve `{}`".format(name))
 
         # data types
-        elif node_type == RelayLexer.NAT:
+        if node_type == RelayLexer.NAT:
             return int(node_text)
-        elif node_type == RelayLexer.FLOAT:
+        if node_type == RelayLexer.FLOAT:
             return float(node_text)
-        elif node_type == RelayLexer.BOOL_LIT:
+        if node_type == RelayLexer.BOOL_LIT:
             if node_text == "True":
                 return True
-            elif node_text == "False":
+            if node_text == "False":
                 return False
-            else:
-                raise ParseError("Unrecognized BOOL_LIT: `{}`".format(node_text))
+            raise ParseError("Unrecognized BOOL_LIT: `{}`".format(node_text))
 
-        else:
-            raise ParseError("todo: {}".format(node_text))
+        raise ParseError("todo: {}".format(node_text))
 
     def visit_list(self, ctx_list):
         # type: (List[ParserRuleContext]) -> List[Any]
@@ -514,6 +528,9 @@ __source_name_counter__ = 0
 def fromtext(data, source_name=None):
     # type: (str, str) -> Union[expr.Expr, module.Module]
     """Parse a Relay program."""
+    if data == "":
+        raise ParseError("Cannot parse the empty string.")
+
     global __source_name_counter__
 
     if source_name is None:

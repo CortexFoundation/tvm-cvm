@@ -1,14 +1,31 @@
+..  Licensed to the Apache Software Foundation (ASF) under one
+    or more contributor license agreements.  See the NOTICE file
+    distributed with this work for additional information
+    regarding copyright ownership.  The ASF licenses this file
+    to you under the Apache License, Version 2.0 (the
+    "License"); you may not use this file except in compliance
+    with the License.  You may obtain a copy of the License at
+
+..    http://www.apache.org/licenses/LICENSE-2.0
+
+..  Unless required by applicable law or agreed to in writing,
+    software distributed under the License is distributed on an
+    "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+    KIND, either express or implied.  See the License for the
+    specific language governing permissions and limitations
+    under the License.
+
 .. _install-from-source:
 
 Install from Source
 ===================
-This page gives instructions on how to build and install the tvm package from
+This page gives instructions on how to build and install the TVM package from
 scratch on various systems. It consists of two steps:
 
-1. First build the shared library from the C++ codes (`libtvm.so` for linux/osx and `libtvm.dll` for windows).
+1. First build the shared library from the C++ codes (`libtvm.so` for linux, `libtvm.dylib` for macOS and `libtvm.dll` for windows).
 2. Setup for the language packages (e.g. Python Package).
 
-To get started, clone tvm repo from github. It is important to clone the submodules along, with ``--recursive`` option.
+To get started, clone TVM repo from github. It is important to clone the submodules along, with ``--recursive`` option.
 
 .. code:: bash
 
@@ -28,7 +45,7 @@ Build the Shared Library
 Our goal is to build the shared libraries:
 
 - On Linux the target library are `libtvm.so, libtvm_topi.so`
-- On OSX the target library are `libtvm.dylib, libtvm_topi.dylib`
+- On macOS the target library are `libtvm.dylib, libtvm_topi.dylib`
 - On Windows the target library are `libtvm.dll, libtvm_topi.dll`
 
 
@@ -46,7 +63,7 @@ The minimal building requirements are
 - If you want to use the NNVM compiler, then LLVM is required
 
 We use cmake to build the library.
-The configuration of tvm can be modified by `config.cmake`.
+The configuration of TVM can be modified by `config.cmake`.
 
 
 - First, check the cmake in your system. If you do not have cmake,
@@ -60,7 +77,7 @@ The configuration of tvm can be modified by `config.cmake`.
 
 - Edit ``build/config.cmake`` to customize the compilation options
 
-  - On macOS, for some versions of XCode, you need to add ``-lc++abi`` in the LDFLAGS or you'll get link errors.
+  - On macOS, for some versions of Xcode, you need to add ``-lc++abi`` in the LDFLAGS or you'll get link errors.
   - Change ``set(USE_CUDA OFF)`` to ``set(USE_CUDA ON)`` to enable CUDA backend. So do other backends and libraries
     (OpenCL, RCOM, METAL, VULKAN, ...).
 
@@ -94,7 +111,7 @@ Building on Windows
 
 TVM support build via MSVC using cmake. The minimum required VS version is **Visual Studio Community 2015 Update 3**.
 In order to generate the VS solution file using cmake,
-make sure you have a recent version of cmake added to your path and then from the tvm directory:
+make sure you have a recent version of cmake added to your path and then from the TVM directory:
 
 .. code:: bash
 
@@ -142,7 +159,7 @@ Method 1
 
 
 Method 2
-   Install tvm python bindings by `setup.py`:
+   Install TVM python bindings by `setup.py`:
 
    .. code:: bash
 
@@ -162,7 +179,7 @@ Python dependencies
 
    .. code:: bash
 
-       pip install --user numpy decorator
+       pip install --user numpy decorator attrs
 
    * If you want to use RPC Tracker
 

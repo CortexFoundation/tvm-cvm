@@ -1,3 +1,19 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 import math
 import tvm
 import numpy as np
@@ -14,6 +30,10 @@ def relu(x):
     np.maximum(x_copy, 0, x_copy)
     return x_copy
 
+def rsqrt(x):
+    one = np.ones_like(x)
+    return one / np.sqrt(x)
+
 def test_unary_op():
     def check_single_op(opfunc, ref):
         shape = (10, 4)
@@ -22,7 +42,7 @@ def test_unary_op():
         x = relay.var("x", tp)
         y = opfunc(x)
         # test printer
-        assert ("%0 = {}(%x)".format(y.op.name)) in y.astext()
+        assert ("{}(%x)".format(y.op.name)) in y.astext()
         # test type inference
         assert relay.ir_pass.infer_type(y).checked_type == tp
 
@@ -39,11 +59,12 @@ def test_unary_op():
 
 
     for opfunc, ref in [(tvm.relay.log, np.log),
-                   (tvm.relay.exp, np.exp),
-                   (tvm.relay.sqrt, np.sqrt),
-                   (tvm.relay.sigmoid, sigmoid),
-                   (tvm.relay.tanh, np.tanh),
-                   (relay.nn.relu, relu)]:
+                        (tvm.relay.exp, np.exp),
+                        (tvm.relay.sqrt, np.sqrt),
+                        (tvm.relay.rsqrt, rsqrt),
+                        (tvm.relay.sigmoid, sigmoid),
+                        (tvm.relay.tanh, np.tanh),
+                        (relay.nn.relu, relu)]:
         check_single_op(opfunc, ref)
 
 
@@ -62,7 +83,7 @@ def test_binary_op():
         y = relay.var("y", t2)
         z = opfunc(x, y)
         # test printer
-        assert ("%0 = {}(%x, %y)".format(z.op.name)) in z.astext()
+        assert ("{}(%x, %y)".format(z.op.name)) in z.astext()
         assert relay.ir_pass.infer_type(z).checked_type == t1
 
         if ref is not None:
@@ -84,9 +105,9 @@ def test_binary_op():
                 np.testing.assert_allclose(op_res.asnumpy(), ref_res, rtol=0.01)
 
     for opfunc, ref in [(relay.add, np.add),
-                   (relay.subtract, np.subtract),
-                   (relay.multiply, np.multiply),
-                   (relay.divide, np.divide)]:
+                        (relay.subtract, np.subtract),
+                        (relay.multiply, np.multiply),
+                        (relay.divide, np.divide)]:
         check_binary_op(opfunc, ref)
 
 
@@ -304,7 +325,6 @@ def test_dense():
         tvm.testing.assert_allclose(op_res1.asnumpy(), ref_res, rtol=1e-5)
         op_res2 = intrp2.evaluate(func)(x_data, w_data)
         tvm.testing.assert_allclose(op_res2.asnumpy(), ref_res, rtol=1e-5)
-
 
 
 if __name__ == "__main__":

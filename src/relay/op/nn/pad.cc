@@ -1,14 +1,33 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ * 
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ * 
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 /*!
  *  Copyright (c) 2018 by Contributors
  * \file pad.cc
  * \brief Implementation of operator pad
  */
-#include <tvm/ir_operator.h>
+#include <tvm/data_layout.h>
+#include <tvm/expr_operator.h>
 #include <tvm/relay/op.h>
 #include <tvm/relay/attrs/nn.h>
 #include <topi/nn.h>
 #include <vector>
-#include "../layout.h"
 #include "../op_common.h"
 
 namespace tvm {
@@ -96,9 +115,7 @@ Expr MakePad(Expr data, Array<Array<IndexExpr> > pad_width, double pad_value) {
 }
 
 TVM_REGISTER_API("relay.op.nn._make.pad")
-.set_body([](const TVMArgs& args, TVMRetValue* rv) {
-    runtime::detail::unpack_call<Expr, 3>(MakePad, args, rv);
-  });
+.set_body_typed(MakePad);
 
 RELAY_REGISTER_OP("nn.pad")
 .describe(R"code(Pad for n-D tensor.

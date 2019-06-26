@@ -1,3 +1,22 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ * 
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ * 
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 /*!
  *  Copyright (c) 2017 by Contributors
  * \file nn.cc
@@ -506,7 +525,6 @@ inline bool PReluInferShape(const nnvm::NodeAttrs &attrs,
   NNVM_ASSIGN_INPUT_SHAPE(attrs, *in_shape, 0, dshape);
 
   // The case of parametric relu
-  CHECK_EQ(dshape.ndim(), 4) << "Input data should be 4D, but got " << dshape.ndim();
   CHECK(size_t(param.axis) < dshape.Size())
       << "Wrong axis ("  << param.axis << ")value.";
 
@@ -674,42 +692,8 @@ the input array by output[n, c, h, w, C] = data[n, C*16+c, h, w]
                     const Array<Tensor>& inputs,
                     const Array<Tensor>& outputs) {
     const LayoutTransformParam& param = nnvm::get<LayoutTransformParam>(attrs.parsed);
-
-    Layout src_layout(param.src_layout);
-    Layout dst_layout(param.dst_layout);
-
-    if (src_layout == dst_layout) {
-      return Array<Tensor>{ inputs[0] };
-    } else if (!src_layout.defined() || !dst_layout.defined()) {
-      LOG(FATAL) << "cannot convert from/to undefined layout";
-    }
-
-    CHECK(src_layout.convertible(dst_layout)) << "cannot convert from " << param.src_layout
-                                                << " to " << param.dst_layout;
-
-    return Array<Tensor> {
-      topi::layout_transform(inputs[0], outputs[0]->shape, [&](const Array<Var>& dst_indices) {
-        std::vector<Expr> dst_to_src_indices;
-        for (Layout::LayoutDim src_axis : src_layout) {
-          int dst_major_pos = dst_layout.indexof(Layout::to_superdim(src_axis));
-          int dst_minor_pos = dst_layout.indexof(Layout::to_subdim(src_axis));
-          int32_t src_factor = static_cast<int32_t>(src_layout.subsizeof(src_axis));
-          int32_t dst_factor = static_cast<int32_t>(dst_layout.subsizeof(src_axis));
-
-          Expr src_index(dst_indices[dst_major_pos]);
-          if (dst_minor_pos >= 0) {
-            CHECK_GT(dst_factor, 0);
-            src_index = src_index * dst_factor + dst_indices[dst_minor_pos];
-          }
-          if (Layout::is_superdim(src_axis) && src_factor > 0) {
-            src_index = src_index / src_factor;
-          } else if (Layout::is_subdim(src_axis) && src_factor > 0) {
-            src_index = src_index % src_factor;
-          }
-          dst_to_src_indices.push_back(src_index);
-        }
-        return Array<Expr>(dst_to_src_indices);
-      })
+    return Array<Tensor>{
+      topi::layout_transform(inputs[0], param.src_layout, param.dst_layout)
     };
 })
 .set_support_level(1);

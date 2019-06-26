@@ -1,9 +1,29 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ * 
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ * 
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 /*!
  *  Copyright (c) 2018 by Contributors
  * \file type_solver.cc
  * \brief Type solver implementations.
  */
 #include <string>
+#include <memory>
 #include "type_solver.h"
 #include "../ir/type_functor.h"
 
@@ -116,7 +136,7 @@ class TypeSolver::Unifier : public TypeFunctor<Type(const Type&, const Type&)> {
   }
 
   // default: unify only if alpha-equal
-  Type VisitTypeDefault_(const Node* op, const Type& tn) override {
+  Type VisitTypeDefault_(const Node* op, const Type& tn) final {
     NodeRef nr = GetRef<NodeRef>(op);
     Type t1 = GetRef<Type>(nr.as_derived<tvm::relay::TypeNode>());
     if (!AlphaEqual(t1, tn)) {
@@ -125,7 +145,7 @@ class TypeSolver::Unifier : public TypeFunctor<Type(const Type&, const Type&)> {
     return t1;
   }
 
-  Type VisitType_(const TupleTypeNode* op, const Type& tn) override {
+  Type VisitType_(const TupleTypeNode* op, const Type& tn) final {
     const auto* ttn = tn.as<TupleTypeNode>();
     if (!ttn || op->fields.size() != ttn->fields.size()) {
       return Type(nullptr);
@@ -142,7 +162,7 @@ class TypeSolver::Unifier : public TypeFunctor<Type(const Type&, const Type&)> {
     return TupleTypeNode::make(new_fields);
   }
 
-  Type VisitType_(const FuncTypeNode* op, const Type& tn) override {
+  Type VisitType_(const FuncTypeNode* op, const Type& tn) final {
     const auto* ftn = tn.as<FuncTypeNode>();
     if (!ftn
         || op->arg_types.size() != ftn->arg_types.size()
@@ -179,6 +199,28 @@ class TypeSolver::Unifier : public TypeFunctor<Type(const Type&, const Type&)> {
     }
 
     return FuncTypeNode::make(arg_types, ret_type, ft1->type_params, type_constraints);
+  }
+
+  Type VisitType_(const RefTypeNode* op, const Type& tn) final {
+    const auto* rtn = tn.as<RefTypeNode>();
+    if (!rtn) {
+      return Type(nullptr);
+    }
+    return RefTypeNode::make(Unify(op->value, rtn->value));
+  }
+
+  Type VisitType_(const TypeCallNode* op, const Type& tn) override {
+    const auto* tcn = tn.as<TypeCallNode>();
+    if (!tcn || tcn->args.size() != op->args.size()) {
+      return Type();
+    }
+
+    Type func = Unify(op->func, tcn->func);
+    tvm::Array<Type> args;
+    for (size_t i = 0; i < op->args.size(); i++) {
+      args.push_back(Unify(op->args[i], tcn->args[i]));
+    }
+    return TypeCallNode::make(func, args);
   }
 
  private:
@@ -255,6 +297,16 @@ class TypeSolver::Propagator : public TypeFunctor<void(const Type&)> {
 
     for (auto type_cs : ft->type_constraints) {
       Propagate(type_cs);
+    }
+  }
+
+  void VisitType_(const TypeCallNode* op) override {
+    TypeCall tc = GetRef<TypeCall>(op);
+    UpdateRelSet(tc);
+
+    Propagate(tc->func);
+    for (auto arg : tc->args) {
+      Propagate(arg);
     }
   }
 
@@ -368,11 +420,8 @@ Type TypeSolver::Unify(const Type& dst, const Type& src, const NodeRef&) {
 }
 
 void TypeSolver::ReportError(const Error& err, const NodeRef& location)  {
-    this->err_reporter_->ReportAt(
-      this->current_func,
-      location,
-      err);
-  }
+  err_reporter_->ReportAt(current_func, location, err);
+}
 
 // Add type constraint to the solver.
 void TypeSolver::AddConstraint(const TypeConstraint& constraint, const NodeRef& loc) {
@@ -411,7 +460,7 @@ Type TypeSolver::Resolve(const Type& type) {
 }
 
 bool TypeSolver::Solve() {
-  // update until queue is empty
+  // Update until queue is empty.
   while (!update_queue_.empty()) {
     RelationNode* rnode = update_queue_.front();
     const auto& rel = rnode->rel;
@@ -447,8 +496,8 @@ bool TypeSolver::Solve() {
       rnode->resolved = false;
       this->ReportError(
           RELAY_ERROR(
-            "an internal invariant was violdated while" \
-            "typechecking your program" <<
+            "an internal invariant was violated while " \
+            "typechecking your program " <<
             err.what()), rnode->location);
     }
 
@@ -486,7 +535,7 @@ TVM_REGISTER_API("relay._ir_pass._test_type_solver")
       } else if (name == "AddConstraint") {
         return TypedPackedFunc<void(TypeConstraint)>([solver](TypeConstraint c) {
             Expr e = VarNode::make("dummy_var",
-              IncompleteTypeNode::make(TypeVarNode::Kind::kType));
+              IncompleteTypeNode::make(Kind::kType));
             return solver->AddConstraint(c, e);
           });
       } else {

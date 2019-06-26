@@ -1,3 +1,22 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ * 
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ * 
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 /*!
  *  Copyright (c) 2017 by Contributors
  * \brief Compute Op.
@@ -10,6 +29,7 @@
 #include <tvm/ir_pass.h>
 #include <unordered_set>
 #include <string>
+#include <utility>
 #include "compute_op.h"
 #include "op_util.h"
 #include "../schedule/message_passing.h"
@@ -40,7 +60,7 @@ int ComputeOpNode::num_outputs() const {
   return body.size();
 }
 
-Array<IterVar> ComputeOpNode::root_iter_vars() const {
+Array<IterVar> BaseComputeOpNode::root_iter_vars() const {
   if (reduce_axis.size() == 0) return axis;
   Array<IterVar> ret = axis;
   for (IterVar iv : reduce_axis) {
@@ -54,15 +74,15 @@ Type ComputeOpNode::output_dtype(size_t idx) const {
   return body[idx].type();
 }
 
-Array<Expr> ComputeOpNode::output_shape(size_t idx) const {
+Array<Expr> BaseComputeOpNode::output_shape(size_t idx) const {
   CHECK_LT(idx, num_outputs());
-  // for now, all outputs of ComputeOp have the same shape
-  std::vector<Expr> shape;
-  for (size_t i = 0; i < axis.size(); ++i) {
-    const Range& r = axis[i]->dom;
+  // for now, all outputs of a BaseComputeOp have the same shape
+  Array<Expr> shape;
+  for (const auto& ivar : this->axis) {
+    const Range& r = ivar->dom;
     shape.push_back(r->extent);
   }
-  return Array<Expr>(shape);
+  return shape;
 }
 
 Tensor compute(Array<Expr> shape,
@@ -208,7 +228,7 @@ void ComputeOpNode::PropBoundToInputs(
   for (auto& e : body) ir::PostOrderVisit(e, fvisit);
 }
 
-void ComputeOpNode::GatherBound(
+void BaseComputeOpNode::GatherBound(
     const Operation& self,
     const std::unordered_map<Tensor, TensorDom>& tensor_dom,
     std::unordered_map<IterVar, Range>* out_dom_map) const {
@@ -225,22 +245,22 @@ void ComputeOpNode::GatherBound(
   }
 }
 
-Stmt ComputeOpNode::BuildRealize(
+Stmt BaseComputeOpNode::BuildRealize(
     const Stage& stage,
     const std::unordered_map<IterVar, Range>& realize_map,
-    const Stmt& realize_body) const {
+    const Stmt& body) const {
   CHECK_EQ(stage->op.get(), this);
   HalideIR::Internal::Region bounds;
   for (IterVar iv : this->axis) {
     bounds.push_back(realize_map.at(iv));
   }
-  Stmt realize = realize_body;
+  Stmt realize = body;
   for (int i = this->num_outputs(); i > 0; --i) {
     Tensor t = stage->op.output(i-1);
     realize = ir::Realize::make(t->op, t->value_index,
       t->dtype, bounds, const_true(), realize);
     // alignment requirement, only useful for compute
-    for (size_t i = 0; i < this->axis.size(); ++i) {
+    for (size_t i = 0; i < num_schedulable_dims(); ++i) {
       auto it = stage->iter_var_attrs.find(this->axis[i]);
       if (it != stage->iter_var_attrs.end()) {
         IterVarAttr attr = (*it).second;
@@ -257,6 +277,10 @@ Stmt ComputeOpNode::BuildRealize(
     }
   }
   return realize;
+}
+
+size_t ComputeOpNode::num_schedulable_dims() const {
+  return axis.size();
 }
 
 // Build a reduction body.
@@ -414,7 +438,7 @@ Stmt ComputeOpNode::BuildProvide(
 }
 
 ComputeLoopNest ComputeLoopNest::make(
-    const ComputeOpNode* self,
+    const BaseComputeOpNode* self,
     const Stage& stage,
     const std::unordered_map<IterVar, Range>& dom_map,
     bool debug_keep_trivial_loop) {
@@ -440,8 +464,8 @@ ComputeLoopNest ComputeLoopNest::make(
     for (IterVar iv : self->reduce_axis) {
       update_state[iv] = 2;
     }
-    for (IterVar iv : self->axis) {
-      update_state[iv] = 1;
+    for (size_t i = 0; i < self->num_schedulable_dims(); ++i) {
+      update_state[self->axis[i]] = 1;
     }
     // find which iter var is related to reduction and which is related to axis.
     schedule::PassDownBitMaskOr(stage, &update_state);

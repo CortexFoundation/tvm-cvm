@@ -1,9 +1,26 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 """Intrinsics of TVM-Python Hybrid Script for Python compilation time
 semantic support."""
 
 from .. import api as _api
 from .. import expr as _expr
 from .. import make as _make
+from .. import target as _tgt
 from ..container import Array
 from .. import ir_pass
 from ..stmt import For
@@ -45,8 +62,8 @@ def bind(func_id, args):
     _internal_assert(args.__len__() == 2, "A loop bind should only have 2 arguments!")
     _internal_assert(isinstance(args[0], str), \
                      "A loop bind's first argument should be a string!")
-    iter_var = _api.thread_axis(args[0])
     low, ext = _api.const(0, "int32"), args[1]
+    iter_var = _api.thread_axis((low, ext), args[0])
     for_type = None
     return iter_var, low, ext, for_type
 
@@ -123,7 +140,7 @@ def ceil_div(func_id, args):
     _internal_assert(isinstance(args[0], _expr.Expr), "Only expressions can div")
     _internal_assert(isinstance(args[1], _expr.Expr), "Only expressions can div")
     a, b = args[0], args[1]
-    return (a + b - 1) / b
+    return (a + b - 1) // b
 
 
 def likely(func_id, args):
@@ -131,3 +148,14 @@ def likely(func_id, args):
                      "Only one expression can be likely")
     _internal_assert(func_id == "likely", "This function cannot be directly invoked!")
     return call_pure_intrin(args[0].dtype, 'likely', *args)
+
+
+def max_num_threads(func_id, args):
+    _internal_assert(func_id == "max_num_threads", "This function cannot be directly invoked!")
+    _internal_assert(args.__len__() <= 1, "At most one argument accepted!")
+    if args.__len__() == 0:
+        res = _tgt.current_target().max_num_threads
+    else:
+        _internal_assert(isinstance(args[0], _expr.UIntImm), "In tvm bool should be uint")
+        res = _tgt.current_target(args[0].value).max_num_threads
+    return _api.convert(res)

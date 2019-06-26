@@ -1,3 +1,19 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 # pylint: disable=invalid-name,unused-variable,unused-argument
 """Winograd template for cuda backend"""
 
@@ -355,6 +371,10 @@ def _alter_conv2d_layout(attrs, inputs, tinfos, F):
     copy_inputs = [s for s in inputs]
     new_attrs = {k: attrs[k] for k in attrs.keys()}
 
+    if F.__name__ == 'tvm.relay.op':
+        # Derive channels for frontends (e.g ONNX) that miss "channel" field.
+        new_attrs["channels"] = inputs[1].checked_type.shape[attrs['kernel_layout'].index('O')]
+
     strides = attrs.get_int_tuple("strides")
     padding = attrs.get_int_tuple("padding")
     dilation = attrs.get_int_tuple("dilation")
@@ -362,7 +382,7 @@ def _alter_conv2d_layout(attrs, inputs, tinfos, F):
     data_layout_key = "data_layout" if "data_layout" in new_attrs else "layout"
     layout = attrs[data_layout_key]
     out_dtype = attrs["out_dtype"]
-    if out_dtype == "" or out_dtype == "same":
+    if out_dtype in ("", "same"):
         out_dtype = tinfos[0].dtype
 
     data, kernel = tinfos[0:2]
@@ -428,7 +448,7 @@ def _alter_conv2d_layout(attrs, inputs, tinfos, F):
         )
         dispatch_ctx.update(target, new_workload, cfg)
         return F.nn.contrib_conv2d_winograd_without_weight_transform(*copy_inputs, **new_attrs)
-    elif groups != CI:
+    if groups != CI:
         workload = autotvm.task.args_to_workload(
             [tinfos[0], tinfos[1], strides, padding, dilation, groups, out_dtype],
             group_conv2d_nchw)

@@ -1,3 +1,19 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 # pylint: disable=invalid-name, unused-variable, unused-argument, no-init
 """
 Yolo detection boxes helper functions
@@ -88,7 +104,6 @@ def _get_yolo_detections(l, im_shape, net_shape, thresh, relative, dets):
         before_correct_dets.append(detection)
     dets.extend(_correct_boxes(before_correct_dets, im_shape[0], im_shape[1],
                                net_shape[0], net_shape[1], relative))
-    return
 
 def _get_region_detections(l, im_shape, net_shape, thresh, relative, dets):
     data = l['output']
@@ -114,7 +129,6 @@ def _get_region_detections(l, im_shape, net_shape, thresh, relative, dets):
     _correct_boxes(before_correct_dets, im_shape[0], im_shape[1],
                    net_shape[0], net_shape[1], relative)
     dets.extend(before_correct_dets)
-    return
 
 def fill_network_boxes(net_shape, im_shape,
                        thresh, relative, tvm_out):
@@ -151,7 +165,7 @@ def do_nms_sort(dets, classes, thresh):
                 if _box_iou(a, b) > thresh:
                     dets[j]['prob'][k] = 0
 
-def draw_detections(im, dets, thresh, names, classes):
+def draw_detections(font_path, im, dets, thresh, names, classes):
     "Draw the markings around the detected region"
     for det in dets:
         labelstr = []
@@ -184,7 +198,7 @@ def draw_detections(im, dets, thresh, names, classes):
             if bot > imh-1:
                 bot = imh-1
             _draw_box_width(im, left, top, right, bot, width, red, green, blue)
-            label = _get_label(''.join(labelstr), rgb)
+            label = _get_label(font_path, ''.join(labelstr), rgb)
             _draw_label(im, top + width, left, label, rgb)
 
 def _get_pixel(im, x, y, c):
@@ -209,7 +223,7 @@ def _draw_label(im, r, c, label, rgb):
                         val = _get_pixel(label, i, j, k)
                         _set_pixel(im, i+c, j+r, k, val)#rgb[k] * val)
 
-def _get_label(labelstr, rgb):
+def _get_label(font_path, labelstr, rgb):
     from PIL import Image
     from PIL import ImageDraw
     from PIL import ImageFont
@@ -217,7 +231,7 @@ def _get_label(labelstr, rgb):
     text = labelstr
     colorText = "black"
     testDraw = ImageDraw.Draw(Image.new('RGB', (1, 1)))
-    font = ImageFont.truetype("arial.ttf", 25)
+    font = ImageFont.truetype(font_path, 25)
     width, height = testDraw.textsize(labelstr, font=font)
     img = Image.new('RGB', (width, height), color=(int(rgb[0]*255), int(rgb[1]*255),
                                                    int(rgb[2]*255)))

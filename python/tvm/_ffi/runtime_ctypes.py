@@ -1,3 +1,19 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 """Common runtime ctypes."""
 # pylint: disable=invalid-name
 from __future__ import absolute_import
@@ -26,7 +42,9 @@ class TypeCode(object):
     STR = 11
     BYTES = 12
     NDARRAY_CONTAINER = 13
+    OBJECT = 14
     EXT_BEGIN = 15
+
 
 class TVMByteArray(ctypes.Structure):
     """Temp data structure for byte array."""
@@ -73,6 +91,13 @@ class TVMType(ctypes.Structure):
             self.type_code = 4
             bits = 64
             head = ""
+        elif head.startswith("custom"):
+            low, high = head.find('['), head.find(']')
+            if not low or not high or low >= high:
+                raise ValueError("Badly formatted custom type string %s" % type_str)
+            type_name = head[low + 1:high]
+            self.type_code = _api_internal._datatype_get_type_code(type_name)
+            head = head[high+1:]
         else:
             raise ValueError("Do not know how to handle type %s" % type_str)
         bits = int(head) if head else bits
@@ -82,7 +107,12 @@ class TVMType(ctypes.Structure):
     def __repr__(self):
         if self.bits == 1 and self.lanes == 1:
             return "bool"
-        x = "%s%d" % (TVMType.CODE2STR[self.type_code], self.bits)
+        if self.type_code in TVMType.CODE2STR:
+            type_name = TVMType.CODE2STR[self.type_code]
+        else:
+            type_name = "custom[%s]" % \
+                        _api_internal._datatype_get_type_name(self.type_code)
+        x = "%s%d" % (type_name, self.bits)
         if self.lanes != 1:
             x += "x%d" % self.lanes
         return x
@@ -113,6 +143,7 @@ class TVMContext(ctypes.Structure):
         10: 'rocm',
         11: 'opengl',
         12: 'ext_dev',
+        27: 'cvm',
     }
     STR2MASK = {
         'llvm': 1,
@@ -133,6 +164,7 @@ class TVMContext(ctypes.Structure):
         'rocm': 10,
         'opengl': 11,
         'ext_dev': 12,
+        'cvm': 27,
     }
     def __init__(self, device_type, device_id):
         super(TVMContext, self).__init__()
@@ -240,3 +272,12 @@ class TVMArray(ctypes.Structure):
                 ("byte_offset", ctypes.c_uint64)]
 
 TVMArrayHandle = ctypes.POINTER(TVMArray)
+
+class TVMNDArrayContainer(ctypes.Structure):
+    """TVM NDArray::Container"""
+    _fields_ = [("dl_tensor", TVMArray),
+                ("manager_ctx", ctypes.c_void_p),
+                ("deleter", ctypes.c_void_p),
+                ("array_type_info", ctypes.c_int32)]
+
+TVMNDArrayContainerHandle = ctypes.POINTER(TVMNDArrayContainer)

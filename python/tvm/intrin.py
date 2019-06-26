@@ -1,3 +1,19 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 """Expression Intrinsics and math functions in TVM."""
 # pylint: disable=redefined-builtin
 from __future__ import absolute_import as _abs
@@ -244,7 +260,7 @@ def log(x):
 
 
 def sqrt(x):
-    """Take log of input x.
+    """Take square root of input x.
 
     Parameters
     ----------
@@ -257,6 +273,22 @@ def sqrt(x):
         The result.
     """
     return call_pure_intrin(x.dtype, "sqrt", x)
+
+
+def rsqrt(x):
+    """Take reciprocal of square root of input x.
+
+    Parameters
+    ----------
+    x : Expr
+        Input argument.
+
+    Returns
+    -------
+    y : Expr
+        The result.
+    """
+    return call_pure_intrin(x.dtype, "rsqrt", x)
 
 
 def floor(x):
@@ -272,7 +304,7 @@ def floor(x):
     y : Expr
         The result.
     """
-    return call_pure_intrin(x.dtype, "floor", x)
+    return _make.floor(x)
 
 
 def ceil(x):
@@ -288,7 +320,7 @@ def ceil(x):
     y : Expr
         The result.
     """
-    return call_pure_intrin(x.dtype, "ceil", x)
+    return _make.ceil(x)
 
 
 def trunc(x):
@@ -307,7 +339,7 @@ def trunc(x):
     y : Expr
         The result.
     """
-    return call_pure_intrin(x.dtype, "trunc", x)
+    return _make.trunc(x)
 
 
 def abs(x):
@@ -339,7 +371,7 @@ def round(x):
     y : Expr
         The result.
     """
-    return call_pure_intrin(x.dtype, "round", x)
+    return _make.round(x)
 
 
 def power(x, y):
@@ -495,7 +527,7 @@ def _rule_float_suffix(op):
     """
     if op.dtype == "float32":
         return call_pure_extern(op.dtype, "%sf" % op.name, *op.args)
-    elif op.dtype == "float64":
+    if op.dtype == "float64":
         return call_pure_extern(op.dtype, op.name, *op.args)
     return op
 

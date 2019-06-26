@@ -1,3 +1,19 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 # pylint: disable=invalid-name
 """Namespace for building operators."""
 from __future__ import absolute_import as _abs
@@ -33,6 +49,7 @@ class BuildConfig(object):
     defaults = {
         "opt_level": 2,
         "add_pass": None,
+        "runtime": "cvm",
     }
     def __init__(self, **kwargs):
         self._old_scope = None
@@ -105,8 +122,8 @@ def _lower(sch, inputs, func_name, graph):
     # pylint: disable=broad-except
     try:
         f = tvm.lower(sch, inputs, name=func_name)
-        logging.debug("lower function %s", func_name)
-        logging.debug("%s", tvm.lower(sch, inputs, simple_mode=True))
+        # logging.debug("lower function %s", func_name)
+        # logging.debug("%s", tvm.lower(sch, inputs, simple_mode=True))
     except Exception:
         msg = traceback.format_exc()
         msg += "Error during compile graph\n"
@@ -178,6 +195,7 @@ def optimize(graph, shape, dtype="float32", layout=None):
     if cfg.pass_enabled("FoldScaleAxis"):
         graph = graph_attr.set_shape_inputs(graph, shape)
         graph = graph.apply(["InferShape", "FoldScaleAxis"])
+
     return graph
 
 
@@ -299,12 +317,19 @@ def build(graph, target=None, shape=None, dtype="float32",
         else:
             graph._set_json_attr("opt_level", 0, "int")
         graph = graph.apply("InferShape").apply("InferType")
+        graph = graph.apply("InferPrecision")
         graph = graph.apply("GraphFindFusibleGroups")
         graph = graph.apply("GraphFuse")
         with target:
-            graph = graph.apply("GraphCompile")
-        libmod = graph_attr._move_out_module(graph, "module")
-        # Write variable initial values into params
+            if cfg.runtime == "cvm":
+                graph = graph.apply("GraphCompile")
+                libmod = None
+            elif cfg.runtime == "tvm":
+                graph = graph.apply("TVMGraphCompile")
+                libmod = graph_attr._move_out_module(graph, "module")
+            else:
+                raise TypeError("runtime %s is not supported."%cfg.runtime)
+        #Write variable initial values into params
         if init_var:
             if params is None:
                 params = {}

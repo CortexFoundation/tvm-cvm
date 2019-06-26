@@ -1,3 +1,22 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ * 
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ * 
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 /*!
  * Copyright (c) 2018 by Contributors
  * \file alter_op_layout.cc
@@ -13,6 +32,8 @@
 #include <vector>
 #include <functional>
 #include <string>
+#include <utility>
+#include <unordered_map>
 
 #include "alter_op_layout.h"
 
@@ -26,7 +47,7 @@ Expr TransformLayout(Expr raw, Layout src_layout, Layout dst_layout) {
   if (src_layout.Equals(dst_layout)) { return raw; }
   CHECK(src_layout.defined() && dst_layout.defined())
     << "Cannot insert layout transform because there are undefined layouts";
-  CHECK(src_layout.Convertible(dst_layout))
+  CHECK(BijectiveLayoutNode::make(src_layout, dst_layout).defined())
     << "Cannot insert layout transform because there are inconvertible layouts: "
     << src_layout << " v.s. " << dst_layout;
   static auto &transform_op = Op::Get("layout_transform");
@@ -34,7 +55,7 @@ Expr TransformLayout(Expr raw, Layout src_layout, Layout dst_layout) {
   attrs->src_layout = src_layout.name();
   attrs->dst_layout = dst_layout.name();
   Call transform = CallNode::make(transform_op, {raw}, Attrs{attrs});
-  return transform;
+  return std::move(transform);
 }
 
 // Memorize layout transform so we can reuse internal transformed nodes
@@ -42,7 +63,7 @@ class TransformMemorizerNode : public Node {
  public:
   // map from (Expr, src_layout, dst_layout) to transformed Expr
   using TransformKey = std::tuple<const Node*, std::string, std::string>;
-  struct key_hash : public std::unary_function<TransformKey , std::size_t> {
+struct key_hash : public std::function<std::size_t(TransformKey)> {
     std::size_t operator()(const TransformKey& k) const {
       return dmlc::HashCombine<std::string>(dmlc::HashCombine<std::string>(
               std::hash<const Node*>()(std::get<0>(k)), std::get<1>(k)), (std::get<2>(k)));

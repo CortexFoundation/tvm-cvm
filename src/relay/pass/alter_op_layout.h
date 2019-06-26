@@ -1,3 +1,22 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ * 
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ * 
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 /*!
  *  Copyright (c) 2018 by Contributors
  * \file alter_op_layout.h
@@ -9,9 +28,8 @@
 #ifndef TVM_RELAY_PASS_ALTER_OP_LAYOUT_H_
 #define TVM_RELAY_PASS_ALTER_OP_LAYOUT_H_
 
+#include <tvm/data_layout.h>
 #include <tvm/relay/expr.h>
-
-#include "../op/layout.h"
 
 namespace tvm {
 namespace relay {
@@ -78,33 +96,38 @@ inline Array<Array<Layout> > BinaryBroadcastLayout(const Attrs& attrs,
 
     if (old_in_shapes[defined_idx].size() >= old_in_shapes[undef_idx].size()) {
       layouts.Set(undef_idx,
-                  layouts[defined_idx].Sublayout(
+                  layouts[defined_idx].SubLayout(
                       old_in_shapes[defined_idx].size() - old_in_shapes[undef_idx].size(),
                       old_in_shapes[undef_idx].size()));
-      return Array<Array<Layout> > {layouts, {layouts[defined_idx]}};
+      return Array<Array<Layout> >{layouts, {layouts[defined_idx]}};
     } else {
       // only know the tensor with smaller dimensions,
       // so we cannot infer the final broadcasted output.
       // fails in this case.
-      return Array<Array<Layout> > {{Layout::Undef()}, {Layout::Undef()}};
+      return Array<Array<Layout> >{{Layout::Undef()}, {Layout::Undef()}};
     }
+  } else if (layouts[0].defined() && layouts[1].defined() &&
+            (layouts[0].ndim() == 0 || layouts[1].ndim() == 0)) {
+    int scalar = layouts[0].ndim() == 0 ? 0 : 1;
+    return Array<Array<Layout> >{layouts, {layouts[1-scalar]}};
   } else {
     // try to broadcast the tensors to the larger dimension
-    int large_idx = layouts[0].ndim_super() >= layouts[1].ndim_super() ? 0 : 1;
+    int large_idx = layouts[0].ndim_primal() >= layouts[1].ndim_primal() ? 0 : 1;
     int small_idx = 1 - large_idx;
     Layout ret = layouts[large_idx];
 
     // extract common part
     size_t i = layouts[large_idx].ndim();
     for (; i != 0; --i) {
-      auto dim = layouts[large_idx][i-1];
-      if (!layouts[small_idx].Contains(Layout::ToSuperdim(dim))) {
+      const auto& axis = layouts[large_idx][i-1];
+      if (!layouts[small_idx].Contains(axis.ToPrimal())) {
         break;
       }
     }
 
-    Layout common_part = layouts[large_idx].Sublayout(i, layouts[large_idx].ndim() - i);
-    if (!layouts[small_idx].Convertible(common_part)) {  // fail
+    Layout common_part = layouts[large_idx].SubLayout(i, layouts[large_idx].ndim() - i);
+    if (!BijectiveLayoutNode::make(layouts[small_idx], common_part).defined()) {
+      // not convertible
       return Array<Array<Layout> > {{Layout::Undef()}, {Layout::Undef()}};
     }
 

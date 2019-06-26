@@ -1,3 +1,19 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 # pylint: disable=redefined-builtin,consider-using-enumerate,no-member
 """Reduce operators"""
 from __future__ import absolute_import as _abs
@@ -47,6 +63,31 @@ def sum(data, axis=None, keepdims=False):
     ret : tvm.Tensor
     """
     return cpp.sum(data, axis, keepdims)
+
+
+def all(data, axis=None, keepdims=False):
+    """Logical AND of array elements over a given axis or a list of axes
+
+    Parameters
+    ----------
+    data : tvm.Tensor
+        The input tvm boolean tensor
+
+    axis : None or int or tuple of int
+        Axis or axes along which a logical AND is performed.
+        The default, axis=None, will perform logical AND over all elements of the input array.
+        If axis is negative it counts from the last to the first axis.
+
+    keepdims : bool
+        If this is set to True, the axes which are reduced are left in the result as dimensions
+        with size one.
+        With this option, the result will broadcast correctly against the input array.
+
+    Returns
+    -------
+    ret : tvm.Tensor
+    """
+    return cpp.all(data, axis, keepdims)
 
 
 def max(data, axis=None, keepdims=False):

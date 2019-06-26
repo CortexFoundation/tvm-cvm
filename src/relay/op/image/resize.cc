@@ -1,13 +1,32 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ * 
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ * 
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 /*!
  *  Copyright (c) 2018 by Contributors
  * \file resize.cc
  * \brief Image operators
  */
+#include <tvm/data_layout.h>
 #include <tvm/relay/op.h>
 #include <tvm/relay/attrs/image.h>
 #include <topi/elemwise.h>
 #include <topi/image/resize.h>
-#include "../layout.h"
 #include "../op_common.h"
 
 namespace tvm {
@@ -28,17 +47,18 @@ bool ResizeRel(const Array<Type>& types,
   const ResizeAttrs* param = attrs.as<ResizeAttrs>();
   CHECK(param != nullptr);
   const Layout in_layout(param->layout);
-  CHECK(in_layout.Convertible(kNCHW))
+  auto layout_converter = BijectiveLayoutNode::make(in_layout, kNCHW);
+  CHECK(layout_converter.defined())
     << "Resize only support input layouts that are convertible from NCHW."
     << " But got " << in_layout;
 
-  auto oshape = ConvertLayout(data->shape, in_layout, kNCHW);
-  oshape[2] = param->size[0];
-  oshape[3] = param->size[1];
+  auto oshape = layout_converter.ForwardShape(data->shape);
+  oshape.Set(2, param->size[0]);
+  oshape.Set(3, param->size[1]);
 
   // assign output type
   reporter->Assign(types[1],
-                   TensorTypeNode::make(ConvertLayout(oshape, kNCHW, in_layout),
+                   TensorTypeNode::make(layout_converter.BackwardShape(oshape),
                                         data->dtype));
   return true;
 }
@@ -85,9 +105,7 @@ Expr MakeResize(Expr data,
 
 
 TVM_REGISTER_API("relay.op.image._make.resize")
-.set_body([](const TVMArgs& args, TVMRetValue* rv) {
-    runtime::detail::unpack_call<Expr, 5>(MakeResize, args, rv);
-  });
+.set_body_typed(MakeResize);
 
 
 RELAY_REGISTER_OP("image.resize")

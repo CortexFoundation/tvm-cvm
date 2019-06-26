@@ -1,3 +1,19 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 #pylint: disable=no-else-return
 """The Python interface to the Relay reference interpreter."""
 from __future__ import absolute_import
@@ -8,8 +24,9 @@ from . import _backend
 from .. import _make, ir_pass
 from ... import register_func, nd
 from ..base import NodeBase, register_relay_node
-from ..expr import Call, Constant, GlobalVar, Function, const
+from ..expr import Tuple, RefCreate, Call, Constant, GlobalVar, Function, const
 from ..scope_builder import ScopeBuilder
+from . import _vm
 
 class Value(NodeBase):
     """Base class of all values.
@@ -19,6 +36,9 @@ class Value(NodeBase):
     def from_scalar(value, dtype=None):
         """Convert a Python scalar to a Relay scalar."""
         return TensorValue(const(value, dtype).data)
+
+    def to_vm(self):
+        return _vm._ValueToVM(self)
 
 
 @register_relay_node
@@ -45,10 +65,17 @@ class TupleValue(Value):
     def __iter__(self):
         return iter(self.fields)
 
+
 @register_relay_node
 class Closure(Value):
     """A closure produced by the interpreter."""
-    pass
+
+
+@register_relay_node
+class ConstructorValue(Value):
+    def __init__(self, constructor, fields, types):
+        self.__init_handle_by_constructor__(
+            _make.ConstructorValue, constructor, fields, types)
 
 
 @register_relay_node
@@ -79,9 +106,22 @@ class TensorValue(Value):
         return str(self.data)
 
 
+@register_relay_node
+class RefValue(Value):
+    def __init__(self, value):
+        self.__init_handle_by_constructor__(
+            _make.RefValue, value)
+
+
 def _arg_to_ast(arg):
     if isinstance(arg, TensorValue):
-        return Constant(arg.data.copyto(_nd.cpu(0)))
+        return Constant(arg.data.copyto(nd.cpu(0)))
+    elif isinstance(arg, TupleValue):
+        return Tuple([_arg_to_ast(field) for field in arg.fields])
+    elif isinstance(arg, RefValue):
+        return RefCreate(_arg_to_ast(arg.value))
+    elif isinstance(arg, ConstructorValue):
+        return Call(arg.constructor, [_arg_to_ast(field) for field in arg.fields])
     elif isinstance(arg, np.ndarray):
         return Constant(nd.array(arg))
     elif isinstance(arg, Constant):
@@ -236,12 +276,15 @@ class Interpreter(Executor):
             The optimized expression.
         """
         # TODO: We need to move this optimization code into the optimizer/pass manager
-        ck_expr = ir_pass.infer_type(expr, mod=self.mod)
+        wrapped_expr = expr if isinstance(expr, Function) else Function([], expr)
+        if self.mod:
+            self.mod[self.mod.entry_func] = wrapped_expr
+        ck_expr = ir_pass.infer_type(wrapped_expr, mod=self.mod)
         simp_expr = ir_pass.simplify_inference(ck_expr)
         ck_simp = ir_pass.infer_type(simp_expr, mod=self.mod)
-        fused_expr = ir_pass.fuse_ops(ck_simp)
+        fused_expr = ir_pass.fuse_ops(ck_simp, 0, mod=self.mod)
         ck_fused = ir_pass.infer_type(fused_expr, mod=self.mod)
-        return ck_fused
+        return ck_fused if isinstance(expr, Function) else Call(ck_fused, [])
 
     def _make_executor(self, expr):
         def _interp_wrapper(*args, **kwargs):

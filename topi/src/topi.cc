@@ -1,3 +1,22 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 /*!
 *  Copyright (c) 2017 by Contributors
 * \brief Registration of TVM operators and schedules
@@ -17,7 +36,7 @@
 #include <topi/reduction.h>
 #include <topi/transform.h>
 
-#include <topi/nn/batch_norm.h>
+#include <topi/nn/bias_add.h>
 #include <topi/nn/bnn.h>
 #include <topi/nn/dense.h>
 #include <topi/nn/dilate.h>
@@ -28,10 +47,10 @@
 #include <topi/nn/upsampling.h>
 #include <topi/nn/l2_normalize.h>
 #include <topi/nn/local_response_norm.h>
+#include <topi/nn/batch_matmul.h>
 
 #include <topi/vision/reorg.h>
 #include <topi/image/resize.h>
-#include <topi/vision/yolo/region.h>
 #include <topi/generic/default.h>
 #include <topi/generic/extern.h>
 #include <topi/generic/injective.h>
@@ -42,7 +61,6 @@
 #include <topi/cuda/pooling.h>
 #include <topi/cuda/reduction.h>
 #include <topi/cuda/softmax.h>
-#include <topi/cuda/vision.h>
 #include <topi/cuda/normalization.h>
 
 #include <topi/x86/bnn.h>
@@ -50,7 +68,6 @@
 #include <topi/x86/injective.h>
 
 #include <topi/rocm/dense.h>
-#include <topi/rocm/vision.h>
 #include <topi/rocm/normalization.h>
 
 namespace topi {
@@ -115,6 +132,8 @@ TOPI_REGISTER_BCAST_OP("topi.maximum", topi::maximum);
 TOPI_REGISTER_BCAST_OP("topi.minimum", topi::minimum);
 TOPI_REGISTER_BCAST_OP("topi.power", topi::power);
 TOPI_REGISTER_BCAST_OP("topi.left_shift", topi::left_shift);
+TOPI_REGISTER_BCAST_OP("topi.logical_and", topi::logical_and);
+TOPI_REGISTER_BCAST_OP("topi.logical_or", topi::logical_or);
 TOPI_REGISTER_BCAST_OP("topi.right_shift", topi::right_shift);
 TOPI_REGISTER_BCAST_OP("topi.greater", topi::greater);
 TOPI_REGISTER_BCAST_OP("topi.less", topi::less);
@@ -144,6 +163,11 @@ TVM_REGISTER_GLOBAL("topi.sqrt")
   *rv = sqrt(args[0]);
   });
 
+TVM_REGISTER_GLOBAL("topi.rsqrt")
+.set_body([](TVMArgs args, TVMRetValue *rv) {
+*rv = rsqrt(args[0]);
+});
+
 TVM_REGISTER_GLOBAL("topi.log")
 .set_body([](TVMArgs args, TVMRetValue *rv) {
   *rv = log(args[0]);
@@ -172,6 +196,11 @@ TVM_REGISTER_GLOBAL("topi.cast")
 TVM_REGISTER_GLOBAL("topi.elemwise_sum")
 .set_body([](TVMArgs args, TVMRetValue *rv) {
   *rv = elemwise_sum(args[0]);
+  });
+
+TVM_REGISTER_GLOBAL("topi.sign")
+.set_body([](TVMArgs args, TVMRetValue *rv) {
+  *rv = sign(args[0]);
   });
 
 TVM_REGISTER_GLOBAL("topi.full")
@@ -236,6 +265,11 @@ TVM_REGISTER_GLOBAL("topi.prod")
   *rv = topi::prod(args[0], ArrayOrInt(args[1]), args[2]);
   });
 
+TVM_REGISTER_GLOBAL("topi.all")
+.set_body([](TVMArgs args, TVMRetValue *rv) {
+  *rv = topi::all(args[0], ArrayOrInt(args[1]), args[2]);
+  });
+
 /* Ops from transform.h */
 TVM_REGISTER_GLOBAL("topi.expand_dims")
 .set_body([](TVMArgs args, TVMRetValue *rv) {
@@ -267,6 +301,16 @@ TVM_REGISTER_GLOBAL("topi.concatenate")
   *rv = concatenate(args[0], args[1]);
   });
 
+TVM_REGISTER_GLOBAL("topi.stack")
+.set_body([](TVMArgs args, TVMRetValue *rv) {
+  *rv = stack(args[0], args[1]);
+});
+
+TVM_REGISTER_GLOBAL("topi.shape")
+.set_body([](TVMArgs args, TVMRetValue *rv) {
+  *rv = shape(args[0], args[1]);
+});
+
 TVM_REGISTER_GLOBAL("topi.split")
 .set_body([](TVMArgs args, TVMRetValue *rv) {
   if (args[1].type_code() == kDLInt || args[1].type_code() == kDLUInt) {
@@ -274,21 +318,43 @@ TVM_REGISTER_GLOBAL("topi.split")
   } else {
     *rv = split(args[0], args[1], args[2]);
   }
-  });
+});
+
+TVM_REGISTER_GLOBAL("topi.layout_transform")
+.set_body([](TVMArgs args, TVMRetValue *rv) {
+  *rv = layout_transform(args[0], args[1], args[2]);
+});
 
 TVM_REGISTER_GLOBAL("topi.take")
 .set_body([](TVMArgs args, TVMRetValue *rv) {
-  if (args.size() == 2) {
-    *rv = take(args[0], args[1]);
+  if (args.size() == 3) {
+    std::string mode = args[2];
+    *rv = take(args[0], args[1], mode);
   } else {
     int axis = args[2];
-    *rv = take(args[0], args[1], axis);
+    std::string mode = args[3];
+    *rv = take(args[0], args[1], axis, mode);
   }
   });
 
 TVM_REGISTER_GLOBAL("topi.where")
 .set_body([](TVMArgs args, TVMRetValue *rv) {
   *rv = where(args[0], args[1], args[2]);
+});
+
+TVM_REGISTER_GLOBAL("topi.arange")
+.set_body([](TVMArgs args, TVMRetValue *rv) {
+  *rv = arange(args[0], args[1], args[2], args[3]);
+});
+
+TVM_REGISTER_GLOBAL("topi.repeat")
+.set_body([](TVMArgs args, TVMRetValue *rv) {
+  *rv = repeat(args[0], args[1], args[2]);
+});
+
+TVM_REGISTER_GLOBAL("topi.tile")
+.set_body([](TVMArgs args, TVMRetValue *rv) {
+  *rv = tile(args[0], args[1]);
 });
 
 TVM_REGISTER_GLOBAL("topi.gather_nd")
@@ -328,18 +394,6 @@ TVM_REGISTER_GLOBAL("topi.nn.upsampling")
   *rv = nn::upsampling(args[0], args[1], args[2], args[3]);
   });
 
-/* Ops from nn/batch_norm.h */
-TVM_REGISTER_GLOBAL("topi.nn.batch_norm_inference")
-.set_body([](TVMArgs args, TVMRetValue *rv) {
-  *rv = nn::batch_norm_inference(args[0],
-                                 args[1],
-                                 args[2],
-                                 args[3],
-                                 args[4],
-                                 static_cast<double>(args[5]),
-                                 args[6]);
-  });
-
 /* Ops from nn/bnn.h */
 TVM_REGISTER_GLOBAL("topi.nn.binarize_pack")
 .set_body([](TVMArgs args, TVMRetValue *rv) {
@@ -354,7 +408,19 @@ TVM_REGISTER_GLOBAL("topi.nn.binary_dense")
 /* Ops from nn/dense.h */
 TVM_REGISTER_GLOBAL("topi.nn.dense")
 .set_body([](TVMArgs args, TVMRetValue *rv) {
-  *rv = nn::dense(args[0], args[1], args[2]);
+  *rv = nn::dense(args[0], args[1], args[2], args[3]);
+  });
+
+/* Ops from nn/bias_add.h */
+TVM_REGISTER_GLOBAL("topi.nn.bias_add")
+.set_body([](TVMArgs args, TVMRetValue *rv) {
+  *rv = nn::bias_add(args[0], args[1], args[2]);
+  });
+
+/* Ops from nn/batch_matmul.h */
+TVM_REGISTER_GLOBAL("topi.nn.batch_matmul")
+.set_body([](TVMArgs args, TVMRetValue *rv) {
+  *rv = nn::batch_matmul(args[0], args[1]);
   });
 
 /* Ops from nn/dilate.h */
@@ -394,6 +460,13 @@ TVM_REGISTER_GLOBAL("topi.nn.global_pool")
                         static_cast<nn::PoolType>(static_cast<int>(args[1])));
   });
 
+TVM_REGISTER_GLOBAL("topi.nn.adaptive_pool")
+.set_body([](TVMArgs args, TVMRetValue *rv) {
+  *rv = nn::adaptive_pool(args[0], args[1],
+                          static_cast<nn::PoolType>(static_cast<int>(args[2])),
+                          args[3]);
+});
+
 /* Ops from nn/softmax.h */
 TVM_REGISTER_GLOBAL("topi.nn.softmax")
 .set_body([](TVMArgs args, TVMRetValue *rv) {
@@ -422,11 +495,6 @@ TVM_REGISTER_GLOBAL("topi.nn.lrn")
 TVM_REGISTER_GLOBAL("topi.vision.reorg")
 .set_body([](TVMArgs args, TVMRetValue *rv) {
   *rv = vision::reorg(args[0], args[1]);
-  });
-
-TVM_REGISTER_GLOBAL("topi.vision.yolo.region")
-.set_body([](TVMArgs args, TVMRetValue *rv) {
-  *rv = vision::yolo::region(args[0], args[1], args[2], args[3], args[4], args[5]);
   });
 
 /* Ops from image/resize.h */
@@ -488,17 +556,12 @@ TVM_REGISTER_GLOBAL("topi.x86.schedule_injective")
 /* ROCm schedules */
 TVM_REGISTER_GLOBAL("topi.rocm.dense_cuda")
 .set_body([](TVMArgs args, TVMRetValue *rv) {
-  *rv = rocm::dense_rocm(args[0], args[1], args[2], args[3]);
+  *rv = rocm::dense_rocm(args[0], args[1], args[2], args[3], args[4]);
   });
 
 TVM_REGISTER_GLOBAL("topi.rocm.schedule_dense")
 .set_body([](TVMArgs args, TVMRetValue *rv) {
   *rv = topi::rocm::schedule_dense(args[0], args[1]);
-  });
-
-TVM_REGISTER_GLOBAL("topi.rocm.schedule_region")
-.set_body([](TVMArgs args, TVMRetValue *rv) {
-  *rv = topi::rocm::schedule_region(args[0], args[1]);
   });
 
 TVM_REGISTER_GLOBAL("topi.rocm.schedule_lrn")
@@ -514,7 +577,7 @@ TVM_REGISTER_GLOBAL("topi.rocm.schedule_l2_normalize")
 /* CUDA schedules */
 TVM_REGISTER_GLOBAL("topi.cuda.dense_cuda")
 .set_body([](TVMArgs args, TVMRetValue *rv) {
-  *rv = cuda::dense_cuda(args[0], args[1], args[2], args[3]);
+  *rv = cuda::dense_cuda(args[0], args[1], args[2], args[3], args[4]);
   });
 
 TVM_REGISTER_GLOBAL("topi.cuda.schedule_dense")
@@ -550,11 +613,6 @@ TVM_REGISTER_GLOBAL("topi.cuda.schedule_reduce")
 TVM_REGISTER_GLOBAL("topi.cuda.schedule_softmax")
 .set_body([](TVMArgs args, TVMRetValue *rv) {
   *rv = topi::cuda::schedule_softmax(args[0], args[1]);
-  });
-
-TVM_REGISTER_GLOBAL("topi.cuda.schedule_region")
-.set_body([](TVMArgs args, TVMRetValue *rv) {
-  *rv = topi::cuda::schedule_region(args[0], args[1]);
   });
 
 TVM_REGISTER_GLOBAL("topi.cuda.schedule_lrn")
@@ -610,6 +668,9 @@ TVM_REGISTER_GENERIC_FUNC(schedule_dense)
 .register_func({ "cuda", "gpu" }, WrapSchedule(topi::cuda::schedule_dense))
 .register_func({ "rocm" }, WrapSchedule(topi::rocm::schedule_dense));
 
+TVM_REGISTER_GENERIC_FUNC(schedule_batch_matmul)
+.set_default(WrapSchedule(topi::generic::default_schedule));
+
 TVM_REGISTER_GENERIC_FUNC(schedule_pool)
 .set_default(WrapSchedule(topi::generic::default_schedule))
 .register_func({ "cpu" }, WrapSchedule(topi::x86::default_schedule))
@@ -637,7 +698,8 @@ TVM_REGISTER_GENERIC_FUNC(schedule_binary_dense)
 using FTVMDenseOpBuilder = std::function<tvm::Tensor(const Target& target,
                                                      const tvm::Tensor& data,
                                                      const tvm::Tensor& weight,
-                                                     const tvm::Tensor& bias)>;
+                                                     const tvm::Tensor& bias,
+                                                     const Type& out_dtype)>;
 
 /*!
 * \brief Helper function for registering dense ops matching the
@@ -654,8 +716,9 @@ inline PackedFunc WrapDenseOp(FTVMDenseOpBuilder builder) {
     Tensor data = args[0];
     Tensor weight = args[1];
     Tensor bias = args[2];
+    Type out_dtype = args[3];
 
-    *ret = builder(target, data, weight, bias);
+    *ret = builder(target, data, weight, bias, out_dtype);
   });
 }
 
@@ -663,8 +726,9 @@ TVM_REGISTER_GENERIC_FUNC(dense)
 .set_default(WrapDenseOp([](const Target& target,
                             const tvm::Tensor& data,
                             const tvm::Tensor& weight,
-                            const tvm::Tensor& bias) {
-  return topi::nn::dense(data, weight, bias);
+                            const tvm::Tensor& bias,
+                            const Type& out_dtype) {
+  return topi::nn::dense(data, weight, bias, out_dtype);
 }))
 .register_func({ "cuda", "gpu" }, WrapDenseOp(topi::cuda::dense_cuda))
 .register_func({ "rocm" }, WrapDenseOp(topi::rocm::dense_rocm));

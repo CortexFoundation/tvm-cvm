@@ -1,3 +1,19 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 import tvm, inspect, sys, traceback, numpy, nose, types, os
 from tvm.contrib import util
 from tvm.hybrid import script
@@ -300,6 +316,7 @@ def test_bind():
     if not tvm.gpu(0).exist:
         print('[Warning] No GPU found! Skip bind test!')
         return
+
     @script
     def vec_add(a, b):
         c = output_tensor((1000, ), 'float32')
@@ -326,23 +343,45 @@ def test_bind():
     func, ins, outs = run_and_check(raw, [a, b], sch=sch, outs=[c], target='cuda')
     run_and_check(func, ins, outs=outs, target='cuda')
 
-    # Test loop binds
+
     @tvm.hybrid.script
-    def goo(a, b):
-        c = output_tensor(a.shape, a.dtype)
-        len_b = len(b)
-        for i in const_range(len_b * 2):
-            if i < len_b:
-                c[i] = a[i] + b[i]
-            else:
-                c[i - len_b] = a[i - len_b] + b[i - len_b]
+    def foo(a):
+        c = output_tensor((a.shape[0],), a.dtype)
+        total = allocate((1,), a.dtype, 'local')
+        len_i = a.shape[0]
+        len_j = a.shape[1]
+        for i in bind('threadIdx.x', len_i):
+            total[0] = 0.
+            for k in const_range(len_j):
+                total[0] += a[i, k]
+            c[i] = total[0]
+
         return c
-    a = tvm.placeholder((5, ), name='a', dtype='int32')
-    b = [1, 2, 3, 4, 5]
-    c = goo(a, tvm.convert(b))
-    sch = tvm.create_schedule(c.op)
-    func, ins, outs = run_and_check(goo, [a, b], sch=sch, outs=[c])
-    run_and_check(func, ins, outs=outs)
+
+    a = tvm.placeholder((8, 4), 'float32')
+    c = foo(a)
+    s = tvm.create_schedule(c.op)
+    ir = tvm.lower(s, [a, c], simple_mode=True)
+    assert not isinstance(ir, tvm.stmt.AttrStmt)
+    func, ins, outs = run_and_check(foo, [a], target='cuda')
+    run_and_check(func, ins, outs=outs, target='cuda')
+
+    @tvm.hybrid.script
+    def max_threads(a):
+        b = output_tensor(a.shape, a.dtype)
+        n = a.shape[0]
+        m = max_num_threads(True)
+        for i in bind('threadIdx.x', m):
+            for j in bind('blockIdx.x', ceil_div(n, m)):
+                if i * m + j < n:
+                    b[i * m + j] = a[i * m + j] + a[i * m + j]
+        return b
+
+    a = tvm.placeholder((10000, ), 'float32')
+    with tvm.target.create('cuda'):
+        func, ins, outs = run_and_check(max_threads, [a], target='cuda')
+        run_and_check(func, ins, outs=outs, target='cuda')
+
 
 def test_math_intrin():
     @script
@@ -455,6 +494,7 @@ def test_allocate():
 
         a = tvm.placeholder((256, ), dtype='float32', name='a')
         b = tvm.placeholder((256, ), dtype='float32', name='b')
+        c = share_vec_add(a, b)
         func, ins, outs = run_and_check(share_vec_add, [a, b], target='cuda')
         run_and_check(func, ins, outs=outs, target='cuda')
     else:
@@ -498,7 +538,7 @@ def test_downstream():
             b[i] = a[i] * i
         return b
 
-    
+
     a = tvm.placeholder((20, ), 'float32')
     b = downstream(a)
     c = tvm.compute((20, ), lambda x: b[x] + 1.0)
@@ -728,6 +768,24 @@ def test_schedule():
 
     # Test loop binds
 
+def test_capture():
+    n = 8
+
+    constant_tuple = (10, n)
+    constant_list = [[1, 2], [3, n]]
+    const_value = 1
+
+    @tvm.hybrid.script
+    def add_something(a):
+        c = output_tensor((constant_tuple[1],), 'int32')
+        for i in range(constant_tuple[1]):
+            c[i] = a[i] + constant_list[1][const_value]
+        return c
+
+    a = tvm.placeholder((n, ), dtype='int32', name='a')
+
+    func, ins, outs = run_and_check(add_something, [a])
+    run_and_check(func, ins, outs=outs)
 
 if __name__ == "__main__":
     test_outer_product()
@@ -746,5 +804,6 @@ if __name__ == "__main__":
     test_bool()
     test_const_range()
     test_schedule()
+    test_capture()
     # TODO:
     # test_inplace()

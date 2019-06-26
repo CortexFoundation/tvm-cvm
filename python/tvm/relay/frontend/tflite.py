@@ -1,8 +1,25 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 # pylint: disable=invalid-name, unused-argument
 """Tensorflow lite frontend."""
 from __future__ import absolute_import as _abs
 import math
 import numpy as np
+import tvm
 from .. import ir_pass
 from .. import expr as _expr
 from .. import op as _op
@@ -35,6 +52,8 @@ class OperatorConverter(object):
         self.builtin_op_code = build_str_map(BuiltinOperator())
         self.activation_fn_type = build_str_map(ActivationFunctionType())
         self.builtin_options = build_str_map(BuiltinOptions())
+
+        # Add more operators
         self.convert_map = {
             'CONV_2D': self.convert_conv2d,
             'DEPTHWISE_CONV_2D': self.convert_depthwise_conv2d,
@@ -43,7 +62,9 @@ class OperatorConverter(object):
             'SOFTMAX': self.convert_softmax,
             'SQUEEZE': self.convert_squeeze,
             'MAX_POOL_2D': self.convert_max_pool2d,
-            # Add more operators
+            'CONCATENATION': self.convert_concatenation,
+            'ADD': self.convert_add,
+            'FULLY_CONNECTED': self.convert_fully_connected,
         }
 
     def check_unsupported_ops(self):
@@ -57,8 +78,10 @@ class OperatorConverter(object):
                 unsupported_ops_set.add(op_code_str)
 
         if unsupported_ops_set:
-            raise NotImplementedError("Unsupported Ops: %s" % (
-                ','.join(unsupported_ops_set)))
+            msg = 'The following operators are not supported in frontend ' \
+                  'TFLite: {}'
+            ops = str(list(unsupported_ops_set)).strip('[,]')
+            raise tvm.error.OpNotImplemented(msg.format(ops))
 
     def convert_op_to_relay(self):
         """Convert TFLite ops to relay ops"""
@@ -126,15 +149,14 @@ class OperatorConverter(object):
         if tensor_wrapper.tensor.Type() == TensorType.UINT8:
             return np.frombuffer(tensor_wrapper.buffer.DataAsNumpy(), dtype=np.uint8).reshape(
                 tensor_wrapper.tensor.ShapeAsNumpy())
-        elif tensor_wrapper.tensor.Type() == TensorType.FLOAT32:
+        if tensor_wrapper.tensor.Type() == TensorType.FLOAT32:
             return np.frombuffer(tensor_wrapper.buffer.DataAsNumpy(), dtype=np.float32).reshape(
                 tensor_wrapper.tensor.ShapeAsNumpy())
-        elif tensor_wrapper.tensor.Type() == TensorType.INT32:
+        if tensor_wrapper.tensor.Type() == TensorType.INT32:
             return np.frombuffer(tensor_wrapper.buffer.DataAsNumpy(), dtype=np.int32).reshape(
                 tensor_wrapper.tensor.ShapeAsNumpy())
-        else:
-            raise NotImplementedError("Not support tensor type {}"
-                                      .format(str(tensor_wrapper.tensor.Type())))
+        raise NotImplementedError("Not support tensor type {}"
+                                  .format(str(tensor_wrapper.tensor.Type())))
 
     def get_tensor_type_str(self, tensor_type):
         """Get tensor type string representation when given TFLite tensor type"""
@@ -145,12 +167,11 @@ class OperatorConverter(object):
 
         if tensor_type == TensorType.UINT8:
             return "uint8"
-        elif tensor_type == TensorType.FLOAT32:
+        if tensor_type == TensorType.FLOAT32:
             return "float32"
-        elif tensor_type == TensorType.INT32:
+        if tensor_type == TensorType.INT32:
             return "int32"
-        else:
-            raise NotImplementedError("Not support tensor type {}".format(str(tensor_type)))
+        raise NotImplementedError("Not support tensor type {}".format(str(tensor_type)))
 
     def convert_conv2d(self, op):
         """Convert TFLite conv2d"""
@@ -188,43 +209,9 @@ class OperatorConverter(object):
         reshape_options = ReshapeOptions()
         reshape_options.Init(op_options.Bytes, op_options.Pos)
         target_shape = reshape_options.NewShapeAsNumpy()
-        input_shape_length = len(input_tensor.tensor.ShapeAsNumpy())
 
         in_expr = self.get_expr(input_tensor_idx)
-
-        if input_shape_length == 1 or input_shape_length == 2:
-            # The rule is channel first (after N but before H, W).
-            # length of 1 means N*H*W*C, do nothing.
-            # length of 2 means N*H*W, C, do nothing.
-            pass
-        elif input_shape_length == 3:
-            # convert N C H*W to N H*W C
-            in_expr = _op.transpose(in_expr, axes=(0, 2, 1))
-        elif input_shape_length == 4:
-            # convert input to N H W C, then reshape to target shape,
-            # finally convert back if necessary
-            in_expr = _op.transpose(in_expr, axes=(0, 2, 3, 1))
-        else:
-            raise NotImplementedError("Not support input shape length {} of reshape : "
-                                      .format(str(input_shape_length)))
-
         out = _op.reshape(in_expr, newshape=tuple(target_shape))
-
-        # The rule is channel first.
-        # 1: N*H*W*C
-        # 2: N*H*W, C
-        # 3: N H W C, reshape to N H*W C, transpose to N C H*W
-        # 4: N H W C, transpose to N C H W
-        # add more if we need target shapes in future
-        if len(target_shape) == 1 or len(target_shape) == 2:
-            pass
-        elif len(target_shape) == 3:
-            out = _op.transpose(out, axes=(0, 2, 1))
-        elif len(target_shape) == 4:
-            out = _op.transpose(out, axes=(0, 3, 1, 2))
-        else:
-            raise NotImplementedError("Not support to reshape to shape length {}: "
-                                      .format(str(len(target_shape))))
 
         return out
 
@@ -244,6 +231,133 @@ class OperatorConverter(object):
         params = {'axis': 1}  # 1 is channel
         in_expr = self.get_expr(input_tensor_idx)
         out = _op.nn.softmax(in_expr, **params)
+
+        return out
+
+    def convert_concatenation(self, op):
+        """Convert TFLite concatenation"""
+        try:
+            from tflite.Operator import Operator
+            from tflite.ConcatenationOptions import ConcatenationOptions
+            from tflite.BuiltinOptions import BuiltinOptions
+            from tflite.ActivationFunctionType import ActivationFunctionType
+        except ImportError:
+            raise ImportError("The tflite package must be installed")
+
+        assert isinstance(op, Operator)
+        input_tensors = self.get_input_tensors(op)
+        assert len(input_tensors) >= 1, "input tensors should greater than 1"
+        in_exprs = [self.get_expr(input_tensor.tensor_idx) for input_tensor in input_tensors]
+
+        output_tensors = self.get_output_tensors(op)
+        assert len(output_tensors) == 1, "output tensors should be 1"
+
+        assert op.BuiltinOptionsType() == BuiltinOptions.ConcatenationOptions
+        op_options = op.BuiltinOptions()
+        concatenation_options = ConcatenationOptions()
+        concatenation_options.Init(op_options.Bytes, op_options.Pos)
+        concatenation_axis = concatenation_options.Axis()
+        fused_activation_fn = concatenation_options.FusedActivationFunction()
+
+        # with axis in N H W C
+        out = _op.concatenate(in_exprs, axis=concatenation_axis)
+
+        # if we have activation fn
+        if fused_activation_fn != ActivationFunctionType.NONE:
+            out = self.convert_fused_activation_function(out, fused_activation_fn)
+        return out
+
+    def convert_add(self, op):
+        """Convert TFLite add"""
+        try:
+            from tflite.Operator import Operator
+        except ImportError:
+            raise ImportError("The tflite package must be installed")
+
+        assert isinstance(op, Operator)
+        input_tensors = self.get_input_tensors(op)
+        assert len(input_tensors) == 2, "input tensors length should be 2"
+
+        lhs_tensor = input_tensors[0]
+        lhs_expr = self.get_expr(lhs_tensor.tensor_idx)
+
+        rhs_tensor = input_tensors[1]
+        if self.has_expr(rhs_tensor.tensor_idx):
+            # In most cases, we can assume that TOCO fuses ADD operators
+            # with constants - it means both will be tensors.
+            rhs_expr = self.get_expr(rhs_tensor.tensor_idx)
+        else:
+            # However, in some corner cases, the ADD operator is not fused,
+            # we can receive as constant.
+            rhs_type_str = self.get_tensor_type_str(rhs_tensor.tensor.Type())
+            rhs_expr = self.exp_tab.new_const(self.get_tensor_value(rhs_tensor),
+                                              dtype=rhs_type_str)
+
+        out = _op.add(lhs_expr, rhs_expr)
+        return out
+
+    def convert_fully_connected(self, op):
+        """Convert TFLite fully connected"""
+        try:
+            from tflite.Operator import Operator
+            from tflite.FullyConnectedOptions import FullyConnectedOptions
+            from tflite.BuiltinOptions import BuiltinOptions
+            from tflite.TensorType import TensorType
+            from tflite.ActivationFunctionType import ActivationFunctionType
+        except ImportError:
+            raise ImportError("The tflite package must be installed")
+
+        assert isinstance(op, Operator)
+        input_tensors = self.get_input_tensors(op)
+        assert len(input_tensors) >= 2, "input tensors length should be >= 2"
+
+        input_tensor = input_tensors[0]
+        input_tensor_idx = input_tensor.tensor_idx
+        weight_tensor = input_tensors[1]
+
+        input_tensor_shape = input_tensor.tensor.ShapeAsNumpy()
+        weight_tensor_shape = weight_tensor.tensor.ShapeAsNumpy()
+
+        # reshape input tensor from N H W C to N H*W*C
+        input_size_per_batch = 1
+        for s in range(1, len(input_tensor_shape)):
+            input_size_per_batch *= input_tensor_shape[s]
+        assert input_size_per_batch == weight_tensor_shape[1], \
+            "input size and weight size are mismatched"
+        target_shape = tuple((input_tensor_shape[0], input_size_per_batch))
+        in_expr = self.get_expr(input_tensor_idx)
+        in_expr = _op.reshape(in_expr, target_shape)
+
+        assert op.BuiltinOptionsType() == BuiltinOptions.FullyConnectedOptions
+        op_options = op.BuiltinOptions()
+        fully_connected_options = FullyConnectedOptions()
+        fully_connected_options.Init(op_options.Bytes, op_options.Pos)
+        fused_activation_fn = fully_connected_options.FusedActivationFunction()
+
+        # weight tensor type should be UINT8 (quantization) or FLOAT32
+        weight_tensor_type = weight_tensor.tensor.Type()
+        assert weight_tensor_type in (TensorType.UINT8, TensorType.FLOAT32)
+        weight_tensor_type_str = self.get_tensor_type_str(weight_tensor_type)
+
+        weight_value = self.get_tensor_value(weight_tensor)
+        weight_expr = self.exp_tab.new_const(weight_value, dtype=weight_tensor_type_str)
+
+        out = _op.nn.dense(in_expr, weight_expr)
+
+        # if we have bias
+        if len(input_tensors) == 3:
+            bias_tensor = input_tensors[2]
+            bias_tensor_type = bias_tensor.tensor.Type()
+            # bias tensor type should be INT32 (quantization) or FLOAT32
+            assert bias_tensor_type in (TensorType.INT32, TensorType.FLOAT32)
+            bias_tensor_type_str = self.get_tensor_type_str(bias_tensor_type)
+            bias_expr = self.exp_tab.new_const(self.get_tensor_value(bias_tensor),
+                                               dtype=bias_tensor_type_str)
+            out = _op.nn.bias_add(out, bias_expr)
+
+        # If we have fused activations
+        if fused_activation_fn != ActivationFunctionType.NONE:
+            out = self.convert_fused_activation_function(out, fused_activation_fn)
 
         return out
 
@@ -269,45 +383,9 @@ class OperatorConverter(object):
         squeeze_options = SqueezeOptions()
         squeeze_options.Init(op_options.Bytes, op_options.Pos)
         squeeze_axis = squeeze_options.SqueezeDimsAsNumpy()
-        input_shape_length = len(input_tensor.tensor.ShapeAsNumpy())
-        output_shape_length = len(output_tensors[0].tensor.ShapeAsNumpy())
 
         in_expr = self.get_expr(input_tensor_idx)
-
-        # TFLite is N H W C, our layout is N C H W
-        if input_shape_length == 1 or input_shape_length == 2:
-            # The rule is channel first (after N but before H, W).
-            # length of 1 means N*H*W*C, do nothing.
-            # length of 2 means N*H*W, C, do nothing.
-            pass
-        elif input_shape_length == 3:
-            # convert N C H*W to N H*W C
-            in_expr = _op.transpose(in_expr, axes=(0, 2, 1))
-        elif input_shape_length == 4:
-            # convert input to N H W C, then reshape to target shape,
-            # finally convert back if necessary
-            in_expr = _op.transpose(in_expr, axes=(0, 2, 3, 1))
-        else:
-            raise NotImplementedError("Not support input shape length {} of squeeze : "
-                                      .format(str(input_shape_length)))
-
         out = _op.squeeze(in_expr, axis=tuple(squeeze_axis))
-
-        # The rule is channel first.
-        # 1: N*H*W*C
-        # 2: N*H*W, C
-        # 3: N H W C, reshape to N H*W C, transpose to N C H*W
-        # 4: N H W C, transpose to N C H W
-        # add more if we need target shapes in future
-        if output_shape_length == 1 or output_shape_length == 2:
-            pass
-        elif output_shape_length == 3:
-            out = _op.transpose(out, axes=(0, 2, 1))
-        elif output_shape_length == 4:
-            out = _op.transpose(out, axes=(0, 3, 1, 2))
-        else:
-            raise NotImplementedError("Not support to squeeze to length {} : "
-                                      .format(str(output_shape_length)))
 
         return out
 
@@ -320,16 +398,15 @@ class OperatorConverter(object):
         assert fused_activation_fn != ActivationFunctionType.NONE
         if fused_activation_fn == ActivationFunctionType.RELU6:
             return _op.clip(in_expr, a_min=0, a_max=6)
-        elif fused_activation_fn == ActivationFunctionType.RELU:
+        if fused_activation_fn == ActivationFunctionType.RELU:
             return _op.nn.relu(in_expr)
-        elif fused_activation_fn == ActivationFunctionType.RELU_N1_TO_1:
+        if fused_activation_fn == ActivationFunctionType.RELU_N1_TO_1:
             return _op.clip(in_expr, a_min=-1, a_max=1)
-        elif fused_activation_fn == ActivationFunctionType.TANH:
+        if fused_activation_fn == ActivationFunctionType.TANH:
             return _op.tanh(in_expr)
-        else:
-            fused_activation_fn_str = self.activation_fn_type[fused_activation_fn]
-            raise NotImplementedError("Unsupported fused activation fn {}"
-                                      .format(fused_activation_fn_str))
+        fused_activation_fn_str = self.activation_fn_type[fused_activation_fn]
+        raise tvm.error.OpNotImplemented(
+            'Operator {} is not supported for frontend TFLite.'.format(fused_activation_fn_str))
 
     def convert_conv(self, op, conv_type):
         """convolution implementation."""
@@ -368,7 +445,8 @@ class OperatorConverter(object):
             assert depth_multiplier == 1, "TF frontend have transformed it be 1 " \
                                           "no matter original value be set by 0.25, 0.5 or any else"
         else:
-            raise ValueError("Not support conv type: {}".format(conv_type))
+            raise tvm.error.OpNotImplemented(
+                'Operator {} is not supported for frontend TFLite.'.format(conv_type))
 
         stride_h = conv_options.StrideH()
         stride_w = conv_options.StrideW()
@@ -391,28 +469,28 @@ class OperatorConverter(object):
         params = {'kernel_size': [kernel_h, kernel_w],
                   'strides': [stride_h, stride_w],
                   'dilation': [dilation_h, dilation_w],
-                  'padding': [0, 0]}
+                  'padding': [0, 0],
+                  'data_layout': 'NHWC'}
 
         if is_depthwise_conv:
             params['channels'] = int(in_channels * multiplier)
             params['groups'] = int(in_channels)
+            params['kernel_layout'] = 'HWOI'
         else:
             params['channels'] = int(output_channels)
+            params['kernel_layout'] = 'HWIO'
 
         # weight tensor type should be UINT8 (quantization) or FLOAT32
         weight_tensor_type = weight_tensor.tensor.Type()
-        assert weight_tensor_type == TensorType.UINT8 or weight_tensor_type == TensorType.FLOAT32
+        assert weight_tensor_type in (TensorType.UINT8, TensorType.FLOAT32)
         weight_tensor_type_str = self.get_tensor_type_str(weight_tensor_type)
 
         in_expr = self.get_expr(input_tensor_idx)
         weight_value = self.get_tensor_value(weight_tensor)
 
-        if is_depthwise_conv:
-            # TFLite is M KH KW IC, we require IC M KH KW
-            weight_value = weight_value.transpose((3, 0, 1, 2))
-        else:
-            # TFLite is OC KH KW IC, we require OC IC KH kW
-            weight_value = weight_value.transpose((0, 3, 1, 2))
+        # TFLite is OC/M KH KW IC, we require KH KW IC OC/M
+        # M means multiplier in depthwise convolution
+        weight_value = weight_value.transpose((1, 2, 3, 0))
 
         weight_expr = self.exp_tab.new_const(weight_value, dtype=weight_tensor_type_str)
 
@@ -421,11 +499,13 @@ class OperatorConverter(object):
         elif padding == Padding.SAME:
             pad_top, pad_bottom = get_pad_value(input_h, dilated_kernel_h, stride_h)
             pad_left, pad_right = get_pad_value(input_w, dilated_kernel_w, stride_w)
-            in_expr = _op.nn.pad(data=in_expr, pad_width=((0, 0), (0, 0),
+            in_expr = _op.nn.pad(data=in_expr, pad_width=((0, 0),
                                                           (pad_top, pad_bottom),
-                                                          (pad_left, pad_right)))
+                                                          (pad_left, pad_right),
+                                                          (0, 0)))
         else:
-            raise NotImplementedError("Not support padding format: {}".format(padding))
+            raise tvm.error.OpAttributeUnimplemented(
+                'Padding format {} is not supported for operator Conv.'.format(padding))
 
         out = _op.nn.conv2d(data=in_expr, weight=weight_expr, **params)
 
@@ -434,11 +514,12 @@ class OperatorConverter(object):
             bias_tensor = input_tensors[2]
             bias_tensor_type = bias_tensor.tensor.Type()
             # bias tensor type should be INT32 (quantization) or FLOAT32
-            assert bias_tensor_type == TensorType.INT32 or bias_tensor_type == TensorType.FLOAT32
+            assert bias_tensor_type in (TensorType.INT32, TensorType.FLOAT32)
             bias_tensor_type_str = self.get_tensor_type_str(bias_tensor_type)
             bias_expr = self.exp_tab.new_const(self.get_tensor_value(bias_tensor),
                                                dtype=bias_tensor_type_str)
-            out = _op.nn.bias_add(out, bias_expr)
+            channel_axis = 3
+            out = _op.nn.bias_add(out, bias_expr, axis=channel_axis)
 
         # If we have fused activations
         if fused_activation_fn != ActivationFunctionType.NONE:
@@ -476,7 +557,8 @@ class OperatorConverter(object):
 
         params = {'pool_size': (filter_h, filter_w),
                   'strides': (stride_h, stride_w),
-                  'padding': [0, 0]}
+                  'padding': [0, 0],
+                  'layout': 'NHWC'}
 
         in_expr = self.get_expr(input_tensor_idx)
 
@@ -488,14 +570,16 @@ class OperatorConverter(object):
             pad_left, pad_right = get_pad_value(input_w, filter_w, stride_w)
             params['padding'] = [pad_top, pad_left, pad_bottom, pad_right]
         else:
-            raise NotImplementedError("Not support padding format: {}".format(padding))
+            raise tvm.error.OpAttributeUnimplemented(
+                'Padding format {} for operator Pool2D is not supported.'.format(padding))
 
         if pool_type == "average":
             out = _op.nn.avg_pool2d(in_expr, **params)
         elif pool_type == "max":
             out = _op.nn.max_pool2d(in_expr, **params)
         else:
-            raise ValueError("Not support pool type: {}".format(pool_type))
+            raise tvm.error.OpNotImplemented(
+                'Operator {} is not supported for frontend TFLite.'.format(pool_type + ' pool'))
 
         # If we have fused activations
         if fused_activation_fn != ActivationFunctionType.NONE:
@@ -505,6 +589,9 @@ class OperatorConverter(object):
 
     def get_expr(self, input_tensor_idx):
         return self.exp_tab.get_expr(get_tensor_name(self.subgraph, input_tensor_idx))
+
+    def has_expr(self, input_tensor_idx):
+        return self.exp_tab.has_expr(get_tensor_name(self.subgraph, input_tensor_idx))
 
 def build_str_map(obj):
     """Build string map of TFLite enum int value

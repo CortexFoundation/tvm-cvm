@@ -1,3 +1,19 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 # pylint: disable=no-else-return, unidiomatic-typecheck, invalid-name
 """The expression nodes of Relay."""
 from __future__ import absolute_import
@@ -50,6 +66,9 @@ class Expr(RelayNode):
             The result expression.
         """
         return _make.cast(self, dtype)
+
+    def __neg__(self):
+        return _op_make.negative(self)
 
     def __add__(self, other):
         if isinstance(other, Expr):
@@ -107,6 +126,20 @@ class Expr(RelayNode):
     def __rtruediv__(self, other):
         return self.__rdiv__(other)
 
+    def __call__(self, *args):
+        """Call the variable (if it represents a function).
+
+        Parameters
+        ----------
+        args: List[relay.Expr]
+            The arguments to the call.
+
+        Returns
+        -------
+        call: Call
+            A call taking the variable as a function.
+        """
+        return Call(self, args)
 
 @register_relay_node
 class Constant(Expr):
@@ -327,6 +360,46 @@ class TupleGetItem(Expr):
             _make.TupleGetItem, tuple_value, index)
 
 
+@register_relay_node
+class RefCreate(Expr):
+    """Create a new reference from initial value.
+    Parameters
+    ----------
+    value: tvm.relay.Expr
+       The initial value.
+    """
+    def __init__(self, value):
+        self.__init_handle_by_constructor__(_make.RefCreate, value)
+
+
+@register_relay_node
+class RefRead(Expr):
+    """Get the value inside the reference.
+    Parameters
+    ----------
+    ref: tvm.relay.Expr
+         The reference.
+    """
+    def __init__(self, ref):
+        self.__init_handle_by_constructor__(_make.RefRead, ref)
+
+
+@register_relay_node
+class RefWrite(Expr):
+    """
+    Update the value inside the reference.
+    The whole expression will evaluate to an empty tuple.
+    Parameters
+    ----------
+    ref: tvm.relay.Expr
+        The reference.
+    value: tvm.relay.Expr
+        The new value.
+    """
+    def __init__(self, ref, value):
+        self.__init_handle_by_constructor__(_make.RefWrite, ref, value)
+
+
 class TempExpr(Expr):
     """Baseclass of all TempExpr.
 
@@ -397,7 +470,8 @@ class TupleWrapper(object):
 def var(name_hint,
         type_annotation=None,
         shape=None,
-        dtype="float32"):
+        dtype="float32",
+        precision=-1):
     """Create a new tvm.relay.Var.
 
     This is a simple wrapper function that allows specify
@@ -437,7 +511,7 @@ def var(name_hint,
     if type_annotation is not None and shape is not None:
         raise ValueError("Can only specify either type_annotation or shape.")
     if shape is not None:
-        type_annotation = _ty.TensorType(shape, dtype)
+        type_annotation = _ty.TensorType(shape, dtype, precision)
     elif isinstance(type_annotation, str):
         type_annotation = _ty.TensorType((), type_annotation)
     return Var(name_hint, type_annotation)

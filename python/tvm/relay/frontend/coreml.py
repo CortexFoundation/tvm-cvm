@@ -1,7 +1,24 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 # pylint: disable=invalid-name, import-self, unused-argument, unused-variable, inconsistent-return-statements
 """CoreML frontend."""
 from __future__ import absolute_import as _abs
 import numpy as np
+import tvm
 from .. import ir_pass
 from .. import expr as _expr
 from .. import op as _op
@@ -81,7 +98,8 @@ def _BatchnormLayerParams(op, inexpr, etab):
     """Get layer of batchnorm parameter"""
     # this changes the symbol
     if op.instanceNormalization:
-        raise NotImplementedError("instance normalization not implemented")
+        raise tvm.error.OpNotImplemented(
+            'Operator "instance normalization" is not supported in frontend CoreML.')
     else:
         params = {'gamma':etab.new_const(list(op.gamma.floatValue)),
                   'beta':etab.new_const(list(op.beta.floatValue)),
@@ -100,37 +118,37 @@ def _ActivationParams(op, inexpr, etab):
         alpha = _expr.const(par.alpha, dtype='float32')
         beta = _expr.const(par.beta, dtype='float32')
         return _op.add(_op.multiply(inexpr, alpha), beta)
-    elif whichActivation == 'ReLU':
+    if whichActivation == 'ReLU':
         return _op.nn.relu(inexpr)
-    elif whichActivation == 'leakyReLU':
+    if whichActivation == 'leakyReLU':
         _op.nn.leaky_relu(inexpr, alpha=_expr.const(par.alpha, dtype='float32'))
     elif whichActivation == 'thresholdedReLU':
         alpha_tensor = _op.full_like(inexpr, fill_value=_expr.const(par.alpha, dtype='float32'))
         return _op.multiply(inexpr, _op.greater(inexpr, alpha_tensor).as_type('float32'))
-    elif whichActivation == 'PReLU':
+    if whichActivation == 'PReLU':
         return _op.nn.prelu(inexpr, alpha=_expr.const(par.alpha, dtype='float32'))
-    elif whichActivation == 'tanh':
+    if whichActivation == 'tanh':
         return _op.tanh(inexpr)
-    elif whichActivation == 'scaledTanh':
+    if whichActivation == 'scaledTanh':
         alpha = _expr.const(par.alpha, dtype='float32')
         beta = _expr.const(par.beta, dtype='float32')
         return _op.multiply(_op.tanh(_op.multiply(inexpr, beta)), alpha)
-    elif whichActivation == 'sigmoid':
+    if whichActivation == 'sigmoid':
         return _op.sigmoid(inexpr)
-    elif whichActivation == 'sigmoidHard':
+    if whichActivation == 'sigmoidHard':
         alpha = _expr.const(par.alpha, dtype='float32')
         beta = _expr.const(par.beta, dtype='float32')
         transformX = (alpha * inexpr) + beta
         return _op.clip(transformX, a_min=0., a_max=1.)
-    elif whichActivation == 'ELU':
+    if whichActivation == 'ELU':
         return _op.multiply(_op.add(_op.exp(inexpr), _expr.const(-1, dtype='float32')),
                             _expr.const(par.alpha, dtype='float32'))
-    elif whichActivation == 'softsign':
+    if whichActivation == 'softsign':
         return inexpr / (_expr.const(1, dtype='float32') + (
             op.nn.relu(inexpr) + _op.nn.relu(_op.negative(inexpr))))
-    elif whichActivation == 'softplus':
+    if whichActivation == 'softplus':
         return _op.log(_op.add(_op.exp(inexpr), _expr.const(1, dtype='float32')))
-    elif whichActivation == 'parametricSoftplus':
+    if whichActivation == 'parametricSoftplus':
         alpha = list(par.alpha.floatValue)
         beta = list(par.alpha.floatValue)
         if len(alpha) == 1:
@@ -142,8 +160,8 @@ def _ActivationParams(op, inexpr, etab):
         alpha_expr = etab.new_const(alpha)
         beta_expr = etab.new_const(beta)
         return _op.multiply(_op.log(_op.add(_op.exp(inexpr), beta_expr)), alpha_expr)
-    else:
-        raise NotImplementedError('%s not implemented' % whichActivation)
+    raise tvm.error.OpNotImplemented(
+        'Operator {} is not supported in frontend CoreML.'.format(whichActivation))
 
 
 def _ScaleLayerParams(op, inexpr, etab):
@@ -163,10 +181,10 @@ def _PoolingLayerParams(op, inexpr, etab):
     if op.globalPooling:
         if op.type == 0:
             return _op.nn.global_max_pool2d(inexpr)
-        elif op.type == 1:
+        if op.type == 1:
             return _op.nn.global_avg_pool2d(inexpr)
-        else:
-            raise NotImplementedError("Only max and average pooling implemented")
+        raise tvm.error.OpNotImplemented(
+            'Only Max and Average Pooling are supported in frontend CoreML.')
 
     else:
         params = {'pool_size':list(op.kernelSize),
@@ -186,7 +204,9 @@ def _PoolingLayerParams(op, inexpr, etab):
             params['padding'] = padding
             params['ceil_mode'] = True
         else:
-            raise NotImplementedError("Other convolution padding not implemented")
+            msg = 'PoolingPaddingType {} is not supported in operator Pooling.'
+            op_name = op.WhichOneof('PoolingPaddingType')
+            raise tvm.error.OpAttributeUnimplemented(msg.format(op_name))
 
         # consume padding layer
         if etab.in_padding:
@@ -196,10 +216,10 @@ def _PoolingLayerParams(op, inexpr, etab):
 
         if op.type == 0:
             return _op.nn.max_pool2d(inexpr, **params)
-        elif op.type == 1:
+        if op.type == 1:
             return _op.nn.avg_pool2d(inexpr, **params)
-        else:
-            raise NotImplementedError("Only max and average pooling implemented")
+        raise tvm.error.OpNotImplemented(
+            'Only Max and Average Pooling are supported in CoreML.')
 
 
 def _SoftmaxLayerParams(op, inexpr, etab):
@@ -242,7 +262,8 @@ def _ConcatLayerParams(op, inexpr, etab):
     if not isinstance(inexpr, list):
         inexpr = [inexpr]
     if op.sequenceConcat:
-        raise NotImplementedError("Sequence Concat not supported")
+        raise tvm.error.OpNotImplemented(
+            'Operator Sequence Concat is not supported in frontend CoreML.')
     ret = _op.concatenate(inexpr, axis=1)
     return ret
 
@@ -258,14 +279,16 @@ def _PaddingLayerParams(op, inexpr, etab):
     if op.WhichOneof('PaddingType') == 'constant':
         constant = op.constant
         if constant.value != 0:
-            raise NotImplementedError("Padding value {} not supported.".format(constant.value))
+            raise tvm.error.OpAttributeUnimplemented(
+                '{} is not supported in operator Padding.'.format(constant.value))
         padding = [b.startEdgeSize for b in op.paddingAmounts.borderAmounts]
         padding2 = [b.endEdgeSize for b in op.paddingAmounts.borderAmounts]
         for i, j in zip(padding, padding2):
             assert i == j
         etab.set_padding(padding)
     else:
-        raise NotImplementedError("Only constant padding is supported now.")
+        raise tvm.error.OpNotImplemented(
+            'Non-constant padding is not supported in frontend CoreML.')
     return inexpr
 
 
@@ -276,8 +299,8 @@ def _PermuteLayerParams(op, inexpr, etab):
 
 def _UpsampleLayerParams(op, inexpr, etab):
     if op.scalingFactor[0] != op.scalingFactor[1]:
-        raise NotImplementedError("Upsampling only supported with same \
-            height and width scaling factor.")
+        raise tvm.error.OpAttributeUnimplemented(
+            'Upsample height and width must be equal.')
     interpolationMode = 'NEAREST_NEIGHBOR' if op.mode == 0 else 'BILINEAR'
     return _op.nn.upsampling(inexpr, scale=op.scalingFactor[0], method=interpolationMode)
 
@@ -367,7 +390,8 @@ def coreml_op_to_relay(op, inname, outname, etab):
     """
     classname = type(op).__name__
     if classname not in _convert_map:
-        raise NotImplementedError("%s is not supported" % (classname))
+        raise tvm.error.OpNotImplemented(
+            'Operator {} is not supported in frontend CoreML.'.format(classname))
     if isinstance(inname, _base.string_types):
         insym = etab.get_expr(inname)
     else:

@@ -1,3 +1,19 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 # pylint: disable=invalid-name, unused-variable, unused-argument, no-member
 """Schedule for vision operators"""
 from __future__ import absolute_import as _abs
@@ -9,37 +25,17 @@ from .pooling import schedule_pool
 
 def _default_schedule(outs):
     """Default schedule for gpu."""
-    target = tvm.target.current_target()
     outs = [outs] if isinstance(outs, tvm.tensor.Tensor) else outs
     s = tvm.create_schedule([x.op for x in outs])
     scheduled_ops = []
-
+    from .injective import _schedule_injective
     def traverse(op):
-        """inline all one-to-one-mapping operators except the last stage (output)"""
-        if "nms" in op.tag:
-            sort = op.input_tensors[1]
-            score = s[sort].op.input_tensors[0]
-            fused = s[score].fuse(*s[score].op.axis)
-            num_thread = tvm.target.current_target(allow_none=False).max_num_threads
-            bx, tx = s[score].split(fused, factor=num_thread)
-            s[score].bind(bx, tvm.thread_axis("blockIdx.x"))
-            s[score].bind(tx, tvm.thread_axis("threadIdx.x"))
-        if tag.is_broadcast(op.tag):
-            if op not in s.outputs:
-                s[op].compute_inline()
-            else:
-                x = op.output(0)
-                fused = s[x].fuse(*s[x].op.axis)
-                num_thread = tvm.target.current_target(allow_none=False).max_num_threads
-                bx, tx = s[x].split(fused, factor=num_thread)
-                s[x].bind(bx, tvm.thread_axis("blockIdx.x"))
-                s[x].bind(tx, tvm.thread_axis("threadIdx.x"))
-            for tensor in op.input_tensors:
-                if tensor.op.input_tensors and tensor.op not in scheduled_ops:
-                    traverse(tensor.op)
-
+        if tag.is_broadcast(op.tag) or op.tag in ['bbox_score', 'sorted_bbox']:
+            _schedule_injective(op, s)
+        for tensor in op.input_tensors:
+            if tensor.op.input_tensors and tensor.op not in scheduled_ops:
+                traverse(tensor.op)
         scheduled_ops.append(op)
-
     traverse(outs[0].op)
     return s
 
@@ -60,24 +56,6 @@ def schedule_reorg(outs):
     target = tvm.target.current_target(allow_none=False)
     cpp_target = cpp.TEST_create_target(target.target_name)
     return cpp.cuda.schedule_injective(cpp_target, outs)
-
-@generic.schedule_region.register(["cuda", "gpu"])
-def schedule_region(outs):
-    """Schedule for region operator.
-    Parameters
-    ----------
-    outs: Array of Tensor
-        The computation graph description of region
-        in the format of an array of tensors.
-
-    Returns
-    -------
-    s: Schedule
-        The computation schedule for region.
-    """
-    target = tvm.target.current_target(allow_none=False)
-    cpp_target = cpp.TEST_create_target(target.target_name)
-    return cpp.cuda.schedule_region(cpp_target, outs)
 
 @generic.schedule_nms.register(["cuda", "gpu"])
 def schedule_nms(outs):
@@ -152,6 +130,10 @@ def schedule_multibox_detection(outs):
 def schedule_roi_align(outs):
     return schedule_pool(outs, 'NCHW')
 
+@generic.schedule_roi_pool.register(["cuda", "gpu"])
+def schedule_roi_pool(outs):
+    return schedule_pool(outs, 'NCHW')
+
 @generic.schedule_proposal.register(["cuda", "gpu"])
 def schedule_proposal(outs):
     """Schedule for proposal operator.
@@ -167,16 +149,21 @@ def schedule_proposal(outs):
     s: Schedule
       The computation schedule for the op.
     """
-    outs = [outs] if isinstance(outs, tvm.tensor.Tensor) else outs
-    s = tvm.create_schedule([x.op for x in outs])
-    scheduled_ops = []
-    from .injective import _schedule_injective
-    def traverse(op):
-        if op.tag in ['bbox_score', 'sorted_bbox']:
-            _schedule_injective(op, s)
-        for tensor in op.input_tensors:
-            if tensor.op.input_tensors and tensor.op not in scheduled_ops:
-                traverse(tensor.op)
-        scheduled_ops.append(op)
-    traverse(outs[0].op)
-    return s
+    return _default_schedule(outs)
+
+@generic.schedule_get_valid_counts.register(["cuda", "gpu"])
+def schedule_get_valid_counts(outs):
+    """Schedule for get_valid_counts operator.
+
+    Parameters
+    ----------
+    outs: Array of Tensor
+        The computation graph description of get_valid_counts
+        in the format of an array of tensors.
+
+    Returns
+    -------
+    s: Schedule
+      The computation schedule for the op.
+    """
+    return _default_schedule(outs)

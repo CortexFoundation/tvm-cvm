@@ -1,15 +1,39 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 /*!
- *  Copyright (c) 2018 by Contributors
  * \file tvm/relay/pass.h
  * \brief The set of Relay passes written in C++.
- */
+  */
 #ifndef TVM_RELAY_PASS_H_
 #define TVM_RELAY_PASS_H_
 
+#include <tvm/ir.h>
+#include <tvm/packed_func_ext.h>
 #include <tvm/relay/expr.h>
 #include <tvm/relay/module.h>
 #include <tvm/relay/op_attr_types.h>
+#include <tvm/relay/type.h>
+#include <tvm/relay/adt.h>
+#include <tvm/runtime/vm.h>
 #include <string>
+#include <vector>
 
 namespace tvm {
 namespace relay {
@@ -56,9 +80,9 @@ TVM_DLL Function InferType(const Function& f, const Module& mod,
  * \param t The type to check.
  * \param mod The global module.
  *
- * \return true if the rules are satisified otherwise false
+ * \return The kind of the passed type.
  */
-TVM_DLL bool KindCheck(const Type& t, const Module& mod);
+TVM_DLL Kind KindCheck(const Type& t, const Module& mod);
 
 /*! \brief Compare two expressions for structural equivalence.
  *
@@ -95,6 +119,22 @@ TVM_DLL bool AlphaEqual(const Expr& e1, const Expr& e2);
  */
 TVM_DLL bool AlphaEqual(const Type& t1, const Type& t2);
 
+/*! \brief Add abstraction over a function
+ *
+ * For example: `square` is transformed to
+ * `fun x -> square x`.
+ *
+ * See https://en.wikipedia.org/wiki/Lambda_calculus#%CE%B7-conversion
+ * for more details.
+ *
+ * \param e The original function.
+ * \param mod The module used for referencing global functions, can be
+ * None.
+ *
+ * \return the new function with abstraction
+ */
+TVM_DLL Expr EtaExpand(const Expr& e, const Module& mod);
+
 /*! \brief Check that each Var is only bound once.
  *
  * For example, the expression `let x = 1 in let x = 2 in 3` bound x twice.
@@ -118,6 +158,17 @@ TVM_DLL bool WellFormed(const Expr& expr);
  * \return List of bound vars, in the PostDFS order in the expression.
  */
 TVM_DLL tvm::Array<Var> BoundVars(const Expr& expr);
+
+/*! \brief Get all bound variables from pattern pat.
+ *
+ * Bound variables are all variables that got bound by the pat.
+ * They only have meaning inside that expr, and can only be used in it.
+ *
+ * \param pat the Pattern.
+ *
+ * \return List of bound vars, in the PostDFS order in the expression.
+ */
+TVM_DLL tvm::Array<Var> BoundVars(const Pattern& pat);
 
 /*! \brief Get free type parameters from expression expr.
  *
@@ -144,10 +195,11 @@ TVM_DLL tvm::Array<Var> AllVars(const Expr& expr);
  * type in the context.
  *
  * \param expr the expression.
+ * \param mod the module.
  *
  * \return List of free vars, in the PostDFS order visited by expr.
  */
-TVM_DLL tvm::Array<TypeVar> FreeTypeVars(const Expr& expr);
+TVM_DLL tvm::Array<TypeVar> FreeTypeVars(const Expr& expr, const Module& mod);
 
 /*! \brief Get free TypeVars from type t.
  *
@@ -155,10 +207,11 @@ TVM_DLL tvm::Array<TypeVar> FreeTypeVars(const Expr& expr);
  * type in the context.
  *
  * \param t the type.
+ * \param mod the module.
  *
  * \return List of free type vars, in the PostDFS order visited by type.
  */
-TVM_DLL tvm::Array<TypeVar> FreeTypeVars(const Type& t);
+TVM_DLL tvm::Array<TypeVar> FreeTypeVars(const Type& t, const Module& mod);
 
 /*! \brief Get all bound type variables from expression expr.
  *
@@ -166,10 +219,11 @@ TVM_DLL tvm::Array<TypeVar> FreeTypeVars(const Type& t);
  * They only have meaning inside that expr, and can only be used in it.
  *
  * \param expr the expression.
+ * \param mod the module.
  *
  * \return List of bound type vars, in the PostDFS order in the expression.
  */
-TVM_DLL tvm::Array<TypeVar> BoundTypeVars(const Expr& expr);
+TVM_DLL tvm::Array<TypeVar> BoundTypeVars(const Expr& expr, const Module& mod);
 
 /*! \brief Get all bound type variables from type t.
  *
@@ -177,35 +231,39 @@ TVM_DLL tvm::Array<TypeVar> BoundTypeVars(const Expr& expr);
  * They only have meaning inside that type, and can only be used in it.
  *
  * \param t the type
+ * \param mod the module.
  *
  * \return List of bound type vars, in the PostDFS order visited by type.
  */
-TVM_DLL tvm::Array<TypeVar> BoundTypeVars(const Type& t);
+TVM_DLL tvm::Array<TypeVar> BoundTypeVars(const Type& t, const Module& mod);
 
 /*! \brief Get all type variables in expression expr.
  *
  * \param expr the expression.
+ * \param mod the module.
  *
  * \return List of type vars, in the PostDFS order in the expression.
  */
-TVM_DLL tvm::Array<TypeVar> AllTypeVars(const Expr& expr);
+TVM_DLL tvm::Array<TypeVar> AllTypeVars(const Expr& expr, const Module& mod);
 
 /*! \brief Get all type variables in type t.
  *
  * \param t the type.
+ * \param mod the module.
  *
  * \return List of type vars, in the PostDFS order visited by type.
  */
-TVM_DLL tvm::Array<TypeVar> AllTypeVars(const Type& t);
+TVM_DLL tvm::Array<TypeVar> AllTypeVars(const Type& t, const Module& mod);
 
 /*! \brief Remove expressions which does not effect the program result.
  *
- * It will remove let bindings which are not referenced, and branches that will
- * not be entered.
+ * It will remove let bindings which are not referenced,
+ * and inline let bindings that are only used once.
  *
- * For example, this pass should turn `let a = 1 in 2` into `2`, as the value of
- * the expression does not depend on a. Another example is `if (true) then 1
- * else 2` will be optimized into 1.
+ * For example, this pass should turn `let a = 1 in 2` into `2`,
+ * as the value of the expression does not depend on a.
+ *
+ * As another example, `let a = 1 in a` will be optimized into 1.
  *
  * \param e the expression to optimize.
  *
@@ -224,9 +282,10 @@ TVM_DLL Expr FoldConstant(const Expr& expr);
  * \brief Fuse operations into expr into seperate functions.
  * \param expr The expression.
  * \param fuse_opt_level Optimization level.
+ * \param mod the module.
  * \return The optimized expression.
  */
-TVM_DLL Expr FuseOps(const Expr& expr, int fuse_opt_level);
+TVM_DLL Expr FuseOps(const Expr& expr, int fuse_opt_level, const Module& mod);
 
 /*!
  * \brief Apply rewrite rules to rewrite the expr in post DFS order.
@@ -314,7 +373,36 @@ struct StructuralHash {
  *
  * \return expression in A-Normal Form
  */
-Expr ToANF(const Expr& e, const Module& mod);
+TVM_DLL Expr ToANormalForm(const Expr& e, const Module& mod);
+
+/*! \brief Remove let binding and directly share via pointer instead.
+ *
+ * It will remove all let binding,
+ * and turn all of the variable bound by let into direct pointer reference.
+ *
+ * \param e the expression.
+ *
+ * \return the expression in graph normal form.
+ */
+TVM_DLL Expr ToGraphNormalForm(const Expr& e);
+
+/*! \brief Aggressive constant propagation/constant folding/inlining.
+ * It will do as much computation in compile time as possible.
+ * It has two benefit: remove runtime overhead, and allow more optimization (typically fusion).
+ * As a side effect, code size will explode.
+ */
+Expr PartialEval(const Expr& e);
+
+namespace vm {
+
+/*! \brief Compile a module, and construct the virtual machine.
+ *
+ * \param mod The module to compile.
+ * \return The constructed virtual machine.
+ */
+runtime::vm::VirtualMachine CompileModule(const Module& mod);
+
+}  // namespace vm
 
 }  // namespace relay
 }  // namespace tvm

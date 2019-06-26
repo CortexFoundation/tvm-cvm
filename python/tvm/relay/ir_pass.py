@@ -1,14 +1,31 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 # pylint: disable=no-else-return
 # pylint: disable=unidiomatic-typecheck
-"""The set of passes for Relay.
-
-Exposes an interface for configuring the passes and
-scripting them in Python.
+"""
+This file contains the set of passes for Relay, which exposes an interface for
+configuring the passes and scripting them in Python.
 """
 from . import _ir_pass
 from . import _make
 from .expr import Expr
 from .ty import Type
+from .module import Module
+
 
 def post_order_visit(expr, fvisit):
     """Recursively visit the ir in post DFS order node,
@@ -66,6 +83,23 @@ def backward_fold_scale_axis(expr):
     """
     return _ir_pass.backward_fold_scale_axis(expr)
 
+def eta_expand(expr, mod):
+    """Add abstraction over a function.
+
+    Parameters
+    ----------
+    expr : tvm.relay.Expr
+        The input expression, we expect that expr's types
+        should be fully inferred by infer_type.
+    mod : tvm.relay.Module
+         The global module.
+
+    Returns
+    -------
+    expanded_expr : tvm.relay.Expr
+        The expression after eta expansion.
+    """
+    return _ir_pass.eta_expand(expr, mod)
 
 def forward_fold_scale_axis(expr):
     """Fold the scaling of axis into weights of conv2d/dense.
@@ -107,7 +141,7 @@ def well_formed(expr):
 
 
 def check_kind(t, mod=None):
-    """Check that the type is well kinded.
+    """Check that the type is well kinded and return the kind.
     For example, this mean type cannot has tensor of tensor, or is a tuple type of 2 shapes.
 
     Parameters
@@ -120,15 +154,15 @@ def check_kind(t, mod=None):
 
     Returns
     -------
-    well_kinded : bool
-        whether the input type is well kinded.
+    kind : Kind
+        the kind of t
 
     Examples
     --------
     .. code:: python
 
-        assert not check_kind(relay.TupleType([relay.TypeParam('tp1', relay.Kind.Shape)]))
-        assert check_kind(relay.TupleType([relay.TypeParam('tp1', relay.Kind.Type)]))
+        assert check_kind(relay.TupleType([relay.TypeParam('tp1', relay.Kind.Shape)])) == Shape
+        assert check_kind(relay.TupleType([relay.TypeParam('tp1', relay.Kind.Type)])) == Type
     """
     if mod is not None:
         return _ir_pass.check_kind(t, mod)
@@ -190,52 +224,61 @@ def all_vars(expr):
     return _ir_pass.all_vars(expr)
 
 
-def free_type_vars(expr):
+def free_type_vars(expr, mod=None):
     """Get free type variables from expression/type e
 
     Parameters
     ----------
     expr: Union[tvm.relay.Expr,tvm.relay.Type]
         The input expression/type
+    mod: tvm.relay.Module, optional
+        The global module
 
     Returns
     -------
     free : List[tvm.relay.TypeVar]
         The list of free type variables in post-DFS order
     """
-    return _ir_pass.free_type_vars(expr)
+    use_mod = mod if mod is not None else Module()
+    return _ir_pass.free_type_vars(expr, use_mod)
 
 
-def bound_type_vars(expr):
+def bound_type_vars(expr, mod=None):
     """Get bound type variables from expression/type e
 
     Parameters
     ----------
     expr: Union[tvm.relay.Expr,tvm.relay.Type]
         The input expression/type
+    mod: tvm.relay.Module, optional
+        The global module
 
     Returns
     -------
     free : List[tvm.relay.TypeVar]
         The list of bound type variables in post-DFS order
     """
-    return _ir_pass.bound_type_vars(expr)
+    use_mod = mod if mod is not None else Module()
+    return _ir_pass.bound_type_vars(expr, use_mod)
 
 
-def all_type_vars(expr):
+def all_type_vars(expr, mod=None):
     """Get all type variables from expression/type e
 
     Parameters
     ----------
     expr: Union[tvm.relay.Expr,tvm.relay.Type]
         The input expression/type
+    mod: tvm.relay.Module, optional
+        The global module
 
     Returns
     -------
     free : List[tvm.relay.TypeVar]
         The list of all type variables in post-DFS order
     """
-    return _ir_pass.all_type_vars(expr)
+    use_mod = mod if mod is not None else Module()
+    return _ir_pass.all_type_vars(expr, use_mod)
 
 
 def simplify_inference(expr):
@@ -369,7 +412,7 @@ def fold_constant(expr):
     return _ir_pass.FoldConstant(expr)
 
 
-def fuse_ops(expr, opt_level=1):
+def fuse_ops(expr, opt_level=1, mod=None):
     """Fuse operators in expr together.
 
     Parameters
@@ -380,28 +423,34 @@ def fuse_ops(expr, opt_level=1):
     opt_level : int
         The level of fuse optimization.
 
+    mod : tvm.relay.Module
+        The module to perform fusion over.
+
     Returns
     -------
     transformed_expr : tvm.relay.Expr
         Transformed expression, containing fused result.
     """
-    return _ir_pass.FuseOps(expr, opt_level)
+    return _ir_pass.FuseOps(expr, opt_level, mod)
 
 
-def combine_parallel_conv2d(expr):
-    """Fold multiple conv2d into one.
+def combine_parallel_conv2d(expr, min_num_branches=3):
+    """Combine multiple conv2d into one.
 
     Parameters
     ----------
     expr : tvm.relay.Expr
         The input expression.
 
+    min_num_branches : int
+        The minimum number of parallel branches when the transformation should be applied.
+
     Returns
     -------
     transformed_expr : tvm.relay.Expr
         Transformed expression
     """
-    return _ir_pass.CombineParallelConv2D(expr)
+    return _ir_pass.CombineParallelConv2D(expr, min_num_branches)
 
 
 def alter_op_layout(expr):
@@ -480,7 +529,7 @@ def collect_device_annotation_ops(expr):
     return _ir_pass.CollectDeviceAnnotationOps(expr)
 
 
-def to_anf(expr, mod=None):
+def to_a_normal_form(expr, mod=None):
     """
     Turn Graph Normal Form expression into A Normal Form Expression.
 
@@ -503,12 +552,28 @@ def to_anf(expr, mod=None):
     expr: tvm.relay.Expr
       The output expression.
     """
-    return _ir_pass.to_anf(expr, mod)
+    return _ir_pass.to_a_normal_form(expr, mod)
 
 
-def gradient(expr, mod=None):
+def to_graph_normal_form(expr):
+    """Turn A Normal Form expression into Graph Normal Form expression
+    Parameters
+    ----------
+    expr : tvm.relay.Expr
+        The input expression
+    Returns
+    -------
+    expr : tvm.relay.Expr
+      The output expression
     """
-    Transform a function to return original result paired with gradient of input.
+    return _ir_pass.to_graph_normal_form(expr)
+
+
+def gradient(expr, mod=None, mode='higher_order'):
+    """
+    Transform the input function,
+    returning a function that calculate the original result,
+    paired with gradient of the input.
 
     Parameters
     ----------
@@ -517,9 +582,73 @@ def gradient(expr, mod=None):
 
     mod : Optional[tvm.relay.Module]
 
+    mode : Optional[String]
+        The mode of the automatic differentiation algorithm.
+        'first_order' only work on first order code, but will not produce reference nor closure.
+        'higher_order' work on all code using reference and closure.
+
+    Returns
+    -------
+    expr : tvm.relay.Expr
+      The transformed expression.
+    """
+    if mode == 'first_order':
+        return _ir_pass.first_order_gradient(expr, mod)
+    elif mode == 'higher_order':
+        return _ir_pass.gradient(expr, mod)
+    else:
+        raise Exception('unknown mode')
+
+
+
+def get_total_mac_number(expr):
+    """
+    Count the number of MACs (multiply-accumulate) of a model
+
+    Parameters
+    ----------
+    expr : tvm.relay.Expr
+        The input expression.
+
+    Returns
+    -------
+    ret : int64
+      The number of MACs (multiply-accumulate) of a model
+    """
+    return _ir_pass.GetTotalMacNumber(expr)
+
+
+def eliminate_common_subexpr(expr, fskip=None):
+    """
+    Eliminate common subexpressions.
+
+    Parameters
+    ----------
+    expr : tvm.relay.Expr
+        The input expression.
+
+    fskip: function
+        The callback function that decides whether an expression should be skipped.
+
     Returns
     -------
     expr : tvm.relay.Expr
       The output expression.
     """
-    return _ir_pass.first_order_gradient(expr, mod)
+    return _ir_pass.eliminate_common_subexpr(expr, fskip)
+
+def partial_evaluate(expr):
+    """
+    Evaluate the static fragment of the code.
+
+    Parameters
+    ----------
+    expr : tvm.relay.Expr
+        The input expression.
+
+    Returns
+    -------
+    expr : tvm.relay.Expr
+      The output expression.
+    """
+    return _ir_pass.partial_evaluate(expr)

@@ -1,9 +1,29 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ * 
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ * 
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 /*!
  * Copyright (c) 2017 by Contributors
  * \file graph_runtime.cc
  * \brief Interface code with TVM graph runtime.
 */
 #include <dmlc/memory_io.h>
+#include <utility>
 #include "graph_runtime.h"
 
 namespace nnvm {
@@ -14,6 +34,13 @@ using tvm::runtime::TVMRetValue;
 using tvm::runtime::PackedFunc;
 
 DMLC_REGISTER_PARAMETER(TVMOpParam);
+DMLC_REGISTER_PARAMETER(CVMOpParam);
+// parser
+inline void CVMOpParamParser(nnvm::NodeAttrs* attrs) {
+  CVMOpParam param;
+  param.Init(attrs->dict);
+  attrs->parsed = std::move(param);
+}
 
 // parser
 inline void TVMOpParamParser(nnvm::NodeAttrs* attrs) {
@@ -21,6 +48,18 @@ inline void TVMOpParamParser(nnvm::NodeAttrs* attrs) {
   param.Init(attrs->dict);
   attrs->parsed = std::move(param);
 }
+
+NNVM_REGISTER_OP(cvm_op)
+.set_attr_parser(CVMOpParamParser)
+.set_num_inputs([](const NodeAttrs& attrs) {
+    const CVMOpParam& param = nnvm::get<CVMOpParam>(attrs.parsed);
+    return param.num_inputs;
+})
+.set_num_outputs([](const NodeAttrs& attrs) {
+    const CVMOpParam& param = nnvm::get<CVMOpParam>(attrs.parsed);
+    return param.num_outputs;
+});
+
 
 NNVM_REGISTER_OP(tvm_op)
 .set_attr_parser(TVMOpParamParser)

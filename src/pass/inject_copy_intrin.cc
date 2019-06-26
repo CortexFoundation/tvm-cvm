@@ -1,3 +1,22 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ * 
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ * 
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 /*!
  *  Copyright (c) 2017 by Contributors
  * \brief Replace certain copy with copy intrinsics.
@@ -7,6 +26,7 @@
 #include <tvm/packed_func_ext.h>
 #include <tvm/ir_mutator.h>
 #include <tvm/ir_pass.h>
+#include "../arithmetic/pattern_match.h"
 
 namespace tvm {
 namespace ir {
@@ -35,29 +55,9 @@ class CopyIntrinInjector : public IRMutator {
   }
 
  private:
-  bool MatchCondition(Expr expr,
-                      Expr* cond,
-                      Expr* true_value,
-                      Expr* false_value) {
-    if (const auto* op = expr.as<Select>()) {
-      *cond = op->condition;
-      *true_value = op->true_value;
-      *false_value = op->false_value;
-      return true;
-    } else if (const auto* op = expr.as<Call>()) {
-      if (op->name == intrinsic::tvm_if_then_else) {
-        *cond = op->args[0];
-        *true_value = op->args[1];
-        *false_value = op->args[2];
-        return true;
-      }
-    }
-    return false;
-  }
-
   bool MatchCopyPattern(Stmt stmt, Stmt *out) {
+    using namespace arith;
     Stmt body = stmt;
-    bool is_single_point_copy = false;
 
     // strip the loops
     std::vector<const For*> loops;
@@ -68,20 +68,21 @@ class CopyIntrinInjector : public IRMutator {
     }
     const Store* store = body.as<Store>();
     if (store == nullptr) return false;
-    Expr sel_cond, sel_true_value, sel_false_value;
-    bool has_cond = MatchCondition(store->value,
-                                   &sel_cond,
-                                   &sel_true_value,
-                                   &sel_false_value);
+    // Expr sel_cond, sel_true_value, sel_false_value;
+    // match select or if
+    PVar<Expr> sel_cond, sel_true_value, sel_false_value;
+    bool has_cond =
+        if_then_else(sel_cond, sel_true_value, sel_false_value).Match(store->value) ||
+        select(sel_cond, sel_true_value, sel_false_value).Match(store->value);
+
     const Cast* cast = store->value.as<Cast>();
     const Load* load = store->value.as<Load>();
     if (0 == loops.size()) {
-      is_single_point_copy = true;
       CHECK(!has_cond);
     }
     // for now only support true condition matching
     if (has_cond) {
-      load = sel_true_value.as<Load>();
+      load = sel_true_value.Eval().as<Load>();
     }
     // cast can be part of the pattern
     if (cast != nullptr) {
@@ -99,9 +100,8 @@ class CopyIntrinInjector : public IRMutator {
         arith::DetectLinearEquation(load->index, loop_vars);
     if (load_strides.size()  == 0 || store_strides.size() == 0) return false;
     Array<Expr> dst_shape;
-    auto loop_var_size = loop_vars.size();
-    if (is_single_point_copy) {
-      loop_var_size = 1;
+    const size_t loop_var_size = loop_vars.size();
+    if (loop_var_size == 0) {
       dst_shape.push_back(make_const(Int(32), 1));
     } else {
       for (const For* op : loops) {
@@ -114,8 +114,8 @@ class CopyIntrinInjector : public IRMutator {
     Expr src_elem_offset = load_strides[loop_var_size];
     if (has_cond) {
       Array<Expr> clip_bound =
-          arith::DetectClipBound(sel_cond, loop_vars);
-      pad_value = sel_false_value;
+          arith::DetectClipBound(sel_cond.Eval(), loop_vars);
+      pad_value = sel_false_value.Eval();
       if (clip_bound.size() == 0) return false;
       CHECK_EQ(src_shape.size(), loop_vars.size());
       CHECK_EQ(clip_bound.size(), loop_vars.size() * 2);
@@ -148,6 +148,10 @@ class CopyIntrinInjector : public IRMutator {
     CHECK_EQ(load_strides.size(), loop_var_size + 1);
     Array<Expr> src_strides(load_strides.begin(), load_strides.begin() + loop_var_size);
     Array<Expr> dst_strides(store_strides.begin(), store_strides.begin() + loop_var_size);
+    if (loop_var_size == 0) {
+        src_strides.push_back(make_const(Int(32), 1));
+        dst_strides.push_back(make_const(Int(32), 1));
+    }
     Buffer dst = BufferNode::make(
         Var(store->buffer_var.node_),
         store->value.type(),

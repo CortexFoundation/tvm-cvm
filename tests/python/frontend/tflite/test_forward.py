@@ -1,3 +1,19 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 # pylint: disable=import-self, invalid-name, unused-argument
 """
 TFLite testcases
@@ -11,10 +27,12 @@ from tvm import relay
 from tvm.contrib import util
 import tensorflow as tf
 from tensorflow.python.framework import constant_op
+from tensorflow.python.framework import ops
+from tensorflow.python.ops import math_ops
 from tensorflow.python.ops import nn_ops
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import variables
-from tensorflow.contrib.lite.python import interpreter as interpreter_wrapper
+from tensorflow.contrib import lite as interpreter_wrapper
 
 import tvm.relay.testing.tf as tf_testing
 
@@ -98,12 +116,10 @@ def run_tflite_graph(tflite_model_buf, input_data):
     return tflite_output
 
 
-def compare_tflite_with_tvm(tflite_in_data, tvm_in_data, in_name, input_tensors,
-                            output_tensors, output_need_transpose_nchw=False,
-                            init_global_variables=False):
+def compare_tflite_with_tvm(in_data, in_name, input_tensors,
+                            output_tensors, init_global_variables=False):
     """Generic function to generate and compare TFLite and TVM output"""
-    tflite_in_data = convert_to_list(tflite_in_data)
-    tvm_in_data = convert_to_list(tvm_in_data)
+    in_data = convert_to_list(in_data)
     in_name = convert_to_list(in_name)
     in_node = [0] * len(in_name)
     for i in range(len(in_name)):
@@ -116,7 +132,7 @@ def compare_tflite_with_tvm(tflite_in_data, tvm_in_data, in_name, input_tensors,
         converter = tf.contrib.lite.TFLiteConverter.from_session(
             sess, input_tensors, output_tensors)
         tflite_model_buffer = converter.convert()
-        tflite_output = run_tflite_graph(tflite_model_buffer, tflite_in_data)
+        tflite_output = run_tflite_graph(tflite_model_buffer, in_data)
 
         for device in ["llvm"]:
             ctx = tvm.context(device, 0)
@@ -124,15 +140,9 @@ def compare_tflite_with_tvm(tflite_in_data, tvm_in_data, in_name, input_tensors,
                 print("Skip because %s is not enabled" % device)
                 continue
 
-            tvm_output = run_tvm_graph(tflite_model_buffer, tvm_in_data, in_node, target=device)
+            tvm_output = run_tvm_graph(tflite_model_buffer, in_data, in_node, target=device)
             for i in range(len(tflite_output)):
-                if output_need_transpose_nchw:
-                    tvm.testing.assert_allclose(tflite_output[i],
-                                                np.transpose(tvm_output[i], axes=(0, 2, 3, 1)),
-                                                atol=1e-5, rtol=1e-5)
-                else:
-                    tvm.testing.assert_allclose(tflite_output[i], tvm_output[i],
-                                                atol=1e-5, rtol=1e-5)
+                tvm.testing.assert_allclose(tflite_output[i], tvm_output[i], atol=1e-5, rtol=1e-5)
 
         sess.close()
 
@@ -145,14 +155,12 @@ def _test_pooling_iteration(input_shape, **kwargs):
 
     x = -np.arange(
         np.prod(input_shape), dtype=np.float32).reshape(input_shape) - 1
-    tvm_data = np.transpose(x, axes=(0, 3, 1, 2))
 
     with tf.Graph().as_default():
         in_data = array_ops.placeholder(shape=input_shape, dtype='float32')
         out = nn_ops.pool(in_data, **kwargs)
 
-        compare_tflite_with_tvm(x, tvm_data, 'Placeholder:0', [in_data], [out],
-                                output_need_transpose_nchw=True)
+        compare_tflite_with_tvm(x,'Placeholder:0', [in_data], [out])
 
 
 def _test_pooling(input_shape, **kwargs):
@@ -230,13 +238,8 @@ def _test_convolution(tensor_in_sizes, filter_in_sizes,
                                 strides=strides,
                                 padding=padding,
                                 data_format=data_format)
-        # TFLite is NHWC, TVM is NCHW
-        tflite_data_array = np.reshape(data_array, tensor_in_sizes).astype('float32')
-        tvm_data_array = np.transpose(tflite_data_array, axes=(0, 3, 1, 2))
-        # TFLite output is NHWC, TVM is NCHW, we need transpose
-        compare_tflite_with_tvm(tflite_data_array, tvm_data_array,
-                                'Placeholder:0', [in_data], [out],
-                                output_need_transpose_nchw=True)
+        data_array = np.reshape(data_array, tensor_in_sizes).astype('float32')
+        compare_tflite_with_tvm(data_array, 'Placeholder:0', [in_data], [out])
 
 
 def test_forward_convolution():
@@ -258,22 +261,11 @@ def test_forward_convolution():
 
 def _test_reshape(data, out_shape):
     """ One iteration of reshape operation with given data and out shape """
-    # see relay/frontend/tflite.py convert_reshape more detail of channel first rule
-    if len(data.shape) == 1 or len(data.shape) == 2:
-        tvm_data = data
-    elif len(data.shape) == 3:
-        tvm_data = np.transpose(data, axes=(0, 2, 1))
-    elif len(data.shape) == 4:
-        tvm_data = np.transpose(data, axes=(0, 3, 1, 2))
-    else:
-        raise NotImplementedError("Not support input shape {} of reshape : ".
-                                  format(str(len(data))))
-
     with tf.Graph().as_default():
         in_data = array_ops.placeholder(shape=data.shape, dtype=data.dtype)
         out = array_ops.reshape(in_data, out_shape)
 
-        compare_tflite_with_tvm(data, tvm_data, 'Placeholder:0', [in_data], [out])
+        compare_tflite_with_tvm(data, 'Placeholder:0', [in_data], [out])
 
 
 def test_forward_reshape():
@@ -281,6 +273,74 @@ def test_forward_reshape():
     _test_reshape(np.arange(6), [-1, 2])
     _test_reshape(np.arange(6), [3, -1])
     _test_reshape(np.arange(6), [-1])
+
+
+#######################################################################
+# Concatenation
+# -------------
+
+def _test_concatenation(data, axis):
+    """ One iteration of concatenation """
+
+    assert len(data) >= 1
+
+    with tf.Graph().as_default():
+        in_data = [
+            array_ops.placeholder(shape=tensor.shape, dtype=tensor.dtype, name="in_{}".format(idx))
+            for idx, tensor in enumerate(data)]
+        out = array_ops.concat(in_data, axis=axis)
+        name = ["in_{}:0".format(idx) for idx in range(len(data))]
+
+        compare_tflite_with_tvm(data, name, in_data, [out])
+
+
+def test_forward_concatenation():
+
+    _test_concatenation(
+        [np.arange(6).reshape((1, 2, 1, 3)),
+        np.arange(6).reshape((1, 2, 1, 3))], 1)
+
+    _test_concatenation(
+        [np.arange(6).reshape((3, 2)),
+         np.arange(6).reshape((3, 2))], 1)
+
+    _test_concatenation(
+        [np.arange(6).reshape((2, 1, 1, 3)),
+         np.arange(6).reshape((2, 1, 1, 3)),
+         np.arange(6).reshape((2, 1, 1, 3))], 1)
+
+
+#######################################################################
+# Add
+# ---
+
+def _test_add(data):
+    """ One iteration of add """
+
+    assert len(data) == 2
+
+    # Test with two tensors
+    with tf.Graph().as_default():
+        in_data = [array_ops.placeholder(shape=data[0].shape, dtype=data[0].dtype, name='in_0'),
+                   array_ops.placeholder(shape=data[1].shape, dtype=data[1].dtype, name='in_1')]
+        out = math_ops.add(in_data[0], in_data[1])
+        compare_tflite_with_tvm(data, ['in_0:0', 'in_1:0'], in_data, [out])
+
+    # Test with tensor and constant
+    with tf.Graph().as_default():
+        in_data = [array_ops.placeholder(shape=data[0].shape, dtype=data[0].dtype, name='in')]
+        out = math_ops.add(in_data[0], ops.convert_to_tensor(data[1], dtype=data[1].dtype))
+        compare_tflite_with_tvm([data[0]], ['in:0'], in_data, [out])
+
+
+def test_forward_add():
+    """ Add """
+    _test_add([np.arange(6.0, dtype=np.float32).reshape((2, 1, 1, 3)),
+               np.arange(6.0, dtype=np.float32).reshape((2, 1, 1, 3))])
+    _test_add([np.arange(6.0, dtype=np.float32).reshape((2, 1, 3)),
+               np.arange(6.0, dtype=np.float32).reshape((2, 1, 3))])
+    _test_add([np.arange(3.0, dtype=np.float32).reshape((1, 3)),
+               np.arange(3.0, dtype=np.float32).reshape((1, 3))])
 
 
 #######################################################################
@@ -293,19 +353,6 @@ def _test_squeeze(data, squeeze_dims=None):
     if squeeze_dims is None:
         squeeze_dims = []
 
-    # see relay/frontend/tflite.py convert_squeeze more detail of channel first rule
-    if len(data.shape) == 1 or len(data.shape) == 2:
-        tvm_data = data
-    elif len(data.shape) == 3:
-        tvm_data = np.transpose(data, axes=(0, 2, 1))
-    elif len(data.shape) == 4:
-        tvm_data = np.transpose(data, axes=(0, 3, 1, 2))
-    else:
-        raise NotImplementedError("Not support input shape {} of reshape : ".
-                                  format(str(len(data.shape))))
-
-    tvm_data = np.transpose(data, axes=(0, 3, 1, 2))
-
     with tf.Graph().as_default():
         in_data = array_ops.placeholder(shape=data.shape, dtype=data.dtype)
 
@@ -314,7 +361,7 @@ def _test_squeeze(data, squeeze_dims=None):
         else:
             out = array_ops.squeeze(in_data)
 
-        compare_tflite_with_tvm(data, tvm_data, 'Placeholder:0', [in_data], [out])
+        compare_tflite_with_tvm(data, 'Placeholder:0', [in_data], [out])
 
 
 def test_forward_squeeze():
@@ -331,27 +378,122 @@ def _test_softmax(data):
     with tf.Graph().as_default():
         in_data = array_ops.placeholder(shape=data.shape, dtype=data.dtype)
         out = nn_ops.softmax(in_data)
-        compare_tflite_with_tvm(data, data, 'Placeholder:0', [in_data], [out])
+        compare_tflite_with_tvm(data, 'Placeholder:0', [in_data], [out])
 
 def test_forward_softmax():
     """ Softmax """
     _test_softmax(np.arange(6.0, dtype=np.float32).reshape((1, 6)))
 
+
+#######################################################################
+# Fully Connected
+# -------
+
+def _test_fully_connected(tensor_in_sizes, filter_in_sizes, bias_in_size=None):
+    """ One iteration of fully connected """
+
+    total_size_1 = 1
+    total_size_2 = 1
+    for s in tensor_in_sizes:
+        total_size_1 *= s
+    for s in filter_in_sizes:
+        total_size_2 *= s
+    # Initializes the input tensor with array containing incrementing
+    # numbers from 1.
+    data_array = [f * 1.0 for f in range(1, total_size_1 + 1)]
+    filter_array = [f * 1.0 for f in range(1, total_size_2 + 1)]
+    assert int(total_size_1 / tensor_in_sizes[0]) == filter_in_sizes[0], \
+        "input size and filter size are mismatched"
+
+    with tf.Graph().as_default():
+        in_data = array_ops.placeholder(shape=tensor_in_sizes, dtype='float32')
+        in_filter = constant_op.constant(filter_array, shape=filter_in_sizes, dtype='float32')
+
+        # reshape N H W C into N H*W*C
+        in_data_reshape = array_ops.reshape(in_data, [tensor_in_sizes[0], -1])
+
+        out = math_ops.mat_mul(in_data_reshape, in_filter)
+
+        # if we have bias
+        if bias_in_size:
+            assert bias_in_size[0] == filter_in_sizes[1], "bias and filter size are mismatched"
+            bias_array = [f * 1.0 for f in range(1, bias_in_size[0] + 1)]
+            in_bias = constant_op.constant(bias_array, shape=bias_in_size, dtype='float32')
+            out = nn_ops.bias_add(out, in_bias)
+
+        data_array = np.reshape(data_array, tensor_in_sizes).astype('float32')
+        compare_tflite_with_tvm(data_array, 'Placeholder:0', [in_data], [out])
+
+
+def test_forward_fully_connected():
+    """ Fully Connected """
+    _test_fully_connected([1, 1, 1, 150], [150, 100])
+    _test_fully_connected([1, 1, 1, 150], [150, 100], [100])
+    _test_fully_connected([5, 1, 1, 150], [150, 100])
+    _test_fully_connected([5, 1, 1, 150], [150, 100], [100])
+
+
 #######################################################################
 # Mobilenet
 # ---------
-def test_forward_mobilenet():
-    '''test mobilenet v1 tflite model'''
+
+def test_forward_mobilenet_v1():
+    """Test the Mobilenet V1 TF Lite model."""
     # MobilenetV1
-    temp = util.tempdir()
     tflite_model_file = tf_testing.get_workload_official(
         "http://download.tensorflow.org/models/mobilenet_v1_2018_08_02/mobilenet_v1_1.0_224.tgz",
-        "mobilenet_v1_1.0_224.tflite", temp)
-    tflite_model_buf = open(tflite_model_file, "rb").read()
+        "mobilenet_v1_1.0_224.tflite")
+    with open(tflite_model_file, "rb") as f:
+        tflite_model_buf = f.read()
     data = np.random.uniform(size=(1, 224, 224, 3)).astype('float32')
-    tvm_data = np.transpose(data, axes=(0, 3, 1, 2))
     tflite_output = run_tflite_graph(tflite_model_buf, data)
-    tvm_output = run_tvm_graph(tflite_model_buf, tvm_data, 'input')
+    tvm_output = run_tvm_graph(tflite_model_buf, data, 'input')
+    tvm.testing.assert_allclose(np.squeeze(tvm_output[0]), np.squeeze(tflite_output[0]),
+                                rtol=1e-5, atol=1e-5)
+
+def test_forward_mobilenet_v2():
+    """Test the Mobilenet V2 TF Lite model."""
+    # MobilenetV2
+    tflite_model_file = tf_testing.get_workload_official(
+        "http://download.tensorflow.org/models/tflite_11_05_08/mobilenet_v2_1.0_224.tgz",
+        "mobilenet_v2_1.0_224.tflite")
+    with open(tflite_model_file, "rb") as f:
+        tflite_model_buf = f.read()
+    data = np.random.uniform(size=(1, 224, 224, 3)).astype('float32')
+    tflite_output = run_tflite_graph(tflite_model_buf, data)
+    tvm_output = run_tvm_graph(tflite_model_buf, data, 'input')
+    tvm.testing.assert_allclose(np.squeeze(tvm_output[0]), np.squeeze(tflite_output[0]),
+                                rtol=1e-5, atol=1e-5)
+
+#######################################################################
+# Inception
+# ------------
+
+def test_forward_inception_v3_net():
+    """Test the Inception V3 TF Lite model."""
+    # InceptionV3
+    tflite_model_file = tf_testing.get_workload_official(
+        "https://storage.googleapis.com/download.tensorflow.org/models/tflite/model_zoo/upload_20180427/inception_v3_2018_04_27.tgz",
+        "inception_v3.tflite")
+    with open(tflite_model_file, "rb") as f:
+        tflite_model_buf = f.read()
+    data = np.random.uniform(size=(1, 299, 299, 3)).astype('float32')
+    tflite_output = run_tflite_graph(tflite_model_buf, data)
+    tvm_output = run_tvm_graph(tflite_model_buf, data, 'input')
+    tvm.testing.assert_allclose(np.squeeze(tvm_output[0]), np.squeeze(tflite_output[0]),
+                                rtol=1e-5, atol=1e-5)
+
+def test_forward_inception_v4_net():
+    """Test the Inception V4 TF Lite model."""
+    # InceptionV4
+    tflite_model_file = tf_testing.get_workload_official(
+        "https://storage.googleapis.com/download.tensorflow.org/models/tflite/model_zoo/upload_20180427/inception_v4_2018_04_27.tgz",
+        "inception_v4.tflite")
+    with open(tflite_model_file, "rb") as f:
+        tflite_model_buf = f.read()
+    data = np.random.uniform(size=(1, 299, 299, 3)).astype('float32')
+    tflite_output = run_tflite_graph(tflite_model_buf, data)
+    tvm_output = run_tvm_graph(tflite_model_buf, data, 'input')
     tvm.testing.assert_allclose(np.squeeze(tvm_output[0]), np.squeeze(tflite_output[0]),
                                 rtol=1e-5, atol=1e-5)
 
@@ -360,6 +502,7 @@ def test_forward_mobilenet():
 # ----
 if __name__ == '__main__':
     # Transforms
+    test_forward_concatenation()
     test_forward_reshape()
     test_forward_squeeze()
 
@@ -367,6 +510,13 @@ if __name__ == '__main__':
     test_forward_convolution()
     test_forward_pooling()
     test_forward_softmax()
+    test_forward_fully_connected()
+
+    # Math
+    test_forward_add()
 
     # End to End
-    test_forward_mobilenet()
+    test_forward_mobilenet_v1()
+    test_forward_mobilenet_v2()
+    test_forward_inception_v3_net()
+    test_forward_inception_v4_net()

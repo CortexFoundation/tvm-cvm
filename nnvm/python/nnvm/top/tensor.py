@@ -1,3 +1,19 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 # pylint: disable=invalid-name, unused-argument
 """Tensor ops"""
 from __future__ import absolute_import
@@ -88,6 +104,10 @@ reg.register_schedule("sqrt", _fschedule_broadcast)
 reg.register_pattern("log", OpPattern.ELEMWISE)
 reg.register_schedule("log", _fschedule_broadcast)
 
+# log2
+reg.register_pattern("log2", OpPattern.ELEMWISE)
+reg.register_schedule("log2", _fschedule_broadcast)
+
 # tanh
 reg.register_pattern("tanh", OpPattern.ELEMWISE)
 reg.register_schedule("tanh", _fschedule_broadcast)
@@ -139,6 +159,18 @@ reg.register_schedule("__lshift_scalar__", _fschedule_broadcast)
 # rshift_scalar
 reg.register_pattern("__rshift_scalar__", OpPattern.ELEMWISE)
 reg.register_schedule("__rshift_scalar__", _fschedule_broadcast)
+
+# logical_and
+reg.register_pattern("logical_and", OpPattern.ELEMWISE)
+reg.register_schedule("logical_and", _fschedule_broadcast)
+
+# logical_or
+reg.register_pattern("logical_or", OpPattern.ELEMWISE)
+reg.register_schedule("logical_or", _fschedule_broadcast)
+
+# logical_not
+reg.register_pattern("logical_not", OpPattern.ELEMWISE)
+reg.register_schedule("logical_not", _fschedule_broadcast)
 
 # elemwise_add
 reg.register_pattern("elemwise_add", OpPattern.BROADCAST)
@@ -235,6 +267,19 @@ reg.register_schedule("broadcast_to", _fschedule_broadcast)
 # clip
 reg.register_pattern("clip", OpPattern.ELEMWISE)
 reg.register_schedule("clip", _fschedule_elemwise)
+
+# cvm op
+reg.register_pattern("cvm_lut", OpPattern.INJECTIVE)
+reg.register_schedule("cvm_lut", _fschedule_injective)
+
+reg.register_pattern("cvm_clip", OpPattern.ELEMWISE)
+reg.register_schedule("cvm_clip", _fschedule_elemwise)
+
+reg.register_pattern("cvm_left_shift", OpPattern.ELEMWISE)
+reg.register_schedule("cvm_left_shift", _fschedule_elemwise)
+
+reg.register_pattern("cvm_right_shift", OpPattern.ELEMWISE)
+reg.register_schedule("cvm_right_shift", _fschedule_elemwise)
 
 # elemwise sum
 reg.register_pattern("elemwise_sum", OpPattern.ELEMWISE)

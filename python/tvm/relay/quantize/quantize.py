@@ -1,3 +1,19 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 #pylint: disable=unused-argument
 """Automatic quantization toolkit."""
 from __future__ import absolute_import
@@ -55,9 +71,11 @@ class QConfig(NodeBase):
         "dtype_activation": "int32",
         "global_scale": 8.0,
         "skip_k_conv": 1,
+        "skip_conv_layers": None,
         "round_for_shift": True,
         "store_lowbit_output": True,
         "debug_enabled_ops": None,
+        "use_stop_fusion": True
     }
 
     # pylint: disable=no-member
@@ -122,12 +140,20 @@ def qconfig(**kwargs):
     skip_k_conv: int
         The number of skipped conv2d.
 
+    skip_conv_layers: list
+        Different way of specifying which layers to avoid. Provide a list of indices
+        that indicate which conv2d layers to leave untouched.
+
     round_for_shift: boolean
         Whether to add bias for rounding during shift.
 
     store_lowbit_output: boolean
         Whether to store low-bit integer back as output before dequantizing.
         Some accelerators need this, e.g. VTA.
+
+    use_stop_fusion: boolean
+        Whether add stop_fusion when casting to dtype_activation. stop_fusion forces lowbit
+        results to be stored in memory.
 
     Returns
     -------
@@ -248,6 +274,77 @@ def realize(graph):
     return _quantize.realize(graph)
 
 
+def optimize(func, params=None):
+    """ Perform "SimplifyInference", "FoldScaleAxis", "FoldConstant", and
+    "CanonicalizeOps" optimization before quantization.
+
+    # TODO(zhiics) These passes are executed one by one so far. We need to
+    # move them to the pass manager.
+
+    Parameters
+    ---------
+    func: tvm.relay.Function
+        The original Relay function to be optimized.
+
+    params : dict of str to tvm.NDArray
+        Input parameters to the graph that do not change
+        during inference time. Used for constant folding.
+
+    Returns
+    -------
+    ret: tvm.relay.Function
+        The graph after quantization
+    """
+
+    opt_passes = ["SimplifyInference",
+                  "FoldScaleAxis",
+                  "FoldConstant",
+                  "CanonicalizeOps"]
+
+    cfg = _build.build_config(add_pass=opt_passes)
+
+    if params:
+        name_dict = {}
+        for arg in func.params:
+            name = arg.name_hint
+            if name in name_dict:
+                name_dict[name] = None
+            else:
+                name_dict[name] = arg
+        bind_dict = {}
+        for k, v in params.items():
+            if k not in name_dict:
+                continue
+            arg = name_dict[k]
+            if arg is None:
+                raise ValueError("Multiple args in the function have name %s" % k)
+            bind_dict[arg] = _expr.const(v)
+        func = _expr.bind(func, bind_dict)
+
+    if "SimplifyInference" in cfg.add_pass:
+        func = _ir_pass.infer_type(func)
+        func = _ir_pass.simplify_inference(func)
+
+    if "FoldConstant" in cfg.add_pass:
+        func = _ir_pass.fold_constant(func)
+
+    if "FoldScaleAxis" in cfg.add_pass:
+        func = _ir_pass.infer_type(func)
+        func = _ir_pass.backward_fold_scale_axis(func)
+        func = _ir_pass.infer_type(func)
+        func = _ir_pass.forward_fold_scale_axis(func)
+        func = _ir_pass.fold_constant(func)
+
+    if "CanonicalizeOps" in cfg.add_pass:
+        func = _ir_pass.infer_type(func)
+        func = _ir_pass.canonicalize_ops(func)
+
+    if "FoldConstant" in cfg.add_pass:
+        func = _ir_pass.fold_constant(func)
+
+    return func
+
+
 def quantize(graph, params=None, dataset=None):
     """ The quantization procedure. Before running the three main
     procedure of quantization, "annotate", "calibrate" and "realize"
@@ -271,12 +368,8 @@ def quantize(graph, params=None, dataset=None):
     ret: Function
         The graph after quantization
     """
-    opt_passes = ["SimplifyInference",
-                  "FoldScaleAxis",
-                  "FoldConstant",
-                  "CanonicalizeOps"]
-    with _build.build_config(add_pass=opt_passes):
-        graph = _build.optimize(graph, params=params)
+    # TODO(zhiics) Move this to the pass manager.
+    graph = optimize(graph, params)
 
     graph = annotate(graph)
     graph = calibrate(graph, dataset)

@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.2)
 project(tvm C CXX)
-set( CMAKE_EXPORT_COMPILE_COMMANDS ON )
+
+set (CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Utility functions
 include(cmake/util/Util.cmake)
@@ -21,7 +22,7 @@ endif()
 # You can create a config.cmake at build folder
 # and add set(OPTION VALUE) to override these build options.
 # Alernatively, use cmake -DOPTION=VALUE through command-line.
-tvm_option(USE_CUDA "Build with CUDA" OFF)
+tvm_option(USE_CUDA "Build with CUDA" ON)
 tvm_option(USE_OPENCL "Build with OpenCL" OFF)
 tvm_option(USE_VULKAN "Build with Vulkan" OFF)
 tvm_option(USE_OPENGL "Build with OpenGL" OFF)
@@ -29,10 +30,13 @@ tvm_option(USE_METAL "Build with Metal" OFF)
 tvm_option(USE_ROCM "Build with ROCM" OFF)
 tvm_option(ROCM_PATH "The path to rocm" /opt/rocm)
 tvm_option(USE_RPC "Build with RPC" ON)
-tvm_option(USE_LLVM "Build with LLVM, can be set to specific llvm-config path" OFF)
+tvm_option(USE_LLVM "Build with LLVM, can be set to specific llvm-config path" ON)
 tvm_option(USE_STACKVM_RUNTIME "Include stackvm into the runtime" OFF)
 tvm_option(USE_GRAPH_RUNTIME "Build with tiny graph runtime" ON)
+tvm_option(USE_CVM_RUNTIME "Build with tiny cvm runtime" ON)
+tvm_option(USE_CVM_RUNTIME_CUDA "Build with tiny cvm runtime cuda" OFF)
 tvm_option(USE_GRAPH_RUNTIME_DEBUG "Build with tiny graph runtime debug mode" OFF)
+tvm_option(USE_RELAY_DEBUG "Building Relay in debug mode..." OFF)
 tvm_option(USE_SGX "Build with SGX" OFF)
 tvm_option(USE_RTTI "Build with RTTI" ON)
 tvm_option(USE_MSVC_MT "Build with MT" OFF)
@@ -45,7 +49,7 @@ tvm_option(USE_CUDNN "Build with cuDNN" OFF)
 tvm_option(USE_CUBLAS "Build with cuBLAS" OFF)
 tvm_option(USE_MIOPEN "Build with ROCM:MIOpen" OFF)
 tvm_option(USE_ROCBLAS "Build with ROCM:RoCBLAS" OFF)
-tvm_option(USE_SORT "Build with sort support" OFF)
+tvm_option(USE_SORT "Build with sort support" ON)
 tvm_option(USE_NNPACK "Build with nnpack support" OFF)
 tvm_option(USE_RANDOM "Build with random support" OFF)
 tvm_option(USE_ANTLR "Build with ANTLR for Relay parsing" OFF)
@@ -56,13 +60,19 @@ include_directories("3rdparty/dlpack/include")
 include_directories("3rdparty/dmlc-core/include")
 include_directories("3rdparty/rang/include")
 include_directories("3rdparty/compiler-rt")
+include_directories("nnvm/include")
+include_directories("3rdparty/HalideIR/src")
 
 # initial variables
 set(TVM_LINKER_LIBS "")
-set(TVM_RUNTIME_LINKER_LIBS "")
+set(TVM_RUNTIME_LINKER_LIBS ${CMAKE_DL_LIBS})
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Generic compilation options
+if (USE_CVM_RUNTIME_CUDA)
+	set(CMAKE_C_FLAGS "-DCVM_RUNTIME_CUDA" ${CMAKE_C_FLAGS})
+	set(CMAKE_CXX_FLAGS "-DCVM_RUNTIME_CUDA" ${CMAKE_CXX_FLAGS})
+endif (USE_CVM_RUNTIME_CUDA)
 if(MSVC)
   add_definitions(-DWIN32_LEAN_AND_MEAN)
   add_definitions(-D_CRT_SECURE_NO_WARNINGS)
@@ -82,13 +92,16 @@ if(MSVC)
     endforeach(flag_var)
   endif()
 else(MSVC)
+  message(STATUS "BUILD C FLAGS")
   include(CheckCXXCompilerFlag)
   check_cxx_compiler_flag("-std=c++11"    SUPPORT_CXX11)
   if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
-    add_compile_options(-O0 -Wall -fPIC -fvisibility=hidden -std=c++11)
+    message("Build in Debug mode")
+    set(CMAKE_C_FLAGS "-O0 -g -Wall -fPIC ${CMAKE_C_FLAGS} -rdynamic")
+    set(CMAKE_CXX_FLAGS "-O0 -g -Wall -fPIC -std=c++11 ${CMAKE_CXX_FLAGS} -rdynamic")
   else()
-    set(CMAKE_C_FLAGS "-O2 -Wall -fPIC -fvisibility=hidden ${CMAKE_C_FLAGS}")
-    set(CMAKE_CXX_FLAGS "-O2 -Wall -fPIC -fvisibility=hidden -std=c++11 ${CMAKE_CXX_FLAGS}")
+    set(CMAKE_C_FLAGS "-g -O2 -Wall -fPIC -fvisibility=hidden ${CMAKE_C_FLAGS}")
+    set(CMAKE_CXX_FLAGS "-g -O2 -Wall -fPIC -fvisibility=hidden -std=c++11 ${CMAKE_CXX_FLAGS}")
   endif ()
   if (CMAKE_CXX_COMPILER_ID MATCHES "GNU" AND
       CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 7.0)
@@ -120,6 +133,8 @@ file(GLOB_RECURSE RELAY_SRCS
     )
 list(APPEND COMPILER_SRCS ${RELAY_SRCS})
 
+file(GLOB DATATYPE_SRCS src/codegen/datatype/*.cc)
+list(APPEND COMPILER_SRCS ${DATATYPE_SRCS})
 
 if(NOT MSVC)
   file(GLOB COMPILER_VERILOG_SRCS src/codegen/verilog/*.cc)
@@ -139,12 +154,17 @@ file(GLOB TOPI_SRCS
 )
 file(GLOB_RECURSE HALIDEIR_SRCS 3rdparty/HalideIR/src/*.cpp)
 list(APPEND COMPILER_SRCS ${HALIDEIR_SRCS})
-file(GLOB RUNTIME_SRCS src/runtime/*.cc)
+file(GLOB RUNTIME_SRCS
+  src/runtime/*.cc
+  src/runtime/vm/*.cc
+)
 
 # Package runtime rules
 if(NOT USE_RTTI)
   add_definitions(-DDMLC_ENABLE_RTTI=0)
 endif()
+
+list(APPEND RUNTIME_SRCS 3rdparty/bfloat16/bfloat16.cc)
 
 if(USE_RPC)
   message(STATUS "Build with RPC support...")
@@ -162,6 +182,18 @@ else()
   list(APPEND COMPILER_SRCS ${STACKVM_RUNTIME_SRCS})
 endif(USE_STACKVM_RUNTIME)
 
+if(USE_CVM_RUNTIME)
+    message(STATUS "Build with CVM runtime support...")
+    file(GLOB RUNTIME_CVM_SRCS src/runtime/cvm/*.cc)
+    list(APPEND RUNTIME_SRCS ${RUNTIME_CVM_SRCS})
+    file(GLOB NNVM_TOP_SRCS src/runtime/cvm/top/*.cc
+            src/runtime/cvm/top/nn/*.cc
+            src/runtime/cvm/top/tensor/*.cc)
+    list(APPEND RUNTIME_SRCS ${NNVM_TOP_SRCS})
+    #list(APPEND RUNTIME_SRCS ${NNVM_COMPILER_SRCS})
+    #list(APPEND RUNTIME_SRCS ${TOPI_SRCS})
+endif(USE_CVM_RUNTIME)
+
 if(USE_GRAPH_RUNTIME)
   message(STATUS "Build with Graph runtime support...")
   file(GLOB RUNTIME_GRAPH_SRCS src/runtime/graph/*.cc)
@@ -176,8 +208,9 @@ if(USE_GRAPH_RUNTIME)
   endif(USE_GRAPH_RUNTIME_DEBUG)
 endif(USE_GRAPH_RUNTIME)
 
+
 # Module rules
-include(cmake/modules/VTA.cmake)
+# include(cmake/modules/VTA.cmake)
 include(cmake/modules/CUDA.cmake)
 include(cmake/modules/OpenCL.cmake)
 include(cmake/modules/OpenGL.cmake)
@@ -187,15 +220,22 @@ include(cmake/modules/ROCM.cmake)
 include(cmake/modules/SGX.cmake)
 include(cmake/modules/LLVM.cmake)
 include(cmake/modules/ANTLR.cmake)
-include(cmake/modules/contrib/BLAS.cmake)
-include(cmake/modules/contrib/Random.cmake)
+#include(cmake/modules/contrib/BLAS.cmake)
+#include(cmake/modules/contrib/Random.cmake)
 include(cmake/modules/contrib/Sort.cmake)
-include(cmake/modules/contrib/NNPack.cmake)
-include(cmake/modules/contrib/HybridDump.cmake)
+#include(cmake/modules/contrib/NNPack.cmake)
+#include(cmake/modules/contrib/HybridDump.cmake)
 
 add_library(tvm SHARED ${COMPILER_SRCS} ${RUNTIME_SRCS})
 add_library(tvm_topi SHARED ${TOPI_SRCS})
 add_library(tvm_runtime SHARED ${RUNTIME_SRCS})
+
+if(USE_RELAY_DEBUG)
+  message(STATUS "Building Relay in debug mode...")
+  set_target_properties(tvm PROPERTIES COMPILE_DEFINITIONS "USE_RELAY_DEBUG")
+  set_target_properties(tvm PROPERTIES COMPILE_DEFINITIONS "NDEBUG")
+endif(USE_RELAY_DEBUG)
+
 if(NOT USE_SGX STREQUAL "OFF")
   add_dependencies(tvm sgx_edl)
   add_dependencies(tvm_runtime sgx_edl tvm_t)
@@ -233,7 +273,7 @@ if(GTEST_LIB)
     add_executable(${__execname} ${__srcpath})
     list(APPEND TEST_EXECS ${__execname})
     target_link_libraries(${__execname}
-      tvm ${GTEST_LIB} pthread)
+      tvm ${GTEST_LIB} pthread dl)
     set_target_properties(${__execname} PROPERTIES EXCLUDE_FROM_ALL 1)
     set_target_properties(${__execname} PROPERTIES EXCLUDE_FROM_DEFAULT_BUILD 1)
   endforeach()
@@ -244,10 +284,10 @@ endif()
 add_custom_target(runtime DEPENDS tvm_runtime)
 
 # Installation rules
-install(TARGETS tvm DESTINATION lib${LIB_SUFFIX})
-install(TARGETS tvm_topi DESTINATION lib${LIB_SUFFIX})
+#install(TARGETS tvm DESTINATION lib${LIB_SUFFIX})
+#install(TARGETS tvm_topi DESTINATION lib${LIB_SUFFIX})
 install(TARGETS tvm_runtime DESTINATION lib${LIB_SUFFIX})
-install(TARGETS nnvm_compiler DESTINATION lib${LIB_SUFFIX})
+#install(TARGETS nnvm_compiler DESTINATION lib${LIB_SUFFIX})
 
 if (INSTALL_DEV)
   install(
