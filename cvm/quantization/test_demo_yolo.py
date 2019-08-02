@@ -120,7 +120,7 @@ def test_mrt_quant(batch_size=1, iter_num=10):
        acc = validate_data(net, data, label, metric)
        return "{:6.2%}".format(acc)
 
-    if False:
+    if True:
         mrt = _mrt.MRT(base, base_params, inputs_ext)
         for i in range(16):
             data, _ = data_iter_func()
@@ -159,8 +159,16 @@ def test_mrt_quant(batch_size=1, iter_num=10):
         qbase_inputs_ext, oscales = sim.load_ext(qb_ext)
 
         maps = dict(zip([c.attr('name') for c in qbase], [c.attr('name') for c in base]))
+        def box_nms(node, params, graph):
+            name, op_name = node.attr('name'), node.attr('op_name')
+            childs, attr = sutils.sym_iter(node.get_children()), node.list_attr()
+            if op_name == '_contrib_box_nms':
+                valid_thresh = sutils.get_attr(attr, 'valid_thresh', 0)
+                attr['valid_thresh'] = int(valid_thresh * oscales[3])
+                node = sutils.get_mxnet_op(op_name)(*childs, **attr, name=name)
+            return node
         qsym, qparams = _mrt.merge_model(qbase, qbase_params,
-                top, top_params, maps)
+                top, top_params, maps, box_nms)
         sym_file, param_file, ext_file = load_fname("_darknet53_voc", "mrt.all.quantize", True)
         open(sym_file, "w").write(qsym.tojson())
         nd.save(param_file, qparams)

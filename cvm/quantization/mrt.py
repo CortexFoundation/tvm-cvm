@@ -632,7 +632,7 @@ def merge_model(base, base_params, top, top_params, base_maps, callback=None):
         if name in graph:
             node = graph[name]
         if callback is not None:
-            node = callback(node, params, graph)
+            node = callback(node, top_params, graph)
         graph[name] = node
     symbols = [graph[s.attr('name')] for s in top]
     symbol = symbols[0] if len(symbols) == 1 else mx.sym.Group(symbols)
