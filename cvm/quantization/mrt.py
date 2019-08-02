@@ -312,6 +312,8 @@ def _realize(sym, params, graph, inputs_ext):
             prec = get_attr(attr, 'precision')
         else:
             prec = _get_bit(params[name])
+            sym = mx.sym.var(name, attr={ 'precision': str(prec) },
+                    shape=params[name].shape)
             logger.warn(
                 "parameter %-40s independent from graph with precision %d",
                     name, prec)
@@ -593,20 +595,20 @@ def std_dump(sym, params, inputs_ext, data, model_name,
 
 def split_model(symbol, params, inputs_ext, keys):
     infer_shapes = spass.sym_infer_shape(symbol, params, inputs_ext)
-    bases = [s for s in sutils.topo_sort(symbol) if s.attr('name') in keys]
+    bases = [s for s in topo_sort(symbol) if s.attr('name') in keys]
     base = mx.sym.Group(bases)
     base_params = {k:params[k] for k in base.list_inputs() if k in params}
     base_inputs_ext = inputs_ext
 
     graph = {}
     inputs = {k:v for k,v in inputs_ext.items()}
-    for sym in sutils.topo_sort(symbol):
+    for sym in topo_sort(symbol):
         name, op_name = sym.attr('name'), sym.attr('op_name')
-        childs, attr = sutils.sym_iter(sym.get_children()), sym.list_attr()
+        childs, attr = sym_iter(sym.get_children()), sym.list_attr()
         node = sym
         if childs is not None:
             childs = [graph[c.attr('name')] for c in childs]
-            node = sutils.get_mxnet_op(op_name)(*childs, **attr, name=name)
+            node = get_mxnet_op(op_name)(*childs, **attr, name=name)
         if name in keys:
             node = mx.sym.var(name)
             inputs[name] = {'shape': infer_shapes[name]}
@@ -619,14 +621,14 @@ def split_model(symbol, params, inputs_ext, keys):
     return base, base_params, base_inputs_ext, top, top_params, top_inputs_ext
 
 def merge_model(base, base_params, top, top_params, base_maps, callback=None):
-    graph = {maps[c.attr('name')]:c for c in base}
-    for sym in sutils.topo_sort(top):
+    graph = {base_maps[c.attr('name')]:c for c in base}
+    for sym in topo_sort(top):
         name, op_name = sym.attr('name'), sym.attr('op_name')
-        childs, attr = sutils.sym_iter(sym.get_children()), sym.list_attr()
+        childs, attr = sym_iter(sym.get_children()), sym.list_attr()
         node = sym
         if childs is not None:
             childs = [graph[c.attr('name')] for c in childs]
-            node = sutils.get_mxnet_op(op_name)(*childs, **attr, name=name)
+            node = get_mxnet_op(op_name)(*childs, **attr, name=name)
         if name in graph:
             node = graph[name]
         if callback is not None:

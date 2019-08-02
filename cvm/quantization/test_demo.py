@@ -79,6 +79,7 @@ def test_sym_pass(batch_size=10, iter_num=10):
         open(dump_sym, "w").write(qsym.tojson())
 
         # convert to cvm executor model
+        inputs_ext['data']['shape'] = (1, 3, 224, 224)
         nnvm_sym, nnvm_params = spass.mxnet_to_nnvm(qsym, qparams, inputs_ext)
         spass.cvm_build(nnvm_sym, nnvm_params, inputs_ext, *load_fname(version, "nnvm"))
 
