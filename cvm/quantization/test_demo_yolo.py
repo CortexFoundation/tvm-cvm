@@ -10,7 +10,6 @@ import sym_pass as spass
 import sym_utils as sutils
 import sim_quant_helper as sim
 import dataset
-import cvm_op
 
 import logging
 

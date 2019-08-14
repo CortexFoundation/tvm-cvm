@@ -4,6 +4,7 @@ from mxnet import ndarray as nd
 import numpy as np
 import math
 
+import cvm_op
 from sym_utils import *
 from utils import *
 import sym_pass as spass
