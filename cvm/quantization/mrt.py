@@ -20,23 +20,6 @@ disable_requant_ops = [
     'max', 'upsampling',
 ]
 
-def RPassThrough(prec, oprec):
-    l = max(prec.l, oprec.l)
-    p = prec.p if prec.l > oprec.l else oprec.p
-    return PREC(p, l)
-def RInjective(prec, oprec):
-    l = max(prec.l, oprec.l)
-    if prec.l > oprec.l:
-        assert prec.p <= oprec.p
-        p = prec.p
-    else:
-        p = oprec.p
-    return PREC(p, l)
-LPassThrough = 'level_pass_through'
-LInjective = 'level_injective'
-LMaxInput = 'level_max_input'
-LMax, LMin = 'level_maximum', 'level_minimum'
-LSelectIndexOne = 'level_select_index_one'
 L0, L1, L2, L3, L4, L5, L6 = 0, 25, 50, 75, 100, 150, 200
 LFIX = 1000
 class PREC():
@@ -85,7 +68,6 @@ def _mrt_sim_quantize(sym, sb, params, graph, prec):
     name = "%s_%d_%d" % (sym.attr('name'), sb, prec)
     if name in graph:
         return graph[name]
-
     return mx.sym.Custom(sym, sb=sb, prec=prec,
                 name=name, op_type='mrt_sim_quant')
 
@@ -118,7 +100,6 @@ def _simulate(sym, params, graph, inputs_ext, self):
     childs, attr = sym_iter(sym.get_children()), sym.list_attr()
     infer_shapes, th_dict = self.shpes, self.th_dict
     precs, scales = self.precs, self.scales
-    rtypes, ltypes = self._rtypes, self._ltypes
     op_input_precs = self._op_input_precs
 
     cns = [c.attr('name') for c in childs] if childs else []
@@ -142,7 +123,6 @@ def _simulate(sym, params, graph, inputs_ext, self):
         oscale = oscale if oscale else scale(th_dict[xn], oprec.p)
         iscale = scales[xn]
         iprec = precs[xn][out_key]
-        oprec = rtypes[name](iprec, oprec)
         if exactly:
             in_prec = _get_bit(th_dict[xn] * iscale)
             out_prec = oprec.p
@@ -351,8 +331,6 @@ class MRT():
 
         self._fixed = set()
         self._datas = {}
-        self._ltypes = {}
-        self._rtypes = {}
         self._op_input_precs = self._op_default_input_precs()
         self._lgr = logging.getLogger('log.mrt')
         self._set_prerequisites()
@@ -506,7 +484,6 @@ class MRT():
             self.precs[k][out_key] = PREC(8, L0)
 
         self.shpes = spass.sym_infer_shape(self.sym, self.prm, self.ins_ext)
-        self._set_default_types()
 
     def _op_default_input_precs(self):
         op_precs = {}
@@ -536,36 +513,12 @@ class MRT():
                 bit = self.precs[name][out_key].p
             self.th_dict[name] = _get_range(bit)
 
-    def _set_default_types(self):
-        for sym in topo_sort(self.sym):
-            name, op_name = sym.attr('name'), sym.attr('op_name')
-            if op_name == 'null':
-                continue
-            elif name in self._rtypes:
-                continue
-            elif op_name in disable_requant_ops:
-                self._rtypes[name] = RPassThrough
-            elif op_name in ['broadcast_add', 'broadcast_sub',
-                'broadcast_mul', 'elemwise_add', 'elemwise_sub',
-                'Concat']:
-                self._rtypes[name] = RPassThrough
-            elif op_name in ['Convolution', 'FullyConnected']:
-                self._rtypes[name] = RInjective
-            elif op_name in ['sum']:
-                self._rtypes[name] = RInjective
-            elif op_name in ['sigmoid', 'exp']:
-                self._rtypes[name] = RInjective
-            elif op_name in ['Embedding']:
-                self._rtypes[name] = RPassThrough
-            else:
-                assert False, "%s name=%s"%(op_name, name)
-
 import os
 from tvm.contrib import graph_runtime
 import tvm
 def std_dump(sym, params, inputs_ext, data, model_name,
-        is_mxnet=True,
-        batch=False, data_dtype="int8", max_num=20, dump_ops=[]):
+        is_mxnet=True, batch=False,
+        data_dtype="int8", max_num=20, dump_ops=[]):
     if not batch:
         for k, v in inputs_ext.items():
             v['shape'] = (1, *v['shape'][1:])

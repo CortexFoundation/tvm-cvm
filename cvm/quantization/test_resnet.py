@@ -38,7 +38,7 @@ def load_fname(version, suffix=None, with_ext=False):
     fname = "./data/resnet%s%s"%(version, suffix)
     return utils.extend_fname(fname, with_ext)
 
-version = "50_v2"
+version = "50_v1"
 
 def test_sym_nnvm(batch_size=10):
     dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
@@ -52,7 +52,7 @@ def test_sym_nnvm(batch_size=10):
 def test_sym_pass(batch_size=10, iter_num=10):
     logger = logging.getLogger("log.test.sym.pass")
     calib_ctx = mx.gpu(2)
-    ctx = [mx.gpu(int(i)) for i in "1,2,3,4,5,6".split(',') if i.strip()]
+    ctx = [mx.gpu(int(i)) for i in "1,2,3".split(',') if i.strip()]
     inputs_ext = { 'data': {
             'shape': (batch_size, 3, 224, 224),
     } }
@@ -85,7 +85,7 @@ def test_sym_pass(batch_size=10, iter_num=10):
     sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
 
     if True:
-        if False:
+        if True:
             mrt = _mrt.MRT(sym, params, inputs_ext)
             #  mrt.set_pure_int8()
             mrt.set_data('data', data)
@@ -148,8 +148,8 @@ if __name__ == "__main__":
                     datadir="/data/wlt", ctx=mx.gpu(2))
         exit()
 
-    # test_sym_pass(batch_size=16, iter_num=100)
-    test_sym_nnvm(batch_size=1)
+    test_sym_pass(batch_size=16, iter_num=100)
+    #  test_sym_nnvm(batch_size=1)
     # test_performance(16, 10)
 
 
