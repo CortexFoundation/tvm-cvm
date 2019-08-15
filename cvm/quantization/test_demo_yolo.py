@@ -119,7 +119,7 @@ def test_mrt_quant(batch_size=1, iter_num=10):
        acc = validate_data(net, data, label, metric)
        return "{:6.2%}".format(acc)
 
-    if True:
+    if False:
         mrt = _mrt.MRT(base, base_params, inputs_ext)
         for i in range(16):
             data, _ = data_iter_func()
@@ -146,18 +146,18 @@ def test_mrt_quant(batch_size=1, iter_num=10):
         mrt.set_output_prec(30)
         qbase, qbase_params, qbase_inputs_ext = mrt.quantize()
         oscales = mrt.get_output_scales()
+        maps = mrt.get_maps()
         dump_sym, dump_params, dump_ext = load_fname("_darknet53_voc", "mrt.quantize", True)
         open(dump_sym, "w").write(qbase.tojson())
         nd.save(dump_params, qbase_params)
-        sim.save_ext(dump_ext, qbase_inputs_ext, oscales)
+        sim.save_ext(dump_ext, qbase_inputs_ext, oscales, maps)
 
     # merge quantize model
     if True:
         qb_sym, qb_params, qb_ext = load_fname("_darknet53_voc", "mrt.quantize", True)
         qbase, qbase_params = mx.sym.load(qb_sym), nd.load(qb_params)
-        qbase_inputs_ext, oscales = sim.load_ext(qb_ext)
+        qbase_inputs_ext, oscales, maps = sim.load_ext(qb_ext)
 
-        maps = dict(zip([c.attr('name') for c in qbase], [c.attr('name') for c in base]))
         def box_nms(node, params, graph):
             name, op_name = node.attr('name'), node.attr('op_name')
             childs, attr = sutils.sym_iter(node.get_children()), node.list_attr()

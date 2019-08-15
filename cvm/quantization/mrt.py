@@ -348,6 +348,7 @@ class MRT():
     def set_pure_int8(self):
         for k,v in self._op_input_precs.items():
             v.p = 8
+        self.set_output_prec(8)
 
     def set_fixed(self, fixes):
         if isinstance(fixes, list):
@@ -400,6 +401,10 @@ class MRT():
             else:
                 oscales.append(1)
         return oscales
+
+    def get_maps(self):
+        return dict(zip([c.attr('name') for c in self.qsym],
+                    [c.attr('name') for c in self.sym]))
 
     def _sym_calibrate(self, ctx):
         order, deps = topo_sort(self.sym, logger=self._lgr, with_deps=True)
