@@ -38,13 +38,16 @@ json.cfg    configuration for MRT quantization
         calibrate_num       calibration iterator number.
         output_precision    set model output precision, by default is non set(-1).
 
+        fixed       set fixed symbol without scale.
+        thresholds  set symbol output range manually instead of calibrate.
+
         split_names     split model into two part for yolo.
         name_maps       model output name maps to split_names for scales.
         valid_thresh    the operator box_nms scale corresponding with split_names.
     cvm:            transform to cvm supported model flags
         batch_size      batch size compiled to cvm model,
                         by default same as quantization batch size.
-        output_scale    whether save output scales
+        save_ext        whether save quantized information 
 """
 
 def CHECK(cond, err="", lgr=logger):
@@ -105,6 +108,10 @@ if __name__ == "__main__":
         def data_iter_func():
             data, label = next(val_data_iter)
             return data, label
+    elif dataset == "trec":
+        data_iter = ds.load_trec(batch_size)
+        def data_iter_func():
+            return next(data_iter)
     else:
          CHECK(False, "config error: dataset")
 
@@ -166,8 +173,7 @@ if __name__ == "__main__":
 
     spass.cvm_build(nnvm_sym, nnvm_params, inputs_ext, cvm_sym, cvm_prm)
 
-    oscale_flag = cvm_flag.get("output_scale", False)
-    if oscale_flag:
-        sim.save_ext(cvm_ext, oscales)
+    if cvm_flag.get("save_ext", False):
+        sim.save_ext(cvm_ext, inputs_ext, oscales)
 
 
