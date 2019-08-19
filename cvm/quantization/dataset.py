@@ -6,6 +6,8 @@ from gluoncv.data.batchify import Tuple, Stack, Pad
 from gluoncv.data.transforms.presets.yolo import YOLO3DefaultValTransform
 from gluoncv.utils.metrics.voc_detection import VOC07MApMetric
 import numpy as np
+import requests
+import shutil
 
 import os
 import math
@@ -39,9 +41,26 @@ def load_imagenet(batch_size):
         last_batch='keep',
         num_workers=30)
 
-def load_imagenet_rec(batch_size, input_size=224):
+
+def download_file(filename):
+    if os.path.exists(filename):
+        return
+    if "imagenet" in filename:
+        if "val.rec" in filename:
+            r = requests.get("http://192.168.50.210:8827/imagenet/val.rec")
+        elif "val.idx" in filename: 
+            r = requests.get("http://192.168.50.210:8827/imagenet/val.idx")
+    r.raise_for_status()
+    nf = open(filename, "wb")
+    for c in r.iter_content(10000):
+        nf.write(c)
+
+
+def load_imagenet_rec(batch_size, input_size=224): 
     rec_val = os.path.expanduser("~/.mxnet/datasets/imagenet/rec/val.rec")
+    download_file(rec_val)
     rec_val_idx = os.path.expanduser("~/.mxnet/datasets/imagenet/rec/val.idx")
+    download_file(rec_val_idx)
     crop_ratio = 0.875
     resize = int(math.ceil(input_size / crop_ratio))
     mean_rgb = [123.68, 116.779, 103.939]
