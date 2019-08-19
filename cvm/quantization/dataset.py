@@ -64,11 +64,13 @@ def download_file(filename, src = "http://192.168.50.210:8827"):
     base_folder = "./dataset"
     suffix = filename.replace(base_folder, "")
     r = requests.get(src + suffix)
+    if r.status_code != 200:
+        print("url request error: %d" % r.status_code )
+        exit()
     r.raise_for_status()
-    nf = open(filename, "wb")
-    for c in r.iter_content(10000):
-        nf.write(c)
-    nf.close()
+    f = open(filename, "wb")
+    f.write(r.content)
+    f.close()
 
 
 def load_imagenet_rec(batch_size, input_size=224): 
