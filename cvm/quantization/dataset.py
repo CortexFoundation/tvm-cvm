@@ -15,14 +15,15 @@ import math
 import pickle
 
 # max value: 2.64
-def load_voc(batch_size, input_size=416):
-    filename = "./dataset/voc/VOCtest_06-Nov-2007.tar"
-    download_file(filename)
+def load_voc(dataset_dir, batch_size, input_size=416):
+    filename = dataset_dir + "/voc/VOCtest_06-Nov-2007.tar"
+    download_file(dataset_dir, filename)
     foldername, _ = os.path.splitext(filename)
     extract_file(filename, foldername)
     width, height = input_size, input_size
-    val_dataset = gdata.VOCDetection(root=os.path.join('~', 'tvm-cvm', 'dataset',
-                                     'voc', 'VOCtest_06-Nov-2007','VOCdevkit' ), 
+    val_dataset = gdata.VOCDetection(root=os.path.join(dataset_dir, 'voc',
+                                                       'VOCtest_06-Nov-2007',
+                                                       'VOCdevkit' ), 
                                      splits=[('2007', 'test')])
     val_batchify_fn = Tuple(Stack(), Pad(pad_val=-1))
     val_loader = gluon.data.DataLoader(
@@ -55,14 +56,13 @@ def extract_file(tar_path, target_path):
     tar.close()
 
 
-def download_file(filename, src = "http://192.168.50.210:8827"):
+def download_file(dataset_dir, filename, src = "http://192.168.50.210:8827"):
     if os.path.exists(filename):
         return
     filedir = os.path.dirname(filename);
     if not os.path.exists(filedir):
         os.makedirs(filedir)
-    base_folder = "./dataset"
-    suffix = filename.replace(base_folder, "")
+    suffix = filename.replace(dataset_dir, "")
     r = requests.get(src + suffix)
     if r.status_code != 200:
         print("url request error: %d" % r.status_code )
@@ -73,13 +73,11 @@ def download_file(filename, src = "http://192.168.50.210:8827"):
     f.close()
 
 
-def load_imagenet_rec(batch_size, input_size=224): 
-    # rec_val = os.path.expanduser("~/.mxnet/datasets/imagenet/rec/val.rec")
-    rec_val = "./dataset/imagenet/val.rec"
-    download_file(rec_val)
-    # rec_val_idx = os.path.expanduser("~/.mxnet/datasets/imagenet/rec/val.idx")
-    rec_val_idx = "./dataset/imagenet/val.idx"
-    download_file(rec_val_idx)
+def load_imagenet_rec(dataset_dir, batch_size, input_size=224): 
+    rec_val = dataset_dir + "/imagenet/val.rec"
+    download_file(dataset_dir, rec_val)
+    rec_val_idx = dataset_dir + "/imagenet/val.idx"
+    download_file(dataset_dir, rec_val_idx)
     crop_ratio = 0.875
     resize = int(math.ceil(input_size / crop_ratio))
     mean_rgb = [123.68, 116.779, 103.939]
@@ -134,14 +132,12 @@ def load_quickdraw10(batch_size, num_workers=4):
             yield data, label
     return data_iter()
 
-def load_trec(batch_size, is_train = False):
+def load_trec(dataset_dir, batch_size, is_train = False):
     if is_train:
-        # fname = "./data/TREC/TREC.train.pk"
-        fname = "./dataset/trec/TREC.train.pk"
+        fname = dataset_dir + "/trec/TREC.train.pk"
     else:
-        # fname = "./data/TREC/TREC.test.pk"
-        fname = "./dataset/trec/TREC.test.pk"
-    download_file(fname) 
+        fname = dataset_dir + "/trec/TREC.test.pk"
+    download_file(dataset_dir, fname) 
     dataset = pickle.load(open(fname, "rb"))
     data, label = [], []
     for x, y in dataset:
