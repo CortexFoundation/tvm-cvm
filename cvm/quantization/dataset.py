@@ -8,6 +8,7 @@ from gluoncv.utils.metrics.voc_detection import VOC07MApMetric
 import numpy as np
 import requests
 import shutil
+import tarfile
 
 import os
 import math
@@ -15,8 +16,14 @@ import pickle
 
 # max value: 2.64
 def load_voc(batch_size, input_size=416):
+    filename = "./dataset/voc/VOCtest_06-Nov-2007.tar"
+    download_file(filename)
+    foldername, _ = os.path.splitext(filename)
+    extract_file(filename, foldername)
     width, height = input_size, input_size
-    val_dataset = gdata.VOCDetection(splits=[('2007', 'test')])
+    val_dataset = gdata.VOCDetection(root=os.path.join('~', 'tvm-cvm', 'dataset',
+                                     'voc', 'VOCtest_06-Nov-2007','VOCdevkit' ), 
+                                     splits=[('2007', 'test')])
     val_batchify_fn = Tuple(Stack(), Pad(pad_val=-1))
     val_loader = gluon.data.DataLoader(
         val_dataset.transform(YOLO3DefaultValTransform(width, height)),
@@ -42,24 +49,21 @@ def load_imagenet(batch_size):
         num_workers=30)
 
 
-def download_file(filename, src_path = "http://192.168.50.210:8827"):
+def extract_file(tar_path, target_path):
+    tar = tarfile.open(tar_path, "r")
+    tar.extractall(target_path)
+    tar.close()
+
+
+def download_file(filename, src = "http://192.168.50.210:8827"):
     if os.path.exists(filename):
         return
-    filedir, _ = os.path.split(filename);
+    filedir = os.path.dirname(filename);
     if not os.path.exists(filedir):
         os.makedirs(filedir)
-    if "imagenet" in filename:
-        if "val.rec" in filename:
-            r = requests.get(src_path + "/imagenet/val.rec")
-        elif "val.idx" in filename: 
-            r = requests.get(src_path + "/imagenet/val.idx")
-    elif "trec" in filename:
-        if "TREC.test.pk" in filename:
-            r = requests.get(src_path + "/trec/TREC.test.pk")
-        if "TREC.train.pk" in filename:
-            r = requests.get(src_path + "/trec/TREC.train.pk")
-    else:
-        return
+    base_folder = "./dataset"
+    suffix = filename.replace(base_folder, "")
+    r = requests.get(src + suffix)
     r.raise_for_status()
     nf = open(filename, "wb")
     for c in r.iter_content(10000):
@@ -69,10 +73,10 @@ def download_file(filename, src_path = "http://192.168.50.210:8827"):
 
 def load_imagenet_rec(batch_size, input_size=224): 
     # rec_val = os.path.expanduser("~/.mxnet/datasets/imagenet/rec/val.rec")
-    rec_val = "./dataset/imagenet/rec/val.rec"
+    rec_val = "./dataset/imagenet/val.rec"
     download_file(rec_val)
     # rec_val_idx = os.path.expanduser("~/.mxnet/datasets/imagenet/rec/val.idx")
-    rec_val_idx = "./dataset/imagenet/rec/val.idx"
+    rec_val_idx = "./dataset/imagenet/val.idx"
     download_file(rec_val_idx)
     crop_ratio = 0.875
     resize = int(math.ceil(input_size / crop_ratio))
