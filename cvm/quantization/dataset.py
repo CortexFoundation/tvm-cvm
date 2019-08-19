@@ -131,10 +131,10 @@ def load_quickdraw10(batch_size, num_workers=4):
 def load_trec(batch_size, is_train = False):
     if is_train:
         # fname = "./data/TREC/TREC.train.pk"
-        fname = os.path.expanduser("./dataset/trec/TREC.train.pk")
+        fname = "./dataset/trec/TREC.train.pk"
     else:
         # fname = "./data/TREC/TREC.test.pk"
-        fname = os.path.expanduser("./dataset/trec/TREC.test.pk")
+        fname = "./dataset/trec/TREC.test.pk"
     download_file(fname) 
     dataset = pickle.load(open(fname, "rb"))
     data, label = [], []
