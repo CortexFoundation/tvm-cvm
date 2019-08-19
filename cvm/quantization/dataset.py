@@ -45,21 +45,34 @@ def load_imagenet(batch_size):
 def download_file(filename):
     if os.path.exists(filename):
         return
+    filedir, _ = os.path.split(filename);
+    if not os.path.exists(filedir):
+        os.makedirs(filedir)
     if "imagenet" in filename:
         if "val.rec" in filename:
             r = requests.get("http://192.168.50.210:8827/imagenet/val.rec")
         elif "val.idx" in filename: 
             r = requests.get("http://192.168.50.210:8827/imagenet/val.idx")
+    elif "trec" in filename:
+        if "TREC.test.pk" in filename:
+            r = requests.get("http://192.168.50.210:8827/trec/TREC.test.pk")
+        if "TREC.train.pk" in filename:
+            r = requests.get("http://192.168.50.210:8827/trec/TREC.train.pk")
+    else:
+        return
     r.raise_for_status()
     nf = open(filename, "wb")
     for c in r.iter_content(10000):
         nf.write(c)
+    nf.close()
 
 
 def load_imagenet_rec(batch_size, input_size=224): 
-    rec_val = os.path.expanduser("~/.mxnet/datasets/imagenet/rec/val.rec")
+    # rec_val = os.path.expanduser("~/.mxnet/datasets/imagenet/rec/val.rec")
+    rec_val = os.path.expanduser("./dataset/imagenet/rec/val.rec")
     download_file(rec_val)
-    rec_val_idx = os.path.expanduser("~/.mxnet/datasets/imagenet/rec/val.idx")
+    # rec_val_idx = os.path.expanduser("~/.mxnet/datasets/imagenet/rec/val.idx")
+    rec_val_idx = os.path.expanduser("./dataset/imagenet/rec/val.idx")
     download_file(rec_val_idx)
     crop_ratio = 0.875
     resize = int(math.ceil(input_size / crop_ratio))
@@ -117,9 +130,12 @@ def load_quickdraw10(batch_size, num_workers=4):
 
 def load_trec(batch_size, is_train = False):
     if is_train:
-        fname = "./data/TREC/TREC.train.pk"
+        # fname = "./data/TREC/TREC.train.pk"
+        fname = os.path.expanduser("./dataset/trec/TREC.train.pk")
     else:
-        fname = "./data/TREC/TREC.test.pk"
+        # fname = "./data/TREC/TREC.test.pk"
+        fname = os.path.expanduser("./dataset/trec/TREC.test.pk")
+    download_file(fname) 
     dataset = pickle.load(open(fname, "rb"))
     data, label = [], []
     for x, y in dataset:
