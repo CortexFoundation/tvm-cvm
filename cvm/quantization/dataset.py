@@ -42,7 +42,7 @@ def load_imagenet(batch_size):
         num_workers=30)
 
 
-def download_file(filename):
+def download_file(filename, src_path = "http://192.168.50.210:8827"):
     if os.path.exists(filename):
         return
     filedir, _ = os.path.split(filename);
@@ -50,14 +50,14 @@ def download_file(filename):
         os.makedirs(filedir)
     if "imagenet" in filename:
         if "val.rec" in filename:
-            r = requests.get("http://192.168.50.210:8827/imagenet/val.rec")
+            r = requests.get(src_path + "/imagenet/val.rec")
         elif "val.idx" in filename: 
-            r = requests.get("http://192.168.50.210:8827/imagenet/val.idx")
+            r = requests.get(src_path + "/imagenet/val.idx")
     elif "trec" in filename:
         if "TREC.test.pk" in filename:
-            r = requests.get("http://192.168.50.210:8827/trec/TREC.test.pk")
+            r = requests.get(src_path + "/trec/TREC.test.pk")
         if "TREC.train.pk" in filename:
-            r = requests.get("http://192.168.50.210:8827/trec/TREC.train.pk")
+            r = requests.get(src_path + "/trec/TREC.train.pk")
     else:
         return
     r.raise_for_status()
@@ -69,10 +69,10 @@ def download_file(filename):
 
 def load_imagenet_rec(batch_size, input_size=224): 
     # rec_val = os.path.expanduser("~/.mxnet/datasets/imagenet/rec/val.rec")
-    rec_val = os.path.expanduser("./dataset/imagenet/rec/val.rec")
+    rec_val = "./dataset/imagenet/rec/val.rec"
     download_file(rec_val)
     # rec_val_idx = os.path.expanduser("~/.mxnet/datasets/imagenet/rec/val.idx")
-    rec_val_idx = os.path.expanduser("./dataset/imagenet/rec/val.idx")
+    rec_val_idx = "./dataset/imagenet/rec/val.idx"
     download_file(rec_val_idx)
     crop_ratio = 0.875
     resize = int(math.ceil(input_size / crop_ratio))
