@@ -22,7 +22,8 @@ def load_voc(batch_size, input_size=416):
     filename = dataset_dir + "/voc/VOCtest_06-Nov-2007.tar"
     download_file(filename)
     foldername, _ = os.path.splitext(filename)
-    extract_file(filename, foldername)
+    if not os.path.exists(foldername):
+        extract_file(filename, foldername)
     width, height = input_size, input_size
     val_dataset = gdata.VOCDetection(root=os.path.join(dataset_dir, 'voc',
                                                        'VOCtest_06-Nov-2007',
