@@ -6,15 +6,29 @@ from gluoncv.data.batchify import Tuple, Stack, Pad
 from gluoncv.data.transforms.presets.yolo import YOLO3DefaultValTransform
 from gluoncv.utils.metrics.voc_detection import VOC07MApMetric
 import numpy as np
+import requests
+import shutil
+import tarfile
 
 import os
 import math
 import pickle
 
+dataset_dir = os.path.expanduser("~/.cvm")
+src = "http://192.168.50.210:8827"
+
 # max value: 2.64
 def load_voc(batch_size, input_size=416):
+    filename = dataset_dir + "/voc/VOCtest_06-Nov-2007.tar"
+    download_file(filename)
+    foldername, _ = os.path.splitext(filename)
+    if not os.path.exists(foldername):
+        extract_file(filename, foldername)
     width, height = input_size, input_size
-    val_dataset = gdata.VOCDetection(splits=[('2007', 'test')])
+    val_dataset = gdata.VOCDetection(root=os.path.join(dataset_dir, 'voc',
+                                                       'VOCtest_06-Nov-2007',
+                                                       'VOCdevkit' ), 
+                                     splits=[('2007', 'test')])
     val_batchify_fn = Tuple(Stack(), Pad(pad_val=-1))
     val_loader = gluon.data.DataLoader(
         val_dataset.transform(YOLO3DefaultValTransform(width, height)),
@@ -39,9 +53,35 @@ def load_imagenet(batch_size):
         last_batch='keep',
         num_workers=30)
 
-def load_imagenet_rec(batch_size, input_size=224):
-    rec_val = os.path.expanduser("~/.mxnet/datasets/imagenet/rec/val.rec")
-    rec_val_idx = os.path.expanduser("~/.mxnet/datasets/imagenet/rec/val.idx")
+
+def extract_file(tar_path, target_path):
+    tar = tarfile.open(tar_path, "r")
+    tar.extractall(target_path)
+    tar.close()
+
+
+def download_file(filename):
+    if os.path.exists(filename):
+        return
+    filedir = os.path.dirname(filename);
+    if not os.path.exists(filedir):
+        os.makedirs(filedir)
+    suffix = filename.replace(dataset_dir, "")
+    r = requests.get(src + suffix)
+    if r.status_code != 200:
+        print("url request error: %d" % r.status_code )
+        exit()
+    r.raise_for_status()
+    f = open(filename, "wb")
+    f.write(r.content)
+    f.close()
+
+
+def load_imagenet_rec(batch_size, input_size=224): 
+    rec_val = dataset_dir + "/imagenet/val.rec"
+    download_file(rec_val)
+    rec_val_idx = dataset_dir + "/imagenet/val.idx"
+    download_file(rec_val_idx)
     crop_ratio = 0.875
     resize = int(math.ceil(input_size / crop_ratio))
     mean_rgb = [123.68, 116.779, 103.939]
@@ -98,9 +138,10 @@ def load_quickdraw10(batch_size, num_workers=4):
 
 def load_trec(batch_size, is_train = False):
     if is_train:
-        fname = "./data/TREC/TREC.train.pk"
+        fname = dataset_dir + "/trec/TREC.train.pk"
     else:
-        fname = "./data/TREC/TREC.test.pk"
+        fname = dataset_dir + "/trec/TREC.test.pk"
+    download_file(fname) 
     dataset = pickle.load(open(fname, "rb"))
     data, label = [], []
     for x, y in dataset:
