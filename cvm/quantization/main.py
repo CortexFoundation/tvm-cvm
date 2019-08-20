@@ -97,20 +97,19 @@ if __name__ == "__main__":
     } }
 
     dataset = cfg["dataset"]
-    dataset_dir = path.expanduser("~/.cvm")
     if dataset == "imagenet":
-        data_iter = ds.load_imagenet_rec(dataset_dir, batch_size, shp[2])
+        data_iter = ds.load_imagenet_rec(batch_size, shp[2])
         def data_iter_func():
             data = data_iter.next()
             return data.data[0], data.label[0]
     elif dataset == "voc":
-        val_data = ds.load_voc(dataset_dir, batch_size, shp[2])
+        val_data = ds.load_voc(batch_size, shp[2])
         val_data_iter = iter(val_data)
         def data_iter_func():
             data, label = next(val_data_iter)
             return data, label
     elif dataset == "trec":
-        data_iter = ds.load_trec(dataset_dir, batch_size)
+        data_iter = ds.load_trec(batch_size)
         def data_iter_func():
             return next(data_iter)
     else:

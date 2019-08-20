@@ -14,10 +14,13 @@ import os
 import math
 import pickle
 
+dataset_dir = os.path.expanduser("~/.cvm")
+src = "http://192.168.50.210:8827"
+
 # max value: 2.64
-def load_voc(dataset_dir, batch_size, input_size=416):
+def load_voc(batch_size, input_size=416):
     filename = dataset_dir + "/voc/VOCtest_06-Nov-2007.tar"
-    download_file(dataset_dir, filename)
+    download_file(filename)
     foldername, _ = os.path.splitext(filename)
     extract_file(filename, foldername)
     width, height = input_size, input_size
@@ -56,7 +59,7 @@ def extract_file(tar_path, target_path):
     tar.close()
 
 
-def download_file(dataset_dir, filename, src = "http://192.168.50.210:8827"):
+def download_file(filename):
     if os.path.exists(filename):
         return
     filedir = os.path.dirname(filename);
@@ -73,11 +76,11 @@ def download_file(dataset_dir, filename, src = "http://192.168.50.210:8827"):
     f.close()
 
 
-def load_imagenet_rec(dataset_dir, batch_size, input_size=224): 
+def load_imagenet_rec(batch_size, input_size=224): 
     rec_val = dataset_dir + "/imagenet/val.rec"
-    download_file(dataset_dir, rec_val)
+    download_file(rec_val)
     rec_val_idx = dataset_dir + "/imagenet/val.idx"
-    download_file(dataset_dir, rec_val_idx)
+    download_file(rec_val_idx)
     crop_ratio = 0.875
     resize = int(math.ceil(input_size / crop_ratio))
     mean_rgb = [123.68, 116.779, 103.939]
@@ -132,12 +135,12 @@ def load_quickdraw10(batch_size, num_workers=4):
             yield data, label
     return data_iter()
 
-def load_trec(dataset_dir, batch_size, is_train = False):
+def load_trec(batch_size, is_train = False):
     if is_train:
         fname = dataset_dir + "/trec/TREC.train.pk"
     else:
         fname = dataset_dir + "/trec/TREC.test.pk"
-    download_file(dataset_dir, fname) 
+    download_file(fname) 
     dataset = pickle.load(open(fname, "rb"))
     data, label = [], []
     for x, y in dataset:
