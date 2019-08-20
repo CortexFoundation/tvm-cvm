@@ -151,3 +151,24 @@ def load_trec(batch_size, is_train = False):
         else:
             yield nd.transpose(nd.array(data)), nd.transpose(nd.array(label))
             data, label = [], []
+
+def load_mnist(batch_size):
+    root_dir = dataset_dir + "/mnist"
+    t10k_images = dataset_dir + "/mnist/t10k-images-idx3-ubyte.gz"
+    t10k_labels = dataset_dir + "/mnist/t10k-labels-idx1-ubyte.gz"
+    train_images = dataset_dir + "/mnist/train-images-idx3-ubyte.gz"
+    train_labels = dataset_dir + "/mnist/train-labels-idx1-ubyte.gz"
+    download_file(t10k_images)
+    download_file(t10k_labels)
+    download_file(train_images)
+    download_file(train_labels)
+    val_data = mx.gluon.data.vision.MNIST(root=root_dir, train=False).transform_first(data_xform)
+    val_loader = mx.gluon.data.DataLoader(val_data, shuffle=False, batch_size=batch_size)
+    return val_loader 
+
+def data_xform(data):
+    """Move channel axis to the beginning, cast to float32, and normalize to [0, 1]."""
+    return nd.moveaxis(data, 2, 0).astype('float32') / 255
+
+
+
