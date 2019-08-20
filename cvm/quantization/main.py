@@ -112,6 +112,11 @@ if __name__ == "__main__":
         data_iter = ds.load_trec(batch_size)
         def data_iter_func():
             return next(data_iter)
+    elif dataset == "mnist":
+        val_loader = ds.load_mnist(batch_size)
+        data_iter = iter(val_loader)
+        def data_iter_func():
+            return next(data_iter) 
     else:
          CHECK(False, "config error: dataset")
 
