@@ -71,8 +71,8 @@ if __name__ == "__main__":
     CHECK("quantization" in cfg, "config error: quantization")
     CHECK("dataset" in cfg, "config error: dataset")
     CHECK("cvm" in cfg, "config error: cvm")
-    cvm_sym = cfg.get("cvm_symbol", "./cvm.symbol")
-    cvm_prm = cfg.get("cvm_params", "./cvm.params")
+    cvm_sym = cfg.get("cvm_symbol", "./symbol")
+    cvm_prm = cfg.get("cvm_params", "./params")
     cvm_ext = cfg.get("cvm_ext", "./cvm.ext")
 
     sym_file, prm_file = cfg["symbol"], cfg["params"]
