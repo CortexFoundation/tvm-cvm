@@ -33,7 +33,7 @@ utils.log_init()
 
 data_iter = ds.load_cifar10(batch_size, input_size)
 def data_iter_func():
-    data, label = data_iter.__next__()
+    data, label = next(data_iter)
     return data, label
 data, _ = next(data_iter)
 
