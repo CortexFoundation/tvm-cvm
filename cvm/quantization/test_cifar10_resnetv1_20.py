@@ -8,10 +8,12 @@ import dataset as ds
 import sym_calib as calib
 import sim_quant_helper as sim
 import utils
+import mrt as _mrt
+import logging
 
 version = "20_v1"
 gz.save_model("cifar_resnet"+version)
-exit(0)
+#exit(0)
 
 def load_fname(version, suffix=None, with_ext=False):
     suffix = "."+suffix if suffix is not None else ""
@@ -25,14 +27,14 @@ inputs_ext = { 'data': {
 }}
 inputs = [mx.sym.var(n) for n in inputs_ext]
 calib_ctx = mx.gpu(2)
-ctx = [mx.gpu(int(i)) for i in "1,2,3,4,5,6,7".split(',') if i.strip()]
+ctx = [mx.gpu(int(i)) for i in "1,2,3,4,5".split(',') if i.strip()]
 
 utils.log_init()
 
 data_iter = ds.load_cifar10(batch_size, input_size)
 def data_iter_func():
-    data = data_iter.next()
-    return data.data[0], data.label[0]
+    data, label = next(data_iter)
+    return data, label
 data, _ = next(data_iter)
 
 sym_file, param_file = load_fname(version)
@@ -50,35 +52,56 @@ def squeezenet(data, label):
     acc_top5.update(label, res)
     _, top5 = acc_top5.get()
     return "top1={:6.2%} top5={:6.2%}".format(top1, top5)
+
+# load original model
+sym_fname, param_fname = load_fname(version)
+sym, params = mx.sym.load(sym_fname), nd.load(param_fname)
+sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
+
+# quantize process
+mrt = _mrt.MRT(sym, params, inputs_ext)     # initialize
+mrt.set_data('data', data)                  # set input data
+mrt.calibrate(ctx=calib_ctx)                # calibration
+mrt.set_output_prec(8)                      # set output prec, do nothing by default
+qsym, qparams, inputs_ext = mrt.quantize()  # quantization
+
 if True:
-  sym, params = mx.sym.load(sym_file), nd.load(param_file)
-  infer_shapes = (spass.sym_infer_shape(sym, params, inputs_ext))
-  sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
-  qsym, qparams, precs, _ = calib.sym_simulate(sym, params, inputs_ext, data, calib_ctx)
-  qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, precs, "cvm")
-  dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
-  sim.save_ext(dump_ext, inputs_ext)
-  nd.save(dump_params, qparams)
-  open(dump_sym, "w").write(qsym.tojson())
-  dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
-  sym, params = mx.sym.load(dump_sym), nd.load(dump_params)
-  (inputs_ext,) = sim.load_ext(dump_ext)
-  inputs = [mx.sym.var(n) for n in inputs_ext]
-  net2 = utils.load_model(dump_sym, dump_params, inputs, ctx=ctx)
-  qacc_top1 = mx.metric.Accuracy()
-  qacc_top5 = mx.metric.TopKAccuracy(5)
-  qacc_top1.reset()
-  qacc_top5.reset()
+    # dump quantized model
+    dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
+    sim.save_ext(dump_ext, inputs_ext)
+    nd.save(dump_params, qparams)
+    open(dump_sym, "w").write(qsym.tojson())
+
+    # convert to cvm executor model
+    inputs_ext['data']['shape'] = (1, 3, input_size, input_size)
+    nnvm_sym, nnvm_params = spass.mxnet_to_nnvm(qsym, qparams, inputs_ext)
+    spass.cvm_build(nnvm_sym, nnvm_params, inputs_ext, *load_fname(version, "nnvm"))
+
+# load quantized model for accuracy
+net3 = mx.gluon.nn.SymbolBlock(qsym, inputs)
+utils.load_parameters(net3, qparams, ctx=ctx)
+qacc_top1 = mx.metric.Accuracy()
+qacc_top5 = mx.metric.TopKAccuracy(5)
+qacc_top1.reset()
+qacc_top5.reset()
 def cvm_quantize(data, label):
     data = sim.load_real_data(data, 'data', inputs_ext)
     data = gluon.utils.split_and_load(data, ctx_list=ctx, batch_axis=0, even_split=False)
-    res = [net2.forward(d) for d in data]
+    res = [net3.forward(d) for d in data]
     res = nd.concatenate(res)
     qacc_top1.update(label, res)
     _, top1 = qacc_top1.get()
     qacc_top5.update(label, res)
     _, top5 = qacc_top5.get()
     return "top1={:6.2%} top5={:6.2%}".format(top1, top5)
+
+
+logger = logging.getLogger("log.test.sym.pass")
+# compare accuracy between models
+utils.multi_validate(squeezenet, data_iter_func,
+        cvm_quantize,
+        iter_num=10, logger=logger)
+
 
 import tvm
 from tvm.contrib import graph_runtime

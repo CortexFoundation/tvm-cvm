@@ -108,12 +108,27 @@ def load_imagenet_rec(batch_size, input_size=224):
 import pickle
 
 def load_cifar10(batch_size, input_size=224, num_workers=4):
-    transform_test = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize([0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010])
-    ])
+    root_dir = dataset_dir + "/cifar10"
+    cifar_bin = root_dir + "/cifar-10-binary.tar.gz"
+    dat_bat_1 = root_dir + "/data_batch_1.bin"
+    download_file(dat_bat_1)
+    dat_bat_2 = root_dir + "/data_batch_2.bin"
+    download_file(dat_bat_2)
+    dat_bat_3 = root_dir + "/data_batch_3.bin"
+    download_file(dat_bat_3)
+    dat_bat_4 = root_dir + "/data_batch_4.bin"
+    download_file(dat_bat_4)
+    dat_bat_5 = root_dir + "/data_batch_5.bin"
+    download_file(dat_bat_5)
+    test_bat = root_dir + "/test_batch.bin"
+    download_file(test_bat)
+    transform_test = gluon.data.vision.transforms.Compose([
+        gluon.data.vision.transforms.ToTensor(),
+        gluon.data.vision.transforms.Normalize([0.4914, 0.4822, 0.4465],
+                                               [0.2023, 0.1994, 0.2010])])
     val_data = gluon.data.DataLoader(
-            gluon.data.vision.CIFAR10(train=False).transform_first(transform_test),
+            gluon.data.vision.CIFAR10(root=os.path.join(root_dir), 
+                train=False).transform_first(transform_test),
             batch_size=batch_size, shuffle=False, num_workers=num_workers)
     def data_iter():
         for i, batch in enumerate(val_data):
