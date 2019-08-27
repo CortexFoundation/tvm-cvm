@@ -398,4 +398,5 @@ mx_identity_ext = {
     'max': {},
     'Embedding': {},
     'squeeze': {},
+    'SwapAxis': {},
 }

@@ -543,6 +543,15 @@ def _sym_rewrite(sym, params, graph, inputs_ext, infer_shapes):
         params[sname] = nd.array([1 / scalar])
         graph[sname] = scale = mx.sym.var(sname, shape=(1,))
         node = mx.sym.broadcast_mul(X, scale, name=name)
+    elif op_name == 'SwapAxis':
+        dim1 = get_attr(attr, 'dim1', 0)
+        dim2 = get_attr(attr, 'dim2', 0)
+        ndim = len(infer_shapes[name])
+        new_axes = [None] * ndim
+        for i in range(ndim):
+            new_axes[i] = dim2 if i==dim1 else i
+            new_axes[i] = dim1 if i==dim2 else new_axes[i]
+        node = mx.sym.transpose(childs[0], tuple(new_axes), name=name)
     infer_shapes[node.attr('name')] = infer_shapes[name]
     return node, params
 
