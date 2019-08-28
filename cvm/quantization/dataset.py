@@ -109,19 +109,12 @@ import pickle
 
 def load_cifar10(batch_size, input_size=224, num_workers=4):
     root_dir = dataset_dir + "/cifar10"
-    cifar_bin = root_dir + "/cifar-10-binary.tar.gz"
-    dat_bat_1 = root_dir + "/data_batch_1.bin"
-    download_file(dat_bat_1)
-    dat_bat_2 = root_dir + "/data_batch_2.bin"
-    download_file(dat_bat_2)
-    dat_bat_3 = root_dir + "/data_batch_3.bin"
-    download_file(dat_bat_3)
-    dat_bat_4 = root_dir + "/data_batch_4.bin"
-    download_file(dat_bat_4)
-    dat_bat_5 = root_dir + "/data_batch_5.bin"
-    download_file(dat_bat_5)
-    test_bat = root_dir + "/test_batch.bin"
-    download_file(test_bat)
+    flist = ["/batches.meta.txt","/cifar-10-binary.tar.gz", 
+            "/data_batch_1.bin", "/data_batch_2.bin", 
+            "/data_batch_3.bin", "/data_batch_4.bin",
+            "/data_batch_5.bin", "/readme.html", "/test_batch.bin"]
+    for f in flist:
+        download_file(root_dir + f)
     transform_test = gluon.data.vision.transforms.Compose([
         gluon.data.vision.transforms.ToTensor(),
         gluon.data.vision.transforms.Normalize([0.4914, 0.4822, 0.4465],
