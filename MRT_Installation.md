@@ -72,15 +72,10 @@ which python
 
 ```
 cd ~
-
-git clone https://github.com/CortexFoundation/tvm-cvm.git
-
-cd ~/tvm-cvm
-
-git submodule update --recursive
+git clone --recursive https://github.com/CortexFoundation/tvm-cvm.git
 ```
 
-2.2. Generate dynamic link libraries
+2.2. Build the Shared Library
 
 ```
 make -j8
