@@ -399,4 +399,7 @@ mx_identity_ext = {
     'Embedding': {},
     'squeeze': {},
     'SwapAxis': {},
+
+    'sigmoid': {},
+    'exp': {},
 }

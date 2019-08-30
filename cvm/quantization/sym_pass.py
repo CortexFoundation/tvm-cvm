@@ -75,15 +75,12 @@ def prepare_for_cvm(symbol, params, inputs_ext):
             node = get_mxnet_op('slice')(X, begin=begin, end=end, name=name)
         elif op_name in ['floor', 'ceil', 'round', 'fix']:
             node = childs[0]
-        elif op_name == '__div_scalar__':
-            scalar = int(attr['scalar'])
-            sb = math.log2(scalar)
-            assert int(sb) == sb, "op(%s name=%s) scalar (%s vs. %s)" \
-                % (op_name, name, scalar, sb)
+        elif op_name == '_greater_scalar':
             X = childs[0]
-            sb_sym, sb_name = op_const(int(sb), graph, var=mx.sym.var)
-            params[sb_name] = nd.array([int(sb)])
-            node = nnvm.sym.broadcast_right_shift(X, sb_sym)
+            scalar = int(attr['scalar'])
+            assert int(scalar) == scalar
+            var = mx_const(scalar, graph, params)
+            node = mx.sym.broadcast_greater(X, var, name=name)
         infer_shapes[node.attr('name')] = infer_shapes[name]
         return node, params
     psym, pparams = topo_visit(symbol, params, inputs_ext,
@@ -543,6 +540,24 @@ def _sym_rewrite(sym, params, graph, inputs_ext, infer_shapes):
         params[sname] = nd.array([1 / scalar])
         graph[sname] = scale = mx.sym.var(sname, shape=(1,))
         node = mx.sym.broadcast_mul(X, scale, name=name)
+    elif op_name == '_plus_scalar':
+        X = childs[0]
+        scalar = get_attr(attr, 'scalar')
+        if scalar == 0:
+            node = X
+        else:
+            sname = name + '_scalar'
+            params[sname] = nd.array([scalar])
+            graph[sname] = offset = mx.sym.var(sname, shape=(1,))
+            node = mx.sym.broadcast_add(X, offset, name=name)
+    elif op_name == 'zeros_like':
+        X = childs[0]
+        params[name] = nd.zeros(infer_shapes[name])
+        node = mx.sym.var(name, shape=infer_shapes[name])
+    elif op_name == 'ones_like':
+        X = childs[0]
+        params[name] = nd.zeros(infer_shapes[name])
+        node = mx.sym.var(name, shape=infer_shapes[name])
     elif op_name == 'SwapAxis':
         dim1 = get_attr(attr, 'dim1', 0)
         dim2 = get_attr(attr, 'dim2', 0)

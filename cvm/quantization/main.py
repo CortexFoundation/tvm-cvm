@@ -71,9 +71,9 @@ if __name__ == "__main__":
     CHECK("quantization" in cfg, "config error: quantization")
     CHECK("dataset" in cfg, "config error: dataset")
     CHECK("cvm" in cfg, "config error: cvm")
-    cvm_sym = cfg.get("cvm_symbol", "./symbol")
-    cvm_prm = cfg.get("cvm_params", "./params")
-    cvm_ext = cfg.get("cvm_ext", "./cvm.ext")
+    cvm_sym = cfg.get("cvm_symbol", baseDir + "/symbol")
+    cvm_prm = cfg.get("cvm_params", baseDir + "/params")
+    cvm_ext = cfg.get("cvm_ext", baseDir + "/cvm.ext")
 
     sym_file, prm_file = cfg["symbol"], cfg["params"]
     if not path.isabs(sym_file):
@@ -124,6 +124,11 @@ if __name__ == "__main__":
     sym, params = mx.sym.load(sym_file), nd.load(prm_file)
     sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
 
+    debug = quant_flag.get("debug", False)
+    if debug:
+        with open(baseDir + "/mxnet.prepare.json", "w") as fout:
+            fout.write(sym.tojson())
+
     keys = quant_flag.get("split_names", [])
     if len(keys) > 0:
         sym, params, inputs_ext, sym2, prm2, ins_ext2 \
@@ -132,8 +137,12 @@ if __name__ == "__main__":
         CHECK("name_maps" in quant_flag, "config error: name_maps")
         name_maps = quant_flag.get("name_maps")
 
-        CHECK("valid_thresh" in quant_flag, "config error: valid_thresh")
-        valid_name = quant_flag.get("valid_thresh")
+        # CHECK("valid_thresh" in quant_flag, "config error: valid_thresh")
+        # valid_name = quant_flag.get("valid_thresh")
+
+    if debug:
+        with open(baseDir + "/mxnet.split.json", "w") as fout:
+            fout.write(sym.tojson())
 
     thresholds = quant_flag.get("thresholds", {})
     fixed = quant_flag.get("fixed", [])
@@ -155,19 +164,45 @@ if __name__ == "__main__":
     qsym, qparams, inputs_ext = mrt.quantize()  # quantization
 
     oscales = mrt.get_output_scales()
+
+    if debug:
+        sim.save_ext(baseDir + "/mxnet.quantize.ext", inputs_ext, oscales)
+        with open(baseDir + "/mxnet.quantize.json", "w") as fout:
+            fout.write(qsym.tojson())
+        nd.save(baseDir + "/mxnet.quantize.params", qparams)
+
     if len(keys) > 0:
         oscales_dict = dict(zip([c.attr('name') for c in sym], oscales))
         oscales = [oscales_dict[name_maps[c.attr('name')]] for c in sym2]
-        def box_nms(node, params, graph):
+
+        attr_scales = quant_flag.get("attr_scales", {})
+        def op_scales(node, params, graph):
             name, op_name = node.attr('name'), node.attr('op_name')
             childs, attr = sutils.sym_iter(node.get_children()), node.list_attr()
-            if op_name == '_contrib_box_nms':
-                valid_thresh = sutils.get_attr(attr, 'valid_thresh', 0)
-                attr['valid_thresh'] = int(valid_thresh * oscales_dict[valid_name])
+            if name in attr_scales:
+                scales = attr_scales[name]
+            elif op_name in attr_scales:
+                scales = attr_scales[op_name]
+            else:
+                return node
+
+            for k, v in scales.items():
+                assert k in attr, "attribute %s not in %s(%s) with %s" \
+                    % (k, op_name, name, attr.keys())
+                attr[k] = int(float(attr[k]) * oscales_dict[v])
                 node = sutils.get_mxnet_op(op_name)(*childs, **attr, name=name)
             return node
+
+        # def box_nms(node, params, graph):
+        #     name, op_name = node.attr('name'), node.attr('op_name')
+        #     childs, attr = sutils.sym_iter(node.get_children()), node.list_attr()
+        #     if op_name == '_contrib_box_nms':
+        #         valid_thresh = sutils.get_attr(attr, 'valid_thresh', 0)
+        #         attr['valid_thresh'] = int(valid_thresh * oscales_dict[valid_name])
+        #         node = sutils.get_mxnet_op(op_name)(*childs, **attr, name=name)
+        #     return node
         maps = mrt.get_maps()
-        qsym, qparams = _mrt.merge_model(qsym, qparams, sym2, prm2, maps, box_nms)
+        qsym, qparams = _mrt.merge_model(qsym, qparams, sym2, prm2, maps, op_scales)
 
     cvm_flag = cfg["cvm"]
     cvm_batch_size = cvm_flag.get("batch_size", batch_size)

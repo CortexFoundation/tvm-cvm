@@ -466,9 +466,13 @@ def verify_max_pool2d():
 
     iattr = IntIter(range_constraint(1, 4))
     pool_size = ConcatIter(
-            VectorIter(iattr, 2),
+            RepeatIter([1,2,3], 2),
+            [(2, 3), (3, 1)],
             name="pool_size")
-    strides = RandomVectorIter(1, 5, 2, 4, name="strides")
+    strides = ConcatIter(
+            RepeatIter([1,2], 2),
+            [(1, 2), (2, 1)],
+            name="strides")
     iattr = IntIter(iter_constraint(2))
     padding = ConcatIter(
             VectorIter(iattr, 1),
@@ -476,8 +480,6 @@ def verify_max_pool2d():
             name="padding")
     ceil_mode = BoolIter(name="ceil_mode")
     def max_pool2d(data, pool_size, strides, padding, ceil_mode):
-        # if ceil_mode:
-        #     raise ValueError("ceil_mode must be false")
         data_nd = nd.array(data)
         pad = padding
         if len(padding) == 1:
@@ -500,10 +502,15 @@ def verify_max_pool2d():
             pb += sh - 1
             pr += sw - 1
         pad_np = np.full((n, ic, ih+pt+pb, iw+pl+pr), -127).astype(INT32)
+        # pad_np = np.zeros(shape=(n, ic, ih+pt+pb, iw+pl+pr)).astype(INT32)
         no_zero = (range(n), range(ic), (range(pt, ih+pt)), (range(pl, iw+pl)))
         pad_np[np.ix_(*no_zero)] = data_npy
         bshape[2] = int(math.floor(float(ashape[2] - kh + pt + pb) / sh) + 1)
         bshape[3] = int(math.floor(float(ashape[3] - kw + pl + pr) / sw) + 1)
+        if pt >= kh or (bshape[2] - 1) * sh - pt >= ashape[2]:
+            raise ValueError("ceil_mode exceed out of input")
+        if pl >= kw or (bshape[3] - 1) * sw - pl >= ashape[3]:
+            raise ValueError("ceil mode exceed out of input")
         _, oc, oh, ow = bshape
         b_np = np.zeros(shape=(n, oc, oh, ow)).astype(INT32)
         for i in range(oh):
