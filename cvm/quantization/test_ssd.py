@@ -213,7 +213,16 @@ def test_sym_nnvm(batch_size, iter_num):
     val_data_iter = iter(val_data)
     data, _ = next(val_data_iter)
 
-    _mrt.std_dump(sym, params, inputs_ext, data, "ssd")
+    if False:
+        data = sim.load_real_data(data, 'data', inputs_ext)
+        inputs_ext['data']['data'] = data
+        spass.sym_dump_ops(sym, params, inputs_ext,
+                datadir="/data/wlt", ctx=mx.gpu(1),
+                cleanDir=True, ops=[
+                    "broadcast_div0",
+                ])
+    else:
+        _mrt.std_dump(sym, params, inputs_ext, data, "ssd", max_num=100)
 
     #  nnvm_sym, nnvm_params = spass.mxnet_to_nnvm(sym, params, inputs_ext)
     #  spass.cvm_build(nnvm_sym, nnvm_params, inputs_ext, *load_fname("nnvm"))
@@ -223,6 +232,6 @@ if __name__ == '__main__':
 
     # zoo.save_model('ssd_512_resnet50_v1_voc')
 
-    #  test_mrt_quant(1, 1000000)
-    test_sym_nnvm(16, 0)
+    test_mrt_quant(1, 100)
+    # test_sym_nnvm(16, 0)
 

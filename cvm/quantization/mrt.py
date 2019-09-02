@@ -276,7 +276,8 @@ def _simulate(sym, params, graph, inputs_ext, self):
         half_lut = _mrt_sim_quantize(sum_lut, 1, params, graph, 31)
         prob = mx.sym.broadcast_add(prob, half_lut)
         sym = mx.sym.broadcast_div(prob, sum_lut)
-        sym = mx.sym.floor(sym) # simulate integer division
+        sym = sym.astype('int32').astype('float32')
+        #  sym = mx.sym.floor(sym) # simulate integer division
         sym = _mrt_sim_quantize(sym, 0, params, graph, oprec)
         precs[name][out_key] = oprec
         scales[name]= oscale

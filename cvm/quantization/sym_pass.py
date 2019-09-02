@@ -73,7 +73,7 @@ def prepare_for_cvm(symbol, params, inputs_ext):
             begin = [0 if s is None else s for s in begin]
             end = [cshape[i] if s is None else s for i,s in enumerate(end)]
             node = get_mxnet_op('slice')(X, begin=begin, end=end, name=name)
-        elif op_name in ['floor', 'ceil', 'round', 'fix']:
+        elif op_name in ['floor', 'ceil', 'round', 'fix', 'Cast']:
             node = childs[0]
         elif op_name == '_greater_scalar':
             X = childs[0]
@@ -709,9 +709,19 @@ def sym_attach_attrs(symbol, params, inputs_ext, **kwargs):
 
 import hashlib
 import shutil
+NAME_MAPS = {
+    'Convolution': 'conv2d',
+    'stride': 'strides',
+    'kernel': 'kernel_size',
+    'pad': 'padding',
+    'num_filter': 'channels',
+    'num_group': 'groups',
+    'dilate': 'dilation',
+    'no_bias': 'use_bias',
+}
 def sym_dump_ops(symbol, params, inputs_ext, datadir="/data/op_std_out",
         dtype="float64", out_dtype="int32",
-        ctx=mx.gpu(), cleanDir=False):
+        ctx=mx.gpu(), cleanDir=False, ops=None):
     logger = logging.getLogger('log.sym.dump.ops')
     check_ext_deps(inputs_ext, 'data')
 
@@ -722,50 +732,67 @@ def sym_dump_ops(symbol, params, inputs_ext, datadir="/data/op_std_out",
     npdir = "%s/%s" % (datadir, ".hidden.out")
     os.makedirs(npdir, exist_ok=True)
 
-    def sha256(data):
-        hsh = hashlib.sha256(data).hexdigest()
-        return hashlib.sha256("{}{}{}{}{}{}{}{}{}".format(
-                hsh, data.shape, data.dtype,
-                data.min(), data.max(),
-                data.argmax(), data.argmin(),
-                data.mean(), data.var(),
-        ).encode()).hexdigest()
-    def dump_nd(hsh, in_file, data):
-        hsh_file = "%s/%s.npy" % (npdir, hsh)
+    def npy_txt(data):
+        data = data.astype("int32")
+        shp = data.shape
+        txt = "{}\n{}\n{}\n".format(
+            len(shp),
+            " ".join([str(s) for s in shp]),
+            " ".join([str(s) for s in data.flatten()]),
+        )
+        return txt
+    def txt_sha256(data):
+        return hashlib.sha256(data.encode()).hexdigest()
+    def dump_txt(hsh_file, ln_file, data):
+        logger = logging.getLogger('log.ops.txt.dump')
+
         if os.path.exists(hsh_file):
-            loaded = np.load(hsh_file)
-            if not np.equal(loaded, data).all():
+            loaded = open(hsh_file, "r").read()
+            if data != loaded:
                 logger.error(
-                    "Failed dump op:%-20s hash=%s, link to file=%s",
-                        op_name, hsh, in_file)
+                    "Dump op failed: hash file=%s, link file=%s",
+                        hsh_file, ln_file)
                 return False
-        np.save(hsh_file, data)
-        os.symlink(hsh_file, in_file)
+        open(hsh_file, "w").write(data)
+        os.symlink(hsh_file, ln_file)
         return True
     def dump_op(op_name, attr, ins, outs):
+        op_name = NAME_MAPS.get(op_name, op_name)
         ins = [_in.asnumpy().astype(out_dtype) for _in in ins]
-        hshes = [sha256(_in) for _in in ins]
-        hsh = hashlib.sha256("{}{}".format(hshes, attr)
+        ins = [npy_txt(_in) for _in in ins]
+        hshes = [txt_sha256(_in) for _in in ins]
+        hsh = hashlib.sha1("{}{}".format(hshes, attr)
                     .encode()).hexdigest()
         hsh_dir = "%s/%s/%s" % (datadir, op_name, hsh)
         if os.path.exists(hsh_dir):
             logger.info("Skip op:%-20s hashdir=%s",
                 op_name, hsh)
             return
+
         os.makedirs(hsh_dir, exist_ok=True)
-        attr_file = "%s/%s" % (hsh_dir, "attribute")
+        attr_file = "%s/%s" % (hsh_dir, "attr.txt")
+        for k, v in NAME_MAPS.items():
+            if k in attr:
+                attr[v] = eval(attr[k])
+                del attr[k]
+        if 'use_bias' in attr:
+            attr['use_bias'] = not attr['use_bias']
         attr_str = str(attr).replace("'", "\"")
-        open(attr_file, "w").write(attr_str + "\n")
+        with open(attr_file, "w") as fout:
+            fout.write(attr_str + "\n")
         for i, _in in enumerate(ins):
-            in_file = "%s/in_%d" % (hsh_dir, i)
-            if not dump_nd(hshes[i], in_file, _in):
+            in_file = "%s/in_%d.txt" % (hsh_dir, i)
+            hsh_file = "%s/%s.txt" % (npdir, hshes[i])
+            if not dump_txt(hsh_file, in_file, _in):
                 shutil.rmtree(hsh_dir)
                 return
         for i, _out in enumerate(outs):
-            out_file = "%s/out_%d" % (hsh_dir, i)
+            out_file = "%s/out_%d.txt" % (hsh_dir, i)
             _out = _out.asnumpy().astype(out_dtype)
-            out_hsh = sha256(_out)
-            if not dump_nd(out_hsh, out_file, _out):
+            _out = npy_txt(_out)
+            out_hsh = txt_sha256(_out)
+            hsh_file = "%s/%s.txt" % (npdir, out_hsh)
+            if not dump_txt(hsh_file, out_file, _out):
                 shutil.rmtree(hsh_dir)
                 return
 
@@ -780,7 +807,7 @@ def sym_dump_ops(symbol, params, inputs_ext, datadir="/data/op_std_out",
         if op_name == 'null':
             out = inputs_ext[name]['data'] if name in inputs_ext \
                   else params[name]
-            out_cache[name] = [out.astype(dtype).as_in_context(ctx)]
+            out_cache[name] = [out.round().astype(dtype).as_in_context(ctx)]
             continue
 
         assert childs is not None
@@ -796,12 +823,17 @@ def sym_dump_ops(symbol, params, inputs_ext, datadir="/data/op_std_out",
             out = nd.array(np_out, dtype=dtype)
         else:
             out = get_nd_op(op_name)(*nd_inputs, **attr)
+            if op_name == 'broadcast_div':
+                out = out.astype('int32').astype(dtype)
         out = [out] if len(sym) == 1 else out
-        out_cache[name] = [o.astype(dtype).as_in_context(ctx) for o in out]
+        out_cache[name] = [o.round().astype(dtype).as_in_context(ctx) for o in out]
+        out = out_cache[name]
 
         op_name = attr['op_type'] if op_name=='Custom' else op_name
-        logger.debug("Dump op:%s attr=%s", op_name, attr)
-        dump_op(op_name, attr, nd_inputs, out)
+
+        if ops is None or name in ops:
+            logger.debug("Dump op:%s attr=%s", op_name, attr)
+            dump_op(op_name, attr, nd_inputs, out)
         for n, _ in cinfos:
             assert n in deps
             deps[n].remove(name)
@@ -848,7 +880,7 @@ def sym_dump_layer_outputs(symbol, params, inputs_ext,
             cs = [] if childs is None else childs
             for i, c in enumerate(cs):
                 dump_in = "%s/%s_%d.%s.in" % (datadir, name, i, DUMP_SUFFIX)
-                out = out_cache[c.attr('name')][get_entry_id(c)].asnumpy().astype(out_dtype)
+                out = out_cache[c.attr('name')][get_entry_id(c)].asnumpy().round().astype(out_dtype)
                 np.save(dump_in, out)
             dump_attr = "%s/%s.%s" % (datadir, name, ATTR_SUFFIX)
             open(dump_attr, "w").write(str(attr))
@@ -872,13 +904,16 @@ def sym_dump_layer_outputs(symbol, params, inputs_ext,
             cinfos = [(c.attr('name'), get_entry_id(c)) for c in childs]
             nd_inputs = [out_cache[n[0]][n[1]] for n in cinfos]
             out = get_nd_op(op_name)(*nd_inputs, **attr)
+            if op_name == 'broadcast_div':
+                out = out.astype('int32').astype(dtype)
             for n, _ in cinfos:
                 assert n in deps
                 deps[n].remove(name)
                 if len(deps[n]) == 0:
                     del out_cache[n]
         out = [out] if len(sym) == 1 else out
-        out_cache[name] = [o.astype(dtype).as_in_context(ctx) for o in out]
+        out_cache[name] = [o.round().astype(dtype).as_in_context(ctx) for o in out]
+        out = out_cache[name]
 
         if name in dump_ops or op_name in dump_ops:
             cs = [] if childs is None else childs
