@@ -582,16 +582,16 @@ def verify_broadcast(op_name="broadcast_add"):
     # op_units.eval_data(op_name, broadcast, is_dump=True)
 
     attr = {}
-    dattr = RandomIter(-127, 127)
+    dattr = RandomIter(-127, 127, divisor=(op_name=="broadcast_div"))
     count = 0
     for i in range(100):
         # dim = random.randint(2, 4)
         dim = 5
-        shp = [random.randint(64, 256) for _ in range(dim)]
-        while np.product(shp) > (2 ** 23):
+        shp = [random.randint(32, 64) for _ in range(dim)]
+        while np.product(shp) > (2 ** 18):
             rand_idx = random.randint(0, dim-1)
             shp[rand_idx] = max(shp[rand_idx] // 2, 1)
-        while np.product(shp) < (2 ** 20):
+        while np.product(shp) < (2 ** 15):
             rand_idx = random.randint(0, dim-1)
             shp[rand_idx] = shp[rand_idx] * 2
 
@@ -607,13 +607,11 @@ def verify_broadcast(op_name="broadcast_add"):
                 ashp[aidx] = 1
             elif rand == 1:
                 bshp[bidx] = 1
-        if np.product(ashp) < (2 ** 20) and np.product(bshp) < (2 ** 20):
+        if np.product(ashp) < (2 ** 15) and np.product(bshp) < (2 ** 15):
             tmp = shp[:dim-adim]
             tmp.extend(ashp)
             ashp = tmp
 
-        if np.product(ashp) < (2 ** 20) and np.product(bshp) < (2 ** 20):
-            continue
         if count > 10:
             break
 
@@ -843,13 +841,15 @@ if __name__ == "__main__":
     # verify_conv2d()
     # verify_dense()
 
-    verify_max_pool2d()
+    # verify_max_pool2d()
     # verify_upsampling()
 
     #  verify_broadcast('broadcast_add')
     #  verify_broadcast('broadcast_sub')
     #  verify_broadcast('broadcast_mul')
     #  verify_broadcast('broadcast_maximum')
+    verify_broadcast('broadcast_div')
+    #  verify_broadcast('broadcast_greater')
 
     # test_load("conv2d", "ffd9ad6afc62dd7541778a81d6529c9a2735fc0a")
 

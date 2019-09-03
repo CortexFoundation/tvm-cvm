@@ -58,14 +58,19 @@ class BoolIter(AttrName):
         return (key == 0)
 
 class RandomIter(AttrName):
-    def __init__(self, start, end, **kwargs):
+    def __init__(self, start, end, divisor=False, **kwargs):
         super(RandomIter, self).__init__(**kwargs)
         self._diter = rand_constraint(start, end, 1)
+        self.divisor = divisor
     def __len__(self):
         return 1
     def __getitem__(self, key):
         assert key == 0
-        return self._diter()[0]
+        val = self._diter()[0]
+        if self.divisor:
+            while val == 0:
+                val = self._diter()[0]
+        return val
 
 
 
