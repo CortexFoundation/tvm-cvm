@@ -128,7 +128,7 @@ if __name__ == "__main__":
     utils.log_init()
 
     # resnet.save_graph(mx.gpu())
-    # zoo.save_model('resnet50_v1', 1000)
+    zoo.save_model('resnet50_v1')
     # zoo.save_model('resnet18_v1')
     # zoo.save_model('resnet50_v1d_0.86')
     # zoo.save_model('resnet18_v1b_0.89')
