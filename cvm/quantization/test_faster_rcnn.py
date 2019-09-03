@@ -15,7 +15,7 @@ import logging
 
 def load_fname(suffix=None, with_ext=False):
     suffix = "."+suffix if suffix is not None else ""
-    prefix = "./data/ssd_512_resnet50_v1_voc%s"%(suffix)
+    prefix = "./data/faster_rcnn_resnet50_v1b%s"%(suffix)
     return utils.extend_fname(prefix, with_ext)
 
 def validate(net, val_data, eval_metric, iter_num, logger=logging):
@@ -230,7 +230,7 @@ def test_sym_nnvm(batch_size, iter_num):
 if __name__ == '__main__':
     utils.log_init()
 
-    zoo.save_model('ssd_512_resnet50_v1_voc')
+    zoo.save_model('faster_rcnn_resnet50_v1b_voc')
 
     # test_mrt_quant(1, 100)
     # test_sym_nnvm(16, 0)

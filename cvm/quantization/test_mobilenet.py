@@ -20,29 +20,17 @@ import cvm_op as cvm
 import logging
 import numpy as np
 
-version = '1_0'
-# version = '_v2_1_0'
+version = '1.0'
+# version = '_v2_1.0'
 def load_fname(version, suffix=None, with_ext=False):
     suffix = "."+suffix if suffix is not None else ""
     prefix = "./data/mobilenet%s%s"%(version, suffix)
     return utils.extend_fname(prefix, with_ext)
 
-def test_sym_nnvm():
-    logger = logging.getLogger("log.test.nnvm")
-    logger.info("=== Log Test NNVM ===")
-
-    dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
-    sym, params = mx.sym.load(dump_sym), nd.load(dump_params)
-    (inputs_ext,) = sim.load_ext(dump_ext)
-    data_iter = ds.load_imagenet_rec(1)
-    data = data_iter.next().data[0]
-
-    _mrt.std_dump(sym, params, inputs_ext, data, "mobilenet1_0")
-
 def test_mx_quantize(batch_size=10, iter_num=10):
     logger = logging.getLogger("log.test.mx.quantize")
 
-    ctx = [mx.gpu(int(i)) for i in "1,2,3,4,5,6,7".split(',') if i.strip()]
+    ctx = [mx.gpu(int(i)) for i in "1,3".split(',') if i.strip()]
     inputs_ext = { 'data': {
         'shape': (batch_size, 3, 224, 224),
     }}
@@ -54,7 +42,6 @@ def test_mx_quantize(batch_size=10, iter_num=10):
         return data.data[0], data.label[0]
     data, _ = data_iter_func()
 
-    version = "1_0"
     net1 = utils.load_model(*load_fname(version), inputs, ctx=ctx)
     acc_top1 = mx.metric.Accuracy()
     acc_top5 = mx.metric.TopKAccuracy(5)
@@ -74,24 +61,26 @@ def test_mx_quantize(batch_size=10, iter_num=10):
     sym_fname, param_fname = load_fname(version)
     sym, params = mx.sym.load(sym_fname), nd.load(param_fname)
     sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
-    if True:
-        mrt = _mrt.MRT(sym, params, inputs_ext)
-        mrt.set_data('data', data)
-        mrt.calibrate()
-        mrt.set_output_prec(8)
-        qsym, qparams, inputs_ext = mrt.quantize()
-    else:
-        inputs_ext['data']['data'] = data
-        th_dict = calib.sym_calibrate(sym, params, inputs_ext, ctx=calib_ctx)
-        qsym, qparams, precs, _ = calib.sym_simulate(sym, params, inputs_ext, th_dict)
-        qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, precs)
-    dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
-    sim.save_ext(dump_ext, inputs_ext)
-    nd.save(dump_params, qparams)
-    open(dump_sym, "w").write(qsym.tojson())
+    if False:
+        if True:
+            mrt = _mrt.MRT(sym, params, inputs_ext)
+            mrt.set_data('data', data)
+            mrt.calibrate()
+            mrt.set_output_prec(8)
+            qsym, qparams, inputs_ext = mrt.quantize()
+        else:
+            inputs_ext['data']['data'] = data
+            th_dict = calib.sym_calibrate(sym, params, inputs_ext, ctx=calib_ctx)
+            qsym, qparams, precs, _ = calib.sym_simulate(sym, params, inputs_ext, th_dict)
+            qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, precs)
+        dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
+        sim.save_ext(dump_ext, inputs_ext)
+        nd.save(dump_params, qparams)
+        open(dump_sym, "w").write(qsym.tojson())
 
-    dump_sym, dump_params = load_fname(version, "nnvm.compile")
-    spass.mxnet_to_nnvm(qsym, qparams, inputs_ext, dump_sym, dump_params)
+        dump_sym, dump_params = load_fname(version, "nnvm.compile")
+        nnvm_sym, nnvm_params = spass.mxnet_to_nnvm(qsym, qparams, inputs_ext)
+        spass.cvm_build(nnvm_sym, nnvm_params, inputs_ext, dump_sym, dump_params)
 
     dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
     (inputs_ext,) = sim.load_ext(dump_ext)
@@ -118,15 +107,29 @@ def test_mx_quantize(batch_size=10, iter_num=10):
     #         cvm_quantize,
     #         iter_num=iter_num, logger=logger)
 
+def test_sym_nnvm():
+    logger = logging.getLogger("log.test.nnvm")
+    logger.info("=== Log Test NNVM ===")
+
+    dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
+    sym, params = mx.sym.load(dump_sym), nd.load(dump_params)
+    (inputs_ext,) = sim.load_ext(dump_ext)
+    data_iter = ds.load_imagenet_rec(1)
+    data = data_iter.next().data[0]
+
+    _mrt.std_dump(sym, params, inputs_ext, data, "mobilenet"+version)
+
+
 if __name__ == '__main__':
     utils.log_init()
 
     # zoo.save_mobilenet_v2_1_0()
     # zoo.save_mobilenet1_0()
-    # zoo.save_model('mobilenet1.0', 1000)
+    # zoo.save_model('mobilenetv2_1.0')
+    # zoo.save_model('mobilenet1.0')
     # zoo.save_model('mobilenet1.0_int8', 1000)
 
-    # test_mx_quantize(16, 1000)
+    # test_mx_quantize(16, 100000)
     test_sym_nnvm()
     # test_sym_nnvm(16, 10)
     # test_performance(16, 10)
