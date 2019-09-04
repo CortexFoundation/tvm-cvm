@@ -198,19 +198,27 @@ def topo_sort(symbol, logger=logging, with_deps=False):
 def sym_collect_attr(symbol, attr_name='op_name'):
     return {sym.attr(attr_name) for sym in topo_sort(symbol)}
 
+MULTIPYE_OUTS_NODE = [
+    'get_valid_counts', 'SliceChannel'
+]
 def get_entry_id(sym):
     oindex = 0
-    if isinstance(sym, _sym.Symbol) and len(sym) > 1:
-        oindex = json.loads(sym.tojson())['heads'][0][1]
-    elif isinstance(sym, nnvm.sym.Symbol) and len(sym.list_output_names()) > 1:
-        graph = nnvm.graph.create(sym)
-        oindex = json.loads(graph.json())['heads'][0][1]
+    if sym.attr('op_name') in MULTIPYE_OUTS_NODE:
+        if isinstance(sym, _sym.Symbol):
+            oindex = json.loads(sym.tojson())['heads'][0][1]
+        elif isinstance(sym, nnvm.sym.Symbol):
+            graph = nnvm.graph.create(sym)
+            oindex = json.loads(graph.json())['heads'][0][1]
     return oindex
 
 def get_node(sym, graph):
+    """ Assume all graph node have single output.
+        Multiple output node will be fused
+        by `fuse_multiple_outputs` sym_pass.
+    """
     name = sym.attr('name')
     if name not in graph:
-        assert False, "Unrecognized layer:%s in graph keys:5s" \
+        assert False, "Unrecognized layer:%s in graph keys:%s" \
             % (name, graph.keys())
     return graph[name][get_entry_id(sym)]
 
@@ -394,6 +402,7 @@ mx_identity_ext = {
 
     '_mul_scalar': {},
     '_div_scalar': {},
+    '_plus_scalar': {},
 
     'max': {},
     'Embedding': {},
@@ -402,4 +411,12 @@ mx_identity_ext = {
 
     'sigmoid': {},
     'exp': {},
+
+    'SliceChannel': {},
+    'zeros_like': {},
+    '_greater_scalar': {},
+    'where': {},
+    'ones_like': {},
+    '_contrib_box_nms': {},
+    'softmax': {},
 }

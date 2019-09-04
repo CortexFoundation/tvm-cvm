@@ -56,6 +56,7 @@ def squeezenet(data, label):
 # load original model
 sym_fname, param_fname = load_fname(version)
 sym, params = mx.sym.load(sym_fname), nd.load(param_fname)
+print(param_fname)
 sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
 
 # quantize process

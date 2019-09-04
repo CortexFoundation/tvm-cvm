@@ -10,7 +10,7 @@
 pip install conda
 ```
 
-1.2. Set up local python `3.X` environment for conda
+1.2. Set up local python `3.7` environment for conda
 
 ​	First, check out whether the enviroment exists or not:
 
@@ -18,10 +18,34 @@ pip install conda
 conda info --envs
 ```
 
-​	If not, create the environment named `py3`:
+<200b>  If not, add source channels into `~/.condarc`, eg.
+
+>channels:
+>
+>  - https://mirrors.ustc.edu.cn/anaconda/pkgs/main/
+>
+>  - https://mirrors.ustc.edu.cn/anaconda/pkgs/free/
+>
+>  - https://mirrors.ustc.edu.cn/anaconda/cloud/conda-forge/
+>
+>  - https://mirrors.ustc.edu.cn/anaconda/cloud/msys2/
+>
+>  - https://mirrors.ustc.edu.cn/anaconda/cloud/bioconda/
+>
+>  - https://mirrors.ustc.edu.cn/anaconda/cloud/menpo/
+>
+>  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/msys2/
+>
+>  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge/
+>
+>  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/free/
+>
+>show_channel_urls: true
+
+​	Then, create the environment named `py3`:
 
 ```
-conda create -n py3 python=3.X
+conda create -n py3 python=3.7
 ```
 
 ​	Then, switch to the environment.
@@ -48,15 +72,10 @@ which python
 
 ```
 cd ~
-
-git clone https://github.com/CortexFoundation/tvm-cvm.git
-
-cd ~/tvm-cvm
-
-git submodule update --recursive
+git clone --recursive https://github.com/CortexFoundation/tvm-cvm.git
 ```
 
-2.2. Generate dynamic link libraries
+2.2. Build the Shared Library
 
 ```
 make -j8
@@ -76,10 +95,16 @@ make -j8
 
 ​	If other packages are also needed while testing, append the package name at a newline.
 
-​	Using the following command to install all the dependancies.
+​	Use the following command to install all the dependancies.
 
 ```
 pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+```
+
+<200b>  An alternative command is available.
+
+```
+pip install -r requirements.txt -i https://mirrors.ustc.edu.cn/pypi/web/simple
 ```
 
 2.4. Create a Data Folder

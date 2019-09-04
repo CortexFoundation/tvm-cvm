@@ -116,11 +116,11 @@ def test_mrt_quant(batch_size=1, iter_num=10):
        acc = validate_data(net, data, label, metric)
        return "{:6.2%}".format(acc)
 
-    #  utils.multi_validate(yolov3, data_iter_func,
-           #  iter_num=iter_num, logger=logger)
-    #  exit()
+    # utils.multi_validate(yolov3, data_iter_func,
+        # iter_num=iter_num, logger=logger)
+    # exit()
 
-    if False:
+    if True:
         mrt = _mrt.MRT(base, base_params, inputs_ext)
         for i in range(16):
             data, _ = data_iter_func()
@@ -222,7 +222,7 @@ def test_sym_nnvm(batch_size, iter_num):
                     "broadcast_div0",
                 ])
     else:
-        _mrt.std_dump(sym, params, inputs_ext, data, "ssd", max_num=100)
+        _mrt.std_dump(sym, params, inputs_ext, data, "ssd_ryt", max_num=100)
 
     #  nnvm_sym, nnvm_params = spass.mxnet_to_nnvm(sym, params, inputs_ext)
     #  spass.cvm_build(nnvm_sym, nnvm_params, inputs_ext, *load_fname("nnvm"))
@@ -233,5 +233,5 @@ if __name__ == '__main__':
     zoo.save_model('ssd_512_resnet50_v1_voc')
 
     # test_mrt_quant(1, 100)
-    # test_sym_nnvm(16, 0)
+    test_sym_nnvm(16, 0)
 
