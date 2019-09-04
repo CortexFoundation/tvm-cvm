@@ -61,7 +61,7 @@ def test_mx_quantize(batch_size=10, iter_num=10):
     sym_fname, param_fname = load_fname(version)
     sym, params = mx.sym.load(sym_fname), nd.load(param_fname)
     sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
-    if False:
+    if True:
         if True:
             mrt = _mrt.MRT(sym, params, inputs_ext)
             mrt.set_data('data', data)
@@ -129,7 +129,7 @@ if __name__ == '__main__':
     # zoo.save_model('mobilenet1.0')
     # zoo.save_model('mobilenet1.0_int8', 1000)
 
-    # test_mx_quantize(16, 100000)
-    test_sym_nnvm()
+    test_mx_quantize(16, 100000)
+    # test_sym_nnvm()
     # test_sym_nnvm(16, 10)
     # test_performance(16, 10)

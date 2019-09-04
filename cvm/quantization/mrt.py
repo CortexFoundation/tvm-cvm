@@ -490,72 +490,66 @@ class MRT():
         assert (hist <= 0).sum() == 0
         return hist
 
-    def _get_optimal_threshold(self, arr, num_bins=8001, num_quantized_bins=255):
+    def _kldiverge(self, arr, bucket_bit=12, quant_bit=8):
         arr = arr.asnumpy()
-        min_val = np.min(arr)
-        max_val = np.max(arr)
-        th = max(abs(min_val), abs(max_val))
+        th = np.abs(arr).max()
 
+        num_bins, num_quantized_bins = (1 << bucket_bit) - 1, (1 << quant_bit) - 1
         hist, hist_edges = np.histogram(arr, bins=num_bins, range=(-th, th))
         zero_bin_idx = num_bins // 2
         num_half_quantized_bins = num_quantized_bins // 2
 
-        thresholds = np.zeros(num_bins // 2 + 1 - num_quantized_bins // 2)
+        step = 1
+        thresholds = np.zeros((zero_bin_idx - num_half_quantized_bins) // step + 1)
         divergence = np.zeros_like(thresholds)
         quantized_bins = np.zeros(num_quantized_bins, dtype=np.int32)
-        # i means the number of bins on half axis excluding the zero bin.
-        for i in range(num_quantized_bins // 2,
-                       num_bins // 2 + 1):
+
+        table = np.zeros(hist.size+1)
+        for i in range(1, table.size):
+            table[i] = table[i-1] + hist[i-1]
+
+        for i in range(num_half_quantized_bins,
+                       zero_bin_idx+1, step):
             p_bin_idx_start = zero_bin_idx - i
             p_bin_idx_stop = zero_bin_idx + i + 1
-            thresholds[i - num_half_quantized_bins] = hist_edges[p_bin_idx_stop]
+            thresholds[(i-num_half_quantized_bins) // step] = hist_edges[p_bin_idx_stop]
             sliced_nd_hist = hist[p_bin_idx_start:p_bin_idx_stop]
 
-            # generate reference distribution p
             p = sliced_nd_hist.copy()
-            assert p.size % 2 == 1
-            assert p.size >= num_quantized_bins
-            # put left outlier count in p[0]
-            left_outlier_count = np.sum(hist[0:p_bin_idx_start])
-            p[0] += left_outlier_count
-            # put right outlier count in p[-1]
-            right_outlier_count = np.sum(hist[p_bin_idx_stop:])
-            p[-1] += right_outlier_count
-            # is_nonzeros[k] indicates whether hist[k] is nonzero
+            p[0] += table[p_bin_idx_start] - table[0]
+            p[-1] += table[-1] - table[p_bin_idx_stop]
             is_nonzeros = (p != 0).astype(np.int32)
 
-            # calculate how many bins should be merged to generate quantized distribution q
             num_merged_bins = sliced_nd_hist.size // num_quantized_bins
-            # merge hist into num_quantized_bins bins
             for j in range(num_quantized_bins):
-                start = j * num_merged_bins
+                start = p_bin_idx_start + j * num_merged_bins
                 stop = start + num_merged_bins
-                quantized_bins[j] = sliced_nd_hist[start:stop].sum()
-            quantized_bins[-1] += sliced_nd_hist[num_quantized_bins * num_merged_bins:].sum()
-            # expand quantized_bins into p.size bins
+                quantized_bins[j] = table[stop] - table[start]
+            quantized_bins[-1] += table[p_bin_idx_stop] - table[p_bin_idx_start +
+                   num_quantized_bins * num_merged_bins]
+
+            expand_bins = sliced_nd_hist.size / num_quantized_bins
             q = np.zeros(sliced_nd_hist.size, dtype=np.float32)
             for j in range(num_quantized_bins):
                 start = j * num_merged_bins
                 if j == num_quantized_bins - 1:
-                    stop = len(is_nonzeros)
+                   stop = len(is_nonzeros)
                 else:
-                    stop = start + num_merged_bins
+                   stop = start + num_merged_bins
                 norm = is_nonzeros[start:stop].sum()
                 if norm != 0:
                     q[start:stop] = float(quantized_bins[j]) / float(norm)
             q[p == 0] = 0
             p = self._smooth_distribution(p)
-            # There is a chance that q is an invalid probability distribution.
             try:
                 q = self._smooth_distribution(q)
             except ValueError:
-                divergence[i - num_half_quantized_bins] = float("inf")
-            divergence[i - num_half_quantized_bins] = stats.entropy(p, q)
+                divergence[(i-num_half_quantized_bins) // step] = float("inf")
+            divergence[(i-num_half_quantized_bins) // step] = stats.entropy(p, q)
 
         min_divergence_idx = np.argmin(divergence)
-        min_divergence = divergence[min_divergence_idx]
         opt_th = thresholds[min_divergence_idx]
-        return min_val, max_val, min_divergence, opt_th
+        return opt_th
 
     def _get_opt(self, out, lbda=10):
         mean = nd.mean(out).asscalar()
@@ -563,12 +557,11 @@ class MRT():
         alpha = abs(mean) + lbda * std
         absmax = out.abs().max().asscalar()
 
-        return absmax
+        return absmax # For normal model network
         #  return min(alpha, absmax)
 
-        _, _, _, kmeans = self._get_optimal_threshold(out, num_bins=2049)
-        print (mean, std, alpha, absmax, kmeans)
-        return sorted([kmeans, alpha, absmax])[1]
+        #  kldiverge = self._kldiverge(out, 10) # For mobilenet
+        #  return sorted([kldiverge, alpha, absmax])[1]
 
     def _sym_calibrate(self, ctx):
         order, deps = topo_sort(self.sym, logger=self._lgr, with_deps=True)
