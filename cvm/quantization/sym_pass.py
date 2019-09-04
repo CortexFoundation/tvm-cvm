@@ -697,32 +697,26 @@ def _reduce_graph(sym, params, graph, inputs_ext):
         node = get_mxnet_op(op_name)(A_A, fuse_sym, **attr, name=name)
     return node, params
 
-def fuse_multiple_outputs(symbol, infer_shapes, logger, get_op):
+def fuse_multiple_outputs(symbol, params, inputs_ext, logger):
+    infer_shapes = sym_robust_infer_shape(symbol, params, inputs_ext)
     channel, graph = {}, {}
     for sym in topo_sort(symbol, logger=logger):
         name, op_name = sym.attr('name'), sym.attr('op_name')
         childs, attr = sym_iter(sym.get_children()), sym.list_attr()
         if childs is not None:
             childs = [get_node(c, graph) for c in childs]
-            sym = get_op(op_name)(*childs, **attr, name=name)
+            sym = get_mxnet_op(op_name)(*childs, **attr, name=name)
         if op_name == 'SliceChannel':
             # Only designed for special usei, thus
             # check of "SliceChannel" has not been added to _sym_check
             assert childs is not None and len(childs) == 1, \
                 "Invalid Layer: %s, the 'SliceChannel' \
                 operator must have exactly one input" % name
-            assert "axis" in attr, "Invalid Layer: %s, \
-                the 'SliceChannel' operator must contain \
-                the 'axis' attribute" % name
-            assert "num_outputs" in attr, "Invalid Layer: %s, \
-                the 'SliceChannel' operator must contain \
-                the 'num_outputs' attribute" % name
-            axis, num_outputs = int(attr['axis']), int(attr['num_outputs'])
+            axis = get_attr(attr, 'axis', 1)
+            num_outputs = get_attr(attr, 'num_outputs')
             chchild_shape = infer_shapes[childs[0].attr('name')]
-            assert chchild_shape and len(chchild_shape) == 1, \
-                "Invalid Layer: %s, the child of the 'SliceChannel' \
-                operator can only have one shape" % childs[0].attr('name')
-            dim = chchild_shape[0][axis]
+            eid = get_entry_id(childs[0])
+            dim = chchild_shape[eid][axis]
             assert num_outputs > 0 and dim % num_outputs == 0, \
                 "Invalid Layer: %s, the 'SliceChannel' operator \
                 has a wrong attribute, 'num_outputs': %d" \
@@ -739,21 +733,20 @@ def fuse_multiple_outputs(symbol, infer_shapes, logger, get_op):
                     is_split = True
                     eid = get_entry_id(childs[i])
                     chchilds, axis, interval = channel[cname]
-                    print (name, cname, eid)
                     begin, end = interval[eid]
                     chattr = {'axis': axis, 'begin': begin, 'end': end}
                     slp_name = "%s_slice_axis%d" % (cname, eid)
                     if slp_name not in graph:
-                        graph[slp_name] = get_op('slice_axis')(*chchilds, \
+                        graph[slp_name] = mx.sym.slice_axis(*chchilds,
                                 **chattr, name=slp_name)
                     childs[i] = graph[slp_name]
             if is_split:
-                sym = get_op(op_name)(*childs, **attr, name=name)
+                sym = get_mxnet_op(op_name)(*childs, **attr, name=name)
         graph[name] = sym
 
     nodes = [get_node(sym, graph) for sym in symbol]
-    ret = get_op("Group")(nodes) if len(nodes) > 1 else nodes[0]
-    return ret
+    ret = mx.sym.Group(nodes) if len(nodes) > 1 else nodes[0]
+    return ret, params
 
 def sym_quant_prepare(symbol, params, inputs_ext, graph_ext={}):
     logger = logging.getLogger('log.sym.pass.prepare')
@@ -762,8 +755,7 @@ def sym_quant_prepare(symbol, params, inputs_ext, graph_ext={}):
             logger=logger, inputs_ext=inputs_ext,
             callback=_sym_check)
 
-    infer_shapes = sym_robust_infer_shape(symbol, params, inputs_ext)
-    symbol = fuse_multiple_outputs(symbol, infer_shapes, logger, get_mxnet_op)
+    symbol, params = fuse_multiple_outputs(symbol, params, inputs_ext, logger)
 
     infer_shapes = sym_infer_shape(symbol, params, inputs_ext)
     sym, params = topo_visit(symbol, params, get_op=get_mxnet_op,
