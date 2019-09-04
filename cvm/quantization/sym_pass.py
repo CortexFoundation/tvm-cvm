@@ -730,21 +730,23 @@ def fuse_multiple_outputs(symbol, infer_shapes, logger, get_op):
             stride = int(dim / num_outputs)
             interval = [(i * stride, (i + 1) * stride) \
                        for i in range(num_outputs)]
-            channel[name] = [childs, axis, 0, interval]
+            channel[name] = [childs, axis, interval]
         elif childs is not None:
             is_split = False
             for i in range(len(childs)):
                 cname = childs[i].attr('name')
                 if cname in channel:
                     is_split = True
-                    chchilds, axis, cnt, interval = channel[cname]
-                    begin, end = interval[cnt % len(interval)]
-                    channel[cname][2] += 1
+                    eid = get_entry_id(childs[i])
+                    chchilds, axis, interval = channel[cname]
+                    print (name, cname, eid)
+                    begin, end = interval[eid]
                     chattr = {'axis': axis, 'begin': begin, 'end': end}
-                    slp_name = "%s_slice_axis%d" % (cname, cnt)
-                    node = get_op('slice_axis')(*chchilds, \
-                            **chattr, name=slp_name)
-                    childs[i] = graph[slp_name] = node
+                    slp_name = "%s_slice_axis%d" % (cname, eid)
+                    if slp_name not in graph:
+                        graph[slp_name] = get_op('slice_axis')(*chchilds, \
+                                **chattr, name=slp_name)
+                    childs[i] = graph[slp_name]
             if is_split:
                 sym = get_op(op_name)(*childs, **attr, name=name)
         graph[name] = sym
