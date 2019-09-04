@@ -303,6 +303,7 @@ def sym_infer_shape(symbol, params, inputs_ext):
         args = sym.list_inputs()
         inputs_shape = {k:tuple(v['shape']) for k,v in inputs_ext.items() if k in args}
         _, out_shapes, _ = sym.infer_shape(**inputs_shape)
+        
         assert len(out_shapes) == 1, 'Infer shape %s'%(name)
         if name in infer_shapes:
             logger.warn("Symbol:%s has been infered shape in graph", out_shapes)
@@ -310,6 +311,48 @@ def sym_infer_shape(symbol, params, inputs_ext):
                     % (name, infer_shapes[name], out_shapes)
 
         infer_shapes[name] = out_shapes[0]
+
+        return sym, params
+
+    inputs = symbol.list_inputs()
+    args, auxs = symbol.list_arguments(), symbol.list_auxiliary_states()
+    inputs_shape = {k:tuple(v['shape']) for k, v in inputs_ext.items() if k in inputs}
+    arg_shapes, _, aux_shapes = symbol.infer_shape(**inputs_shape)
+    infer_shapes = {args[i]:arg_shapes[i] for i in range(len(args))}
+    infer_shapes.update({auxs[i]:aux_shapes[i] for i in range(len(auxs))})
+
+    _, _ = topo_visit(symbol, params, get_op=get_mxnet_op,
+            logger=logger, inputs_ext=inputs_ext,
+            callback=_infer_shape, infer_shapes=infer_shapes)
+
+    return infer_shapes
+    
+def sym_robust_infer_shape(symbol, params, inputs_ext):
+    logger = logging.getLogger('log.symbol.infer_shape')
+    check_ext_deps(inputs_ext, 'shape')
+
+    def _infer_shape(sym, params, graph, inputs_ext, infer_shapes):
+        logger = logging.getLogger('log.symbol.infer_shape')
+        name, op_name = sym.attr('name'), sym.attr('op_name')
+
+        if op_name == 'null':
+            if name in params:
+                assert params[name].shape == infer_shapes[name], \
+                        "parameter %s shape %s is inconsistent with \
+                        params dict %s"%(name, infer_shapes[name], params[name].shape)
+            return sym, params
+
+        args = sym.list_inputs()
+        inputs_shape = {k:tuple(v['shape']) for k,v in inputs_ext.items() if k in args}
+        _, out_shapes, _ = sym.infer_shape(**inputs_shape)
+        
+        # assert len(out_shapes) == 1, 'Infer shape %s'%(name)
+        if name in infer_shapes:
+            logger.warn("Symbol:%s has been infered shape in graph", out_shapes)
+            assert infer_shapes[name] == out_shapes[0], "%s shape %s vs. %s" \
+                    % (name, infer_shapes[name], out_shapes)
+
+        infer_shapes[name] = out_shapes
 
         return sym, params
 
@@ -630,12 +673,71 @@ def _reduce_graph(sym, params, graph, inputs_ext):
         node = get_mxnet_op(op_name)(A_A, fuse_sym, **attr, name=name)
     return node, params
 
+def fuse_multiple_outputs(symbol, infer_shapes, logger, get_op):
+    channel, graph = {}, {}
+    for sym in topo_sort(symbol, logger=logger):
+        name, op_name = sym.attr('name'), sym.attr('op_name')
+        childs, attr = sym_iter(sym.get_children()), sym.list_attr()
+        if childs is not None:
+            childs = [get_node(c, graph) for c in childs]
+            sym = get_op(op_name)(*childs, **attr, name=name)
+        if op_name == 'SliceChannel':
+            # Only designed for special usei, thus
+            # check of "SliceChannel" has not been added to _sym_check
+            assert childs is not None and len(childs) == 1, \
+                "Invalid Layer: %s, the 'SliceChannel' \
+                operator must have exactly one input" % name
+            assert "axis" in attr, "Invalid Layer: %s, \
+                the 'SliceChannel' operator must contain \
+                the 'axis' attribute" % name
+            assert "num_outputs" in attr, "Invalid Layer: %s, \
+                the 'SliceChannel' operator must contain \
+                the 'num_outputs' attribute" % name
+            axis, num_outputs = int(attr['axis']), int(attr['num_outputs'])
+            chchild_shape = infer_shapes[childs[0].attr('name')]
+            assert chchild_shape and len(chchild_shape) == 1, \
+                "Invalid Layer: %s, the child of the 'SliceChannel' \
+                operator can only have one shape" % childs[0].attr('name')
+            dim = chchild_shape[0][axis]
+            assert num_outputs > 0 and dim % num_outputs == 0, \
+                "Invalid Layer: %s, the 'SliceChannel' operator \
+                has a wrong attribute, 'num_outputs': %d" \
+                % (name, num_outputs)
+            stride = int(dim / num_outputs)
+            interval = [(i * stride, (i + 1) * stride) \
+                       for i in range(num_outputs)]
+            channel[name] = [childs, axis, 0, interval]
+        elif childs is not None:
+            is_split = False
+            for i in range(len(childs)):
+                cname = childs[i].attr('name')
+                if cname in channel:
+                    is_split = True
+                    chchilds, axis, cnt, interval = channel[cname]
+                    begin, end = interval[cnt % len(interval)]
+                    channel[cname][2] += 1
+                    chattr = {'axis': axis, 'begin': begin, 'end': end}
+                    slp_name = "%s_slice_axis%d" % (cname, cnt)
+                    node = get_op('slice_axis')(*chchilds, \
+                            **chattr, name=slp_name)
+                    childs[i] = graph[slp_name] = node
+            if is_split:
+                sym = get_op(op_name)(*childs, **attr, name=name)
+        graph[name] = sym
+
+    nodes = [get_node(sym, graph) for sym in symbol]
+    ret = get_op("Group")(nodes) if len(nodes) > 1 else nodes[0]
+    return ret
+
 def sym_quant_prepare(symbol, params, inputs_ext, graph_ext={}):
     logger = logging.getLogger('log.sym.pass.prepare')
 
     topo_visit(symbol, params, get_op=get_mxnet_op,
             logger=logger, inputs_ext=inputs_ext,
             callback=_sym_check)
+
+    infer_shapes = sym_robust_infer_shape(symbol, params, inputs_ext)
+    symbol = fuse_multiple_outputs(symbol, infer_shapes, logger, get_mxnet_op)
 
     infer_shapes = sym_infer_shape(symbol, params, inputs_ext)
     sym, params = topo_visit(symbol, params, get_op=get_mxnet_op,
