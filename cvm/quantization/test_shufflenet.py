@@ -1,53 +1,48 @@
 import mxnet as mx
 from mxnet import ndarray as nd
-from mxnet.gluon import nn
 from mxnet import gluon
-
-import tvm
-from tvm.contrib import graph_runtime
-import nnvm
-
-import sym_calib as calib
-import utils
-import mrt as _mrt
-import dataset as ds
-import gluon_zoo as zoo
-import sym_pass as spass
-import sym_utils as sutils
-import sim_quant_helper as sim
-import cvm_op as cvm
+import gluoncv as cv
 
 import logging
-import numpy as np
 
-version = '1.0'
-# version = '_v2_1.0'
+import utils
+import cvm_op
+import sim_quant_helper as sim
+import dataset as ds
+import sym_pass as spass
+import mrt as _mrt
+import gluon_zoo as zoo
+
 def load_fname(version, suffix=None, with_ext=False):
     suffix = "."+suffix if suffix is not None else ""
-    prefix = "./data/mobilenet%s%s"%(version, suffix)
-    return utils.extend_fname(prefix, with_ext)
+    fname = "./data/shufflenet_%s%s"%(version, suffix)
+    return utils.extend_fname(fname, with_ext)
 
-def test_mx_quantize(batch_size=10, iter_num=10):
-    logger = logging.getLogger("log.test.mx.quantize")
-
-    ctx = [mx.gpu(int(i)) for i in "1,3".split(',') if i.strip()]
+version = "v1"
+def test_sym_pass(batch_size=10, iter_num=10):
+    logger = logging.getLogger("log.test.sym.pass")
+    calib_ctx = mx.gpu(1)
+    ctx = [mx.gpu(int(i)) for i in "0,1,3,4,5".split(',') if i.strip()]
     inputs_ext = { 'data': {
-        'shape': (batch_size, 3, 224, 224),
-    }}
-    inputs = [mx.sym.var(n) for n in inputs_ext]
+            'shape': (batch_size, 3, 224, 224),
+    } }
+    inputs = [mx.sym.var(name) for name in inputs_ext]
 
+    logger.info("load dataset, symbol and parameters")
+    # load dataset and iter function
     data_iter = ds.load_imagenet_rec(batch_size)
     def data_iter_func():
         data = data_iter.next()
         return data.data[0], data.label[0]
     data, _ = data_iter_func()
 
+    # load original model for accuracy
     net1 = utils.load_model(*load_fname(version), inputs, ctx=ctx)
     acc_top1 = mx.metric.Accuracy()
     acc_top5 = mx.metric.TopKAccuracy(5)
     acc_top1.reset()
     acc_top5.reset()
-    def mobilenet(data, label):
+    def shufflenet(data, label):
         data = gluon.utils.split_and_load(data, ctx_list=ctx, batch_axis=0, even_split=False)
         res = [net1.forward(d) for d in data]
         res = nd.concatenate(res)
@@ -57,34 +52,39 @@ def test_mx_quantize(batch_size=10, iter_num=10):
         _, top5 = acc_top5.get()
         return "top1={:6.2%} top5={:6.2%}".format(top1, top5)
 
-    calib_ctx = mx.gpu(1)
-    sym_fname, param_fname = load_fname(version)
-    sym, params = mx.sym.load(sym_fname), nd.load(param_fname)
-    sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
     if False:
-        if True:
-            mrt = _mrt.MRT(sym, params, inputs_ext)
-            mrt.set_data('data', data)
-            mrt.calibrate()
-            mrt.set_output_prec(8)
-            qsym, qparams, inputs_ext = mrt.quantize()
-        else:
-            inputs_ext['data']['data'] = data
-            th_dict = calib.sym_calibrate(sym, params, inputs_ext, ctx=calib_ctx)
-            qsym, qparams, precs, _ = calib.sym_simulate(sym, params, inputs_ext, th_dict)
-            qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, precs)
+        # load original model
+        sym_fname, param_fname = load_fname(version)
+        sym, params = mx.sym.load(sym_fname), nd.load(param_fname)
+        sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
+
+        # quantize process
+        mrt = _mrt.MRT(sym, params, inputs_ext)     # initialize
+        mrt.set_data('data', data)                  # set input data
+        mrt.calibrate(ctx=calib_ctx)                # calibration
+        mrt.set_output_prec(8)                      # set output prec, do nothing by default
+        qsym, qparams, inputs_ext = mrt.quantize()  # quantization
+
+        # dump quantized model
         dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
         sim.save_ext(dump_ext, inputs_ext)
         nd.save(dump_params, qparams)
         open(dump_sym, "w").write(qsym.tojson())
 
-        dump_sym, dump_params = load_fname(version, "nnvm.compile")
+    if False:
+        # convert to cvm executor model
+        inputs_ext['data']['shape'] = (1, 3, 224, 224)
         nnvm_sym, nnvm_params = spass.mxnet_to_nnvm(qsym, qparams, inputs_ext)
-        spass.cvm_build(nnvm_sym, nnvm_params, inputs_ext, dump_sym, dump_params)
+        spass.cvm_build(nnvm_sym, nnvm_params, inputs_ext, *load_fname(version, "nnvm"))
 
+    # load quantized model for accuracy
     dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
     (inputs_ext,) = sim.load_ext(dump_ext)
-    net2 = utils.load_model(dump_sym, dump_params, inputs, ctx=ctx)
+    inputs = [mx.sym.var(n) for n in inputs_ext]
+    net3 = utils.load_model(dump_sym, dump_params, inputs, ctx=ctx)
+
+    # net3 = mx.gluon.nn.SymbolBlock(qsym, inputs)
+    # utils.load_parameters(net3, qparams, ctx=ctx)
     qacc_top1 = mx.metric.Accuracy()
     qacc_top5 = mx.metric.TopKAccuracy(5)
     qacc_top1.reset()
@@ -92,44 +92,37 @@ def test_mx_quantize(batch_size=10, iter_num=10):
     def cvm_quantize(data, label):
         data = sim.load_real_data(data, 'data', inputs_ext)
         data = gluon.utils.split_and_load(data, ctx_list=ctx, batch_axis=0, even_split=False)
-        res = [net2.forward(d) for d in data]
+        res = [net3.forward(d) for d in data]
         res = nd.concatenate(res)
+
         qacc_top1.update(label, res)
         _, top1 = qacc_top1.get()
         qacc_top5.update(label, res)
         _, top5 = qacc_top5.get()
         return "top1={:6.2%} top5={:6.2%}".format(top1, top5)
 
-    utils.multi_validate(mobilenet, data_iter_func,
+    # compare accuracy between models
+    utils.multi_validate(shufflenet, data_iter_func,
             cvm_quantize,
             iter_num=iter_num, logger=logger)
-    # utils.multi_eval_accuracy(mobilenet, data_iter_func,
-    #         cvm_quantize,
-    #         iter_num=iter_num, logger=logger)
 
-def test_sym_nnvm():
+def test_sym_nnvm(batch_size=10, iter_num=10):
     logger = logging.getLogger("log.test.nnvm")
     logger.info("=== Log Test NNVM ===")
 
     dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
     sym, params = mx.sym.load(dump_sym), nd.load(dump_params)
     (inputs_ext,) = sim.load_ext(dump_ext)
-    data_iter = ds.load_imagenet_rec(1)
+    data_iter = ds.load_imagenet_rec(batch_size, 224)
     data = data_iter.next().data[0]
 
-    _mrt.std_dump(sym, params, inputs_ext, data, "mobilenet"+version)
+    _mrt.std_dump(sym, params, inputs_ext, data, "shufflenet", max_num=100)
 
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     utils.log_init()
 
-    # zoo.save_mobilenet_v2_1_0()
-    # zoo.save_mobilenet1_0()
-    # zoo.save_model('mobilenetv2_1.0')
-    # zoo.save_model('mobilenet1.0')
-    # zoo.save_model('mobilenet1.0_int8', 1000)
+    # test_sym_pass(batch_size=640, iter_num=100)
+    test_sym_nnvm(1, 0)
 
-    # test_mx_quantize(16, 100000)
-    test_sym_nnvm()
-    # test_sym_nnvm(16, 10)
-    # test_performance(16, 10)
+
+

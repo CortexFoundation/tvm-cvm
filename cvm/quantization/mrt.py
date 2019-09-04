@@ -3,6 +3,7 @@ from mxnet import ndarray as nd
 
 import numpy as np
 import math
+from scipy import stats
 
 import cvm_op
 from sym_utils import *
@@ -202,16 +203,85 @@ def _simulate(sym, params, graph, inputs_ext, self):
         oscale = scales[name] = scale(opt, oprec.p)
 
         W_name = _uniq_name("cvm_lut_weight")
-        weight = (out * oscale).round().reshape(2*alpha, 1)
+        weight = (out * oscale).round().reshape(2*alpha+1, 1)
         params[W_name] = weight
         wattr = { 'precision': str(oprec.p)}
         W = graph[W_name] = mx.sym.var(W_name, shape=weight.shape, attr=wattr)
         var = mx_const(alpha, graph, params)
         add_name = _uniq_name(op_name + "_offset")
         X = mx.sym.broadcast_add(X, var, name=add_name)
-        sym = mx.sym.Custom(X, W, in_dim=2*alpha,
+        sym = mx.sym.Custom(X, W, in_dim=2*alpha+1,
                 name=name, op_type='cvm_lut')
         precs[name][out_key] = oprec
+    # elif op_name in ['softmax']:
+    #     X = childs[0]
+    #     alpha = int(15 * scales[cns[0]])
+    #     offset = mx.sym.max(X) - alpha
+    #     norm = mx.sym.broadcast_sub(X, offset)
+    #     neg, pos = mx.sym.minimum(norm, 0), mx.sym.maximum(norm, 0)
+    #     neg = neg * 1000000
+    #     norm = neg + pos
+    #     norm = norm / scales[cns[0]]
+    #     sym = mx.sym.softmax(norm, **attr, name=name)
+    #     sym = sym * 127
+    #     precs[name][out_key] = 8
+    #     scales[name] = 127
+    elif op_name in ['softmax']:
+        """  Softmax Quantization
+        ::math
+            y(i) = e ^ i \over {\sum_j^K {e ^ j}}
+        ::quantize
+            1. Keep value in range [max(input) - lbda, max(input)),
+                otherwise set zero to ignore for tiny probability.
+            2. Embedding e ^ i for input scale. ie. calculate the value
+                of e ^ i for i in range [0, lbda * input scale],
+                E(i) = Embedding(e ^ i).
+            3. Do math for interger computation.
+                sum = \sum_j^K { E(j) }
+                \hat_{y}(i) = {E(i) * 2 ^ 14 + sum - 1} \over sum
+
+        """
+        iprec = op_input_precs[op_name]
+        xs = scale(th_dict[cns[0]], iprec.p)
+        axis = get_attr(attr, 'axis', -1)
+        X, xprec, xs = _requant_operator(childs[0], iprec, xs)
+        lbda = 10
+        alpha = int(lbda * xs)
+        max_axis = mx.sym.max(X, axis=axis, keepdims=True)
+        var = mx_const(alpha, graph, params)
+        offset_name = _uniq_name("softmax_offset")
+        offset = mx.sym.broadcast_sub(max_axis, var, name=offset_name)
+        offset = _mrt_sim_quantize(offset, 0, params, graph, xprec.p)
+        norm = mx.sym.relu(mx.sym.broadcast_sub(X, offset))
+        norm = _mrt_sim_quantize(norm, 0, params, graph, xprec.p)
+
+        data = nd.arange(0, alpha+1)
+        table = nd.exp(data / xs)
+
+        tprec = _get_bit(math.exp(lbda))
+        table = nd.clip(table, a_min=0, a_max=_get_range(tprec))
+        W_name = _uniq_name("cvm_lut_weight")
+        params[W_name] = weight = table.round().reshape(alpha+1, 1)
+        wattr = { 'precision': str(tprec) }
+        W = graph[W_name] = mx.sym.var(W_name, shape=weight.shape, attr=wattr)
+        lut = mx.sym.Custom(norm, W, in_dim=alpha+1, name=name, op_type='cvm_lut')
+        sum_lut = mx.sym.sum(lut, axis=axis, keepdims=True)
+
+        oprec = min(15, 31 - tprec)
+        assert oprec > 8, "operator softmax(%s) lambda(%d) is too large" \
+            % (name, lbda)
+        oscale = _get_range(oprec)
+        var_scale = mx_const(oscale, graph, params)
+        prob = mx.sym.broadcast_mul(lut, var_scale)
+        var_one = mx_const(1, graph, params)
+        half_lut = _mrt_sim_quantize(sum_lut, 1, params, graph, 31)
+        prob = mx.sym.broadcast_add(prob, half_lut)
+        sym = mx.sym.broadcast_div(prob, sum_lut)
+        sym = sym.astype('int32').astype('float32')
+        #  sym = mx.sym.floor(sym) # simulate integer division
+        sym = _mrt_sim_quantize(sym, 0, params, graph, oprec)
+        precs[name][out_key] = oprec
+        scales[name]= oscale
     elif op_name in ['Convolution', 'FullyConnected']:
         iprec = op_input_precs[op_name]
         X, xprec, xs = _requant_operator(childs[0], iprec)
@@ -406,6 +476,100 @@ class MRT():
         return dict(zip([c.attr('name') for c in self.qsym],
                     [c.attr('name') for c in self.sym]))
 
+    def _smooth_distribution(self, p, eps=0.0001):
+        is_zeros = (p == 0).astype(np.float32)
+        is_nonzeros = (p != 0).astype(np.float32)
+        n_zeros = is_zeros.sum()
+        n_nonzeros = p.size - n_zeros
+        if not n_nonzeros:
+            raise ValueError('The discrete probability distribution is malformed. All entries are 0.')
+        eps1 = eps * float(n_zeros) / float(n_nonzeros)
+        assert eps1 < 1.0, 'n_zeros=%d, n_nonzeros=%d, eps1=%f' % (n_zeros, n_nonzeros, eps1)
+        hist = p.astype(np.float32)
+        hist += eps * is_zeros + (-eps1) * is_nonzeros
+        assert (hist <= 0).sum() == 0
+        return hist
+
+    def _get_optimal_threshold(self, arr, num_bins=8001, num_quantized_bins=255):
+        arr = arr.asnumpy()
+        min_val = np.min(arr)
+        max_val = np.max(arr)
+        th = max(abs(min_val), abs(max_val))
+
+        hist, hist_edges = np.histogram(arr, bins=num_bins, range=(-th, th))
+        zero_bin_idx = num_bins // 2
+        num_half_quantized_bins = num_quantized_bins // 2
+
+        thresholds = np.zeros(num_bins // 2 + 1 - num_quantized_bins // 2)
+        divergence = np.zeros_like(thresholds)
+        quantized_bins = np.zeros(num_quantized_bins, dtype=np.int32)
+        # i means the number of bins on half axis excluding the zero bin.
+        for i in range(num_quantized_bins // 2,
+                       num_bins // 2 + 1):
+            p_bin_idx_start = zero_bin_idx - i
+            p_bin_idx_stop = zero_bin_idx + i + 1
+            thresholds[i - num_half_quantized_bins] = hist_edges[p_bin_idx_stop]
+            sliced_nd_hist = hist[p_bin_idx_start:p_bin_idx_stop]
+
+            # generate reference distribution p
+            p = sliced_nd_hist.copy()
+            assert p.size % 2 == 1
+            assert p.size >= num_quantized_bins
+            # put left outlier count in p[0]
+            left_outlier_count = np.sum(hist[0:p_bin_idx_start])
+            p[0] += left_outlier_count
+            # put right outlier count in p[-1]
+            right_outlier_count = np.sum(hist[p_bin_idx_stop:])
+            p[-1] += right_outlier_count
+            # is_nonzeros[k] indicates whether hist[k] is nonzero
+            is_nonzeros = (p != 0).astype(np.int32)
+
+            # calculate how many bins should be merged to generate quantized distribution q
+            num_merged_bins = sliced_nd_hist.size // num_quantized_bins
+            # merge hist into num_quantized_bins bins
+            for j in range(num_quantized_bins):
+                start = j * num_merged_bins
+                stop = start + num_merged_bins
+                quantized_bins[j] = sliced_nd_hist[start:stop].sum()
+            quantized_bins[-1] += sliced_nd_hist[num_quantized_bins * num_merged_bins:].sum()
+            # expand quantized_bins into p.size bins
+            q = np.zeros(sliced_nd_hist.size, dtype=np.float32)
+            for j in range(num_quantized_bins):
+                start = j * num_merged_bins
+                if j == num_quantized_bins - 1:
+                    stop = len(is_nonzeros)
+                else:
+                    stop = start + num_merged_bins
+                norm = is_nonzeros[start:stop].sum()
+                if norm != 0:
+                    q[start:stop] = float(quantized_bins[j]) / float(norm)
+            q[p == 0] = 0
+            p = self._smooth_distribution(p)
+            # There is a chance that q is an invalid probability distribution.
+            try:
+                q = self._smooth_distribution(q)
+            except ValueError:
+                divergence[i - num_half_quantized_bins] = float("inf")
+            divergence[i - num_half_quantized_bins] = stats.entropy(p, q)
+
+        min_divergence_idx = np.argmin(divergence)
+        min_divergence = divergence[min_divergence_idx]
+        opt_th = thresholds[min_divergence_idx]
+        return min_val, max_val, min_divergence, opt_th
+
+    def _get_opt(self, out, lbda=10):
+        mean = nd.mean(out).asscalar()
+        std = nd.norm(out - mean).asscalar() / math.sqrt(np.product(out.shape))
+        alpha = abs(mean) + lbda * std
+        absmax = out.abs().max().asscalar()
+
+        return absmax
+        #  return min(alpha, absmax)
+
+        _, _, _, kmeans = self._get_optimal_threshold(out, num_bins=2049)
+        print (mean, std, alpha, absmax, kmeans)
+        return sorted([kmeans, alpha, absmax])[1]
+
     def _sym_calibrate(self, ctx):
         order, deps = topo_sort(self.sym, logger=self._lgr, with_deps=True)
         old_ths = self.th_dict if self.th_dict else {}
@@ -429,7 +593,8 @@ class MRT():
                         del out_cache[n]
             out = [out] if len(sym) == 1 else out
             out_cache[name] = [o.as_in_context(ctx) for o in out]
-            opts = [float(o.abs().max().asscalar()) for o in out][0]
+            #  opts = [float(o.abs().max().asscalar()) for o in out][0]
+            opts = float(self._get_opt(out[0]))
             # TODO: out may be multiple
             if name in old_ths:
                 #  th_dict[name] = [max(old_ths[name][i], o) for i,o in enumerate(opts)]
@@ -492,7 +657,7 @@ class MRT():
 
     def _op_default_input_precs(self):
         op_precs = {}
-        for n in ['Convolution', 'FullyConnected', 'sigmoid', 'exp']:
+        for n in ['Convolution', 'FullyConnected', 'sigmoid', 'exp', 'softmax']:
             op_precs[n] = PREC(8, L5)
         op_precs['sum'] = PREC(8, L4)
         for n in ['broadcast_add', 'broadcast_sub', 'elemwise_add', 'elemwise_sub']:

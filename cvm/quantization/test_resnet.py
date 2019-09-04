@@ -29,7 +29,7 @@ import gluon_zoo as zoo
 
 # import resnet18 as resnet
 # import resnet152 as resnet
-import resnet50 as resnet
+# import resnet50 as resnet
 
 from sym_pass import *
 

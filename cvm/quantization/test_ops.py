@@ -306,8 +306,8 @@ def verify_sum():
 
 # ====== nn ======
 def verify_conv2d():
-    batch = IntIter(list_constraint([1, 4, 8, 16]))
-    channel = IntIter(list_constraint([1, 3, 4]))
+    batch = IntIter(list_constraint([1, 4, 8]))
+    channel = IntIter(list_constraint([1, 3, 4, 8]))
     h = IntIter(range_constraint(1, 9, 3))
     w = IntIter(range_constraint(1, 9, 3))
     dshp = opg.ExtendIter(batch, channel, h, w)
@@ -320,28 +320,29 @@ def verify_conv2d():
     data = ConcatIter(*datas)
     print (len(data))
 
-    num_filter = IntIter(list_constraint([1, 32, 64]), name="num_filter")
+    num_filter = IntIter(list_constraint([1, 16, 32]), name="num_filter")
     kernel = VectorIter(
             IntIter(list_constraint([1, 2, 3])),
             size=2,
             name="kernel_size")
     strides = RandomVectorIter(1, 4, 2, 1, name="strides")
     padding = RandomVectorIter(0, 3, 2, 1, name="padding")
-    dilation = RepeatIter(
-            IntIter(list_constraint([1, 2])),
-            size=2,
-            name="dilation")
-    groups = IntIter(list_constraint([1, 2]), name="groups")
+    groups = IntIter(list_constraint([1, 2, 4]), name="groups")
     use_bias = RandomBoolIter(name="use_bias")
     op_units = opg.OpUnitIter(
             [data, num_filter, kernel, strides,
-            padding, dilation, groups, use_bias], 1)
+            padding, groups, use_bias], 1)
     for i in range(len(op_units)):
         data, num_filter, kernel, strides, padding, \
-            dilation, groups, use_bias = op_units[i]
+            groups, use_bias = op_units[i]
         a_np = np.array(data)
         batch, ic, h, w = a_np.shape
-        groups = 1 if groups == 1 else ic
+        if groups == 1:
+            pass
+        elif random.randint(0, 10) < 5 and ic % groups == 0:
+            pass
+        else:
+            groups = ic
         wshp = (num_filter, ic // groups, *kernel)
         wsize = np.product(wshp)
         weight = ConstantIter(rand_constraint(-127, 127, wsize), shape=wshp)
@@ -349,6 +350,16 @@ def verify_conv2d():
         bshp = (num_filter,)
         bias = ConstantIter(rand_constraint(-127, 127, num_filter), shape=bshp)
         b_np = np.array(bias[0])
+
+        rand = random.randint(0, 100)
+        if rand < 60:
+            dilation = (1, 1)
+        elif rand < 70:
+            dilation = (1, 2)
+        elif rand < 80:
+            dilation = (2, 1)
+        else:
+            dilation = (2, 2)
         attr = {
             'channels': num_filter,
             'kernel_size': kernel,
@@ -455,9 +466,13 @@ def verify_max_pool2d():
 
     iattr = IntIter(range_constraint(1, 4))
     pool_size = ConcatIter(
-            VectorIter(iattr, 2),
+            RepeatIter([1,2,3], 2),
+            [(2, 3), (3, 1)],
             name="pool_size")
-    strides = RandomVectorIter(1, 5, 2, 4, name="strides")
+    strides = ConcatIter(
+            RepeatIter([1,2], 2),
+            [(1, 2), (2, 1)],
+            name="strides")
     iattr = IntIter(iter_constraint(2))
     padding = ConcatIter(
             VectorIter(iattr, 1),
@@ -465,8 +480,6 @@ def verify_max_pool2d():
             name="padding")
     ceil_mode = BoolIter(name="ceil_mode")
     def max_pool2d(data, pool_size, strides, padding, ceil_mode):
-        # if ceil_mode:
-        #     raise ValueError("ceil_mode must be false")
         data_nd = nd.array(data)
         pad = padding
         if len(padding) == 1:
@@ -488,11 +501,16 @@ def verify_max_pool2d():
         if ceil_mode:
             pb += sh - 1
             pr += sw - 1
-        pad_np = np.zeros(shape=(n, ic, ih+pt+pb, iw+pl+pr)).astype(INT32)
+        pad_np = np.full((n, ic, ih+pt+pb, iw+pl+pr), -127).astype(INT32)
+        # pad_np = np.zeros(shape=(n, ic, ih+pt+pb, iw+pl+pr)).astype(INT32)
         no_zero = (range(n), range(ic), (range(pt, ih+pt)), (range(pl, iw+pl)))
         pad_np[np.ix_(*no_zero)] = data_npy
         bshape[2] = int(math.floor(float(ashape[2] - kh + pt + pb) / sh) + 1)
         bshape[3] = int(math.floor(float(ashape[3] - kw + pl + pr) / sw) + 1)
+        if pt >= kh or (bshape[2] - 1) * sh - pt >= ashape[2]:
+            raise ValueError("ceil_mode exceed out of input")
+        if pl >= kw or (bshape[3] - 1) * sw - pl >= ashape[3]:
+            raise ValueError("ceil mode exceed out of input")
         _, oc, oh, ow = bshape
         b_np = np.zeros(shape=(n, oc, oh, ow)).astype(INT32)
         for i in range(oh):
@@ -564,16 +582,16 @@ def verify_broadcast(op_name="broadcast_add"):
     # op_units.eval_data(op_name, broadcast, is_dump=True)
 
     attr = {}
-    dattr = RandomIter(-127, 127)
+    dattr = RandomIter(-127, 127, divisor=(op_name=="broadcast_div"))
     count = 0
     for i in range(100):
         # dim = random.randint(2, 4)
         dim = 5
-        shp = [random.randint(64, 256) for _ in range(dim)]
-        while np.product(shp) > (2 ** 23):
+        shp = [random.randint(32, 64) for _ in range(dim)]
+        while np.product(shp) > (2 ** 18):
             rand_idx = random.randint(0, dim-1)
             shp[rand_idx] = max(shp[rand_idx] // 2, 1)
-        while np.product(shp) < (2 ** 20):
+        while np.product(shp) < (2 ** 15):
             rand_idx = random.randint(0, dim-1)
             shp[rand_idx] = shp[rand_idx] * 2
 
@@ -589,13 +607,11 @@ def verify_broadcast(op_name="broadcast_add"):
                 ashp[aidx] = 1
             elif rand == 1:
                 bshp[bidx] = 1
-        if np.product(ashp) < (2 ** 20) and np.product(bshp) < (2 ** 20):
+        if np.product(ashp) < (2 ** 15) and np.product(bshp) < (2 ** 15):
             tmp = shp[:dim-adim]
             tmp.extend(ashp)
             ashp = tmp
 
-        if np.product(ashp) < (2 ** 20) and np.product(bshp) < (2 ** 20):
-            continue
         if count > 10:
             break
 
@@ -822,16 +838,18 @@ if __name__ == "__main__":
     # verify_max()
     # verify_sum()
 
-    #  verify_conv2d()
+    # verify_conv2d()
     # verify_dense()
 
     # verify_max_pool2d()
     # verify_upsampling()
 
-    verify_broadcast('broadcast_add')
-    verify_broadcast('broadcast_sub')
-    verify_broadcast('broadcast_mul')
-    verify_broadcast('broadcast_maximum')
+    #  verify_broadcast('broadcast_add')
+    #  verify_broadcast('broadcast_sub')
+    #  verify_broadcast('broadcast_mul')
+    #  verify_broadcast('broadcast_maximum')
+    verify_broadcast('broadcast_div')
+    #  verify_broadcast('broadcast_greater')
 
     # test_load("conv2d", "ffd9ad6afc62dd7541778a81d6529c9a2735fc0a")
 
