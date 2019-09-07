@@ -231,10 +231,10 @@ def _simulate(sym, params, graph, inputs_ext, self):
         ::math
             y(i) = e ^ i \over {\sum_j^K {e ^ j}}
         ::quantize
-            1. Keep value in range [max(input) - lbda, max(input)),
+            1. Keep value in range [max(input) - lambd, max(input)),
                 otherwise set zero to ignore for tiny probability.
             2. Embedding e ^ i for input scale. ie. calculate the value
-                of e ^ i for i in range [0, lbda * input scale],
+                of e ^ i for i in range [0, lambd* input scale],
                 E(i) = Embedding(e ^ i).
             3. Do math for interger computation.
                 sum = \sum_j^K { E(j) }
@@ -245,8 +245,8 @@ def _simulate(sym, params, graph, inputs_ext, self):
         xs = scale(th_dict[cns[0]], iprec.p)
         axis = get_attr(attr, 'axis', -1)
         X, xprec, xs = _requant_operator(childs[0], iprec, xs)
-        lbda = 10
-        alpha = int(lbda * xs)
+        lambd = 10
+        alpha = int(lambd * xs)
         max_axis = mx.sym.max(X, axis=axis, keepdims=True)
         var = mx_const(alpha, graph, params)
         offset_name = _uniq_name("softmax_offset")
@@ -258,7 +258,7 @@ def _simulate(sym, params, graph, inputs_ext, self):
         data = nd.arange(0, alpha+1)
         table = nd.exp(data / xs)
 
-        tprec = _get_bit(math.exp(lbda))
+        tprec = _get_bit(math.exp(lambd))
         table = nd.clip(table, a_min=0, a_max=_get_range(tprec))
         W_name = _uniq_name("cvm_lut_weight")
         params[W_name] = weight = table.round().reshape(alpha+1, 1)
@@ -269,7 +269,7 @@ def _simulate(sym, params, graph, inputs_ext, self):
 
         oprec = min(15, 31 - tprec)
         assert oprec > 8, "operator softmax(%s) lambda(%d) is too large" \
-            % (name, lbda)
+            % (name, lambd)
         oscale = _get_range(oprec)
         var_scale = mx_const(oscale, graph, params)
         prob = mx.sym.broadcast_mul(lut, var_scale)
@@ -551,14 +551,17 @@ class MRT():
         opt_th = thresholds[min_divergence_idx]
         return opt_th
 
-    def _get_opt(self, out, lbda=10):
+    def _get_opt(self, out, lambd=10):
         mean = nd.mean(out).asscalar()
         std = nd.norm(out - mean).asscalar() / math.sqrt(np.product(out.shape))
-        alpha = abs(mean) + lbda * std
+        alpha = abs(mean) + lambd * std
         absmax = out.abs().max().asscalar()
 
-        return absmax # For normal model network
-        #  return min(alpha, absmax)
+        # return absmax # For normal model network
+        # if alpha < 0.95 * absmax:
+        #     print ("[", mean, std, "]", alpha, absmax)
+        #     return alpha
+        return absmax
 
         #  kldiverge = self._kldiverge(out, 10) # For mobilenet
         #  return sorted([kldiverge, alpha, absmax])[1]
@@ -587,15 +590,15 @@ class MRT():
             out = [out] if len(sym) == 1 else out
             out_cache[name] = [o.as_in_context(ctx) for o in out]
             #  opts = [float(o.abs().max().asscalar()) for o in out][0]
-            opts = float(self._get_opt(out[0]))
+            opts = float(self._get_opt(out[0], lambd=10))
             # TODO: out may be multiple
             if name in old_ths:
                 #  th_dict[name] = [max(old_ths[name][i], o) for i,o in enumerate(opts)]
                 self.th_dict[name] = max(old_ths[name], opts)
             else:
                 self.th_dict[name] = opts
-                self._lgr.debug(
-                    "collect symbol %-40s out_shape=%-20s th_dict: (%s)",
+                p = self._lgr.debug if opts < 30 else self._lgr.warn
+                p("collect symbol %-40s out_shape=%-20s th_dict: (%s)",
                         name, [o.shape for o in out], self.th_dict[name])
 
         out_cache.clear()

@@ -49,7 +49,7 @@ def test_sym_nnvm(batch_size=10):
 
     _mrt.std_dump(sym, params, inputs_ext, data, "resnet"+version)
 
-def test_sym_pass(batch_size=10, iter_num=10):
+def test_sym_pass(batch_size=10, iter_num=10, quantize=True):
     logger = logging.getLogger("log.test.sym.pass")
     calib_ctx = mx.gpu(2)
     ctx = [mx.gpu(int(i)) for i in "1,2,3".split(',') if i.strip()]
@@ -84,7 +84,7 @@ def test_sym_pass(batch_size=10, iter_num=10):
     sym, params = mx.sym.load(sym_fname), nd.load(param_fname)
     sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
 
-    if True:
+    if quantize:
         if True:
             mrt = _mrt.MRT(sym, params, inputs_ext)
             #  mrt.set_pure_int8()
@@ -148,7 +148,8 @@ if __name__ == "__main__":
                     datadir="/data/wlt", ctx=mx.gpu(2))
         exit()
 
-    test_sym_pass(batch_size=16, iter_num=100)
+    test_sym_pass(batch_size=16, iter_num=10)
+    test_sym_pass(batch_size=160, iter_num=1000, quantize=False)
     #  test_sym_nnvm(batch_size=1)
     # test_performance(16, 10)
 
