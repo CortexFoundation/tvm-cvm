@@ -688,6 +688,7 @@ def std_dump(sym, params, inputs_ext, data, model_name,
     if not batch:
         for k, v in inputs_ext.items():
             v['shape'] = (1, *v['shape'][1:])
+        data = data[0].reshape(inputs_ext['data']['shape'])
     datadir = "/data/std_out/" + model_name
     os.makedirs(datadir, exist_ok=True)
     if is_mxnet:

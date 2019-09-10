@@ -72,16 +72,16 @@ sym, params = mx.sym.load(dump_sym), nd.load(dump_params)
 (inputs_ext,) = sim.load_ext(dump_ext)
 if True:
     #  data = data[0, :].reshape((1, 1, input_size, input_size))
-    _mrt.std_dump(sym, params, inputs_ext, data, "qd10_resnet20_v2",
-            batch=True,
-            dump_ops=["cifarresnetv215_stage1_bn_conv2_fwd"])
-    opg.dump_file("conv2d",
-            ["cifarresnetv215_stage1_bn_conv2_fwd_0.mrt.dump.in.npy",
-             "cifarresnetv215_stage1_bn_conv2_fwd_1.mrt.dump.in.npy",
-             "cifarresnetv215_stage1_bn_conv2_fwd_2.mrt.dump.in.npy"],
-            ["cifarresnetv215_stage1_bn_conv2_fwd_0.mrt.dump.out.npy"],
-            "cifarresnetv215_stage1_bn_conv2_fwd.attr",
-            root="/data/std_out/qd10_resnet20_v2")
+    _mrt.std_dump(sym, params, inputs_ext, data, "animal_10",
+            batch=False)
+            # dump_ops=["cifarresnetv215_stage1_bn_conv2_fwd"])
+    # opg.dump_file("conv2d",
+    #         ["cifarresnetv215_stage1_bn_conv2_fwd_0.mrt.dump.in.npy",
+    #          "cifarresnetv215_stage1_bn_conv2_fwd_1.mrt.dump.in.npy",
+    #          "cifarresnetv215_stage1_bn_conv2_fwd_2.mrt.dump.in.npy"],
+    #         ["cifarresnetv215_stage1_bn_conv2_fwd_0.mrt.dump.out.npy"],
+    #         "cifarresnetv215_stage1_bn_conv2_fwd.attr",
+    #         root="/data/std_out/qd10_resnet20_v2")
     exit()
 inputs = [mx.sym.var(n) for n in inputs_ext]
 net2 = utils.load_model(dump_sym, dump_params, inputs, ctx=ctx)
