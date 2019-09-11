@@ -104,11 +104,9 @@ def load_imagenet_rec(batch_size, input_size=224, **kwargs):
 import pickle
 
 def load_cifar10(batch_size, input_size=224, num_workers=4, **kwargs):
-    flist = ["cifar-10-binary.tar.gz",
-            "data_batch_1.bin", "data_batch_2.bin",
-            "data_batch_3.bin", "data_batch_4.bin",
-            "data_batch_5.bin", "test_batch.bin"]
+    flist = ["cifar-10-binary.tar.gz"]
     root_dir = download_files("cifar10", flist, **kwargs)
+    extract_file(os.path.join(root_dir, flist[0]), root_dir)
     transform_test = gluon.data.vision.transforms.Compose([
         gluon.data.vision.transforms.ToTensor(),
         gluon.data.vision.transforms.Normalize([0.4914, 0.4822, 0.4465],
