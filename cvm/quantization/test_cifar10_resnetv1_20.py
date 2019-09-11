@@ -32,8 +32,8 @@ ctx = [mx.gpu(int(i)) for i in "1,2,3,4,5".split(',') if i.strip()]
 
 utils.log_init()
 
-data_iter = ds.load_cifar10(batch_size, input_size, dataset_dir=os.path.expanduser("~/.cvm_test"))
-# data_iter = ds.load_cifar10(batch_size, input_size)
+# data_iter = ds.load_cifar10(batch_size, input_size, root=os.path.expanduser("~/.cvm_test"))
+data_iter = ds.load_cifar10(batch_size, input_size)
 def data_iter_func():
     data, label = next(data_iter)
     return data, label

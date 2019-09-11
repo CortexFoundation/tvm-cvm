@@ -19,17 +19,12 @@ src = "http://192.168.50.210:8827"
 
 # max value: 2.64
 def load_voc(batch_size, input_size=416, **kwargs):
-    if "dataset_dir" in kwargs:
-        dataset_dir = kwargs["dataset_dir"]
-    filename = dataset_dir + "/voc/VOCtest_06-Nov-2007.tar"
-    download_file(filename, dataset_dir=dataset_dir)
-    foldername, _ = os.path.splitext(filename)
-    if not os.path.exists(foldername):
-        extract_file(filename, foldername)
+    fname = "VOCtest_06-Nov-2007.tar"
+    root_dir = download_files("voc", [fname], **kwargs)
+    extract_file(os.path.join(root_dir, fname), root_dir)
     width, height = input_size, input_size
-    val_dataset = gdata.VOCDetection(root=os.path.join(dataset_dir, 'voc',
-                                                       'VOCtest_06-Nov-2007',
-                                                       'VOCdevkit' ), 
+    val_dataset = gdata.VOCDetection(root=os.path.join(root_dir,
+                                                       'VOCdevkit'),
                                      splits=[('2007', 'test')])
     val_batchify_fn = Tuple(Stack(), Pad(pad_val=-1))
     val_loader = gluon.data.DataLoader(
@@ -80,25 +75,6 @@ def download_files(category, files, baseUrl=src, root=dataset_dir):
             fout.write(r.content)
     return root_dir
 
-def download_file(filename, **kwargs):
-    if "dataset_dir" in kwargs:
-        dataset_dir = kwargs["dataset_dir"]
-    if os.path.exists(filename):
-        return
-    filedir = os.path.dirname(filename);
-    if not os.path.exists(filedir):
-        os.makedirs(filedir)
-    suffix = filename.replace(dataset_dir, "")
-    r = requests.get(src + suffix)
-    if r.status_code != 200:
-        print("url request error: %d" % r.status_code )
-        exit()
-    r.raise_for_status()
-    f = open(filename, "wb")
-    f.write(r.content)
-    f.close()
-
-
 def load_imagenet_rec(batch_size, input_size=224, **kwargs):
     files = ["val.rec", "val.idx"]
     download_files("imagenet", files, **kwargs)
@@ -128,21 +104,17 @@ def load_imagenet_rec(batch_size, input_size=224, **kwargs):
 import pickle
 
 def load_cifar10(batch_size, input_size=224, num_workers=4, **kwargs):
-    if "dataset_dir" in kwargs:
-        dataset_dir = kwargs["dataset_dir"]
-    root_dir = dataset_dir + "/cifar10"
-    flist = ["/batches.meta.txt", "/cifar-10-binary.tar.gz",
-            "/data_batch_1.bin", "/data_batch_2.bin",
-            "/data_batch_3.bin", "/data_batch_4.bin",
-            "/data_batch_5.bin", "/readme.html", "/test_batch.bin"]
-    for f in flist:
-        download_file(root_dir + f, dataset_dir=dataset_dir)
+    flist = ["cifar-10-binary.tar.gz",
+            "data_batch_1.bin", "data_batch_2.bin",
+            "data_batch_3.bin", "data_batch_4.bin",
+            "data_batch_5.bin", "test_batch.bin"]
+    root_dir = download_files("cifar10", flist, **kwargs)
     transform_test = gluon.data.vision.transforms.Compose([
         gluon.data.vision.transforms.ToTensor(),
         gluon.data.vision.transforms.Normalize([0.4914, 0.4822, 0.4465],
                                                [0.2023, 0.1994, 0.2010])])
     val_data = gluon.data.DataLoader(
-            gluon.data.vision.CIFAR10(root=os.path.join(root_dir),
+            gluon.data.vision.CIFAR10(root=root_dir,
                 train=False).transform_first(transform_test),
             batch_size=batch_size, shuffle=False, num_workers=num_workers)
     def data_iter():
