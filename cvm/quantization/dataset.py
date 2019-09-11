@@ -7,15 +7,42 @@ from gluoncv.data.transforms.presets.yolo import YOLO3DefaultValTransform
 from gluoncv.utils.metrics.voc_detection import VOC07MApMetric
 import numpy as np
 import requests
-import shutil
 import tarfile
 
 import os
 import math
 import pickle
+import logging
 
 dataset_dir = os.path.expanduser("~/.cvm")
 src = "http://192.168.50.210:8827"
+
+def extract_file(tar_path, target_path):
+    tar = tarfile.open(tar_path, "r")
+    tar.extractall(target_path)
+    tar.close()
+
+def download_files(category, files, baseUrl=src, root=dataset_dir):
+    logger = logging.getLogger("dataset")
+    root_dir = os.path.join(root, category)
+    os.makedirs(root_dir, exist_ok=True)
+    for df in files:
+        url = os.path.join(baseUrl, category, df)
+        fpath = os.path.join(root_dir, df)
+        if os.path.exists(fpath):
+            continue
+
+        logger.info("Downloading dateset %s into %s from url[%s]",
+                df, root_dir, url)
+        r = requests.get(url)
+        if r.status_code != 200:
+            logger.error("Url response invalid status code: %s",
+                    r.status_code)
+            exit()
+        r.raise_for_status()
+        with open(fpath, "wb") as fout:
+            fout.write(r.content)
+    return root_dir
 
 # max value: 2.64
 def load_voc(batch_size, input_size=416, **kwargs):
@@ -50,31 +77,6 @@ def load_imagenet(batch_size):
         last_batch='keep',
         num_workers=30)
 
-
-def extract_file(tar_path, target_path):
-    tar = tarfile.open(tar_path, "r")
-    tar.extractall(target_path)
-    tar.close()
-
-def download_files(category, files, baseUrl=src, root=dataset_dir):
-    root_dir = os.path.join(root, category)
-    os.makedirs(root_dir, exist_ok=True)
-    for df in files:
-        url = os.path.join(baseUrl, category, df)
-        fpath = os.path.join(root_dir, df)
-        if os.path.exists(fpath):
-            continue
-
-        print ("Downloading dataset: ", df, " from url ", url)
-        r = requests.get(url)
-        if r.status_code != 200:
-            print("url request error: %d" % r.status_code )
-            exit()
-        r.raise_for_status()
-        with open(fpath, "wb") as fout:
-            fout.write(r.content)
-    return root_dir
-
 def load_imagenet_rec(batch_size, input_size=224, **kwargs):
     files = ["val.rec", "val.idx"]
     download_files("imagenet", files, **kwargs)
@@ -100,8 +102,6 @@ def load_imagenet_rec(batch_size, input_size=224, **kwargs):
 	std_b               = std_rgb[2],
     )
     return val_data
-
-import pickle
 
 def load_cifar10(batch_size, input_size=224, num_workers=4, **kwargs):
     flist = ["cifar-10-binary.tar.gz"]
