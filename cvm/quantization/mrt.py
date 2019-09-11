@@ -231,10 +231,10 @@ def _simulate(sym, params, graph, inputs_ext, self):
         ::math
             y(i) = e ^ i \over {\sum_j^K {e ^ j}}
         ::quantize
-            1. Keep value in range [max(input) - lbda, max(input)),
+            1. Keep value in range [max(input) - lambd, max(input)),
                 otherwise set zero to ignore for tiny probability.
             2. Embedding e ^ i for input scale. ie. calculate the value
-                of e ^ i for i in range [0, lbda * input scale],
+                of e ^ i for i in range [0, lambd* input scale],
                 E(i) = Embedding(e ^ i).
             3. Do math for interger computation.
                 sum = \sum_j^K { E(j) }
@@ -245,8 +245,8 @@ def _simulate(sym, params, graph, inputs_ext, self):
         xs = scale(th_dict[cns[0]], iprec.p)
         axis = get_attr(attr, 'axis', -1)
         X, xprec, xs = _requant_operator(childs[0], iprec, xs)
-        lbda = 10
-        alpha = int(lbda * xs)
+        lambd = 10
+        alpha = int(lambd * xs)
         max_axis = mx.sym.max(X, axis=axis, keepdims=True)
         var = mx_const(alpha, graph, params)
         offset_name = _uniq_name("softmax_offset")
@@ -258,7 +258,7 @@ def _simulate(sym, params, graph, inputs_ext, self):
         data = nd.arange(0, alpha+1)
         table = nd.exp(data / xs)
 
-        tprec = _get_bit(math.exp(lbda))
+        tprec = _get_bit(math.exp(lambd))
         table = nd.clip(table, a_min=0, a_max=_get_range(tprec))
         W_name = _uniq_name("cvm_lut_weight")
         params[W_name] = weight = table.round().reshape(alpha+1, 1)
@@ -269,7 +269,7 @@ def _simulate(sym, params, graph, inputs_ext, self):
 
         oprec = min(15, 31 - tprec)
         assert oprec > 8, "operator softmax(%s) lambda(%d) is too large" \
-            % (name, lbda)
+            % (name, lambd)
         oscale = _get_range(oprec)
         var_scale = mx_const(oscale, graph, params)
         prob = mx.sym.broadcast_mul(lut, var_scale)
@@ -490,85 +490,81 @@ class MRT():
         assert (hist <= 0).sum() == 0
         return hist
 
-    def _get_optimal_threshold(self, arr, num_bins=8001, num_quantized_bins=255):
+    def _kldiverge(self, arr, bucket_bit=12, quant_bit=8):
         arr = arr.asnumpy()
-        min_val = np.min(arr)
-        max_val = np.max(arr)
-        th = max(abs(min_val), abs(max_val))
+        th = np.abs(arr).max()
 
+        num_bins, num_quantized_bins = (1 << bucket_bit) - 1, (1 << quant_bit) - 1
         hist, hist_edges = np.histogram(arr, bins=num_bins, range=(-th, th))
         zero_bin_idx = num_bins // 2
         num_half_quantized_bins = num_quantized_bins // 2
 
-        thresholds = np.zeros(num_bins // 2 + 1 - num_quantized_bins // 2)
+        step = 1
+        thresholds = np.zeros((zero_bin_idx - num_half_quantized_bins) // step + 1)
         divergence = np.zeros_like(thresholds)
         quantized_bins = np.zeros(num_quantized_bins, dtype=np.int32)
-        # i means the number of bins on half axis excluding the zero bin.
-        for i in range(num_quantized_bins // 2,
-                       num_bins // 2 + 1):
+
+        table = np.zeros(hist.size+1)
+        for i in range(1, table.size):
+            table[i] = table[i-1] + hist[i-1]
+
+        for i in range(num_half_quantized_bins,
+                       zero_bin_idx+1, step):
             p_bin_idx_start = zero_bin_idx - i
             p_bin_idx_stop = zero_bin_idx + i + 1
-            thresholds[i - num_half_quantized_bins] = hist_edges[p_bin_idx_stop]
+            thresholds[(i-num_half_quantized_bins) // step] = hist_edges[p_bin_idx_stop]
             sliced_nd_hist = hist[p_bin_idx_start:p_bin_idx_stop]
 
-            # generate reference distribution p
             p = sliced_nd_hist.copy()
-            assert p.size % 2 == 1
-            assert p.size >= num_quantized_bins
-            # put left outlier count in p[0]
-            left_outlier_count = np.sum(hist[0:p_bin_idx_start])
-            p[0] += left_outlier_count
-            # put right outlier count in p[-1]
-            right_outlier_count = np.sum(hist[p_bin_idx_stop:])
-            p[-1] += right_outlier_count
-            # is_nonzeros[k] indicates whether hist[k] is nonzero
+            p[0] += table[p_bin_idx_start] - table[0]
+            p[-1] += table[-1] - table[p_bin_idx_stop]
             is_nonzeros = (p != 0).astype(np.int32)
 
-            # calculate how many bins should be merged to generate quantized distribution q
             num_merged_bins = sliced_nd_hist.size // num_quantized_bins
-            # merge hist into num_quantized_bins bins
             for j in range(num_quantized_bins):
-                start = j * num_merged_bins
+                start = p_bin_idx_start + j * num_merged_bins
                 stop = start + num_merged_bins
-                quantized_bins[j] = sliced_nd_hist[start:stop].sum()
-            quantized_bins[-1] += sliced_nd_hist[num_quantized_bins * num_merged_bins:].sum()
-            # expand quantized_bins into p.size bins
+                quantized_bins[j] = table[stop] - table[start]
+            quantized_bins[-1] += table[p_bin_idx_stop] - table[p_bin_idx_start +
+                   num_quantized_bins * num_merged_bins]
+
+            expand_bins = sliced_nd_hist.size / num_quantized_bins
             q = np.zeros(sliced_nd_hist.size, dtype=np.float32)
             for j in range(num_quantized_bins):
                 start = j * num_merged_bins
                 if j == num_quantized_bins - 1:
-                    stop = len(is_nonzeros)
+                   stop = len(is_nonzeros)
                 else:
-                    stop = start + num_merged_bins
+                   stop = start + num_merged_bins
                 norm = is_nonzeros[start:stop].sum()
                 if norm != 0:
                     q[start:stop] = float(quantized_bins[j]) / float(norm)
             q[p == 0] = 0
             p = self._smooth_distribution(p)
-            # There is a chance that q is an invalid probability distribution.
             try:
                 q = self._smooth_distribution(q)
             except ValueError:
-                divergence[i - num_half_quantized_bins] = float("inf")
-            divergence[i - num_half_quantized_bins] = stats.entropy(p, q)
+                divergence[(i-num_half_quantized_bins) // step] = float("inf")
+            divergence[(i-num_half_quantized_bins) // step] = stats.entropy(p, q)
 
         min_divergence_idx = np.argmin(divergence)
-        min_divergence = divergence[min_divergence_idx]
         opt_th = thresholds[min_divergence_idx]
-        return min_val, max_val, min_divergence, opt_th
+        return opt_th
 
-    def _get_opt(self, out, lbda=10):
+    def _get_opt(self, out, lambd=10):
         mean = nd.mean(out).asscalar()
         std = nd.norm(out - mean).asscalar() / math.sqrt(np.product(out.shape))
-        alpha = abs(mean) + lbda * std
+        alpha = abs(mean) + lambd * std
         absmax = out.abs().max().asscalar()
 
+        # return absmax # For normal model network
+        # if alpha < 0.95 * absmax:
+        #     print ("[", mean, std, "]", alpha, absmax)
+        #     return alpha
         return absmax
-        #  return min(alpha, absmax)
 
-        _, _, _, kmeans = self._get_optimal_threshold(out, num_bins=2049)
-        print (mean, std, alpha, absmax, kmeans)
-        return sorted([kmeans, alpha, absmax])[1]
+        #  kldiverge = self._kldiverge(out, 10) # For mobilenet
+        #  return sorted([kldiverge, alpha, absmax])[1]
 
     def _sym_calibrate(self, ctx):
         order, deps = topo_sort(self.sym, logger=self._lgr, with_deps=True)
@@ -594,15 +590,15 @@ class MRT():
             out = [out] if len(sym) == 1 else out
             out_cache[name] = [o.as_in_context(ctx) for o in out]
             #  opts = [float(o.abs().max().asscalar()) for o in out][0]
-            opts = float(self._get_opt(out[0]))
+            opts = float(self._get_opt(out[0], lambd=10))
             # TODO: out may be multiple
             if name in old_ths:
                 #  th_dict[name] = [max(old_ths[name][i], o) for i,o in enumerate(opts)]
                 self.th_dict[name] = max(old_ths[name], opts)
             else:
                 self.th_dict[name] = opts
-                self._lgr.debug(
-                    "collect symbol %-40s out_shape=%-20s th_dict: (%s)",
+                p = self._lgr.debug if opts < 30 else self._lgr.warn
+                p("collect symbol %-40s out_shape=%-20s th_dict: (%s)",
                         name, [o.shape for o in out], self.th_dict[name])
 
         out_cache.clear()
@@ -692,6 +688,7 @@ def std_dump(sym, params, inputs_ext, data, model_name,
     if not batch:
         for k, v in inputs_ext.items():
             v['shape'] = (1, *v['shape'][1:])
+        data = data[0].reshape(inputs_ext['data']['shape'])
     datadir = "/data/std_out/" + model_name
     os.makedirs(datadir, exist_ok=True)
     if is_mxnet:

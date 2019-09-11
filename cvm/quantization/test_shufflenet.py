@@ -19,10 +19,10 @@ def load_fname(version, suffix=None, with_ext=False):
     return utils.extend_fname(fname, with_ext)
 
 version = "v1"
-def test_sym_pass(batch_size=10, iter_num=10):
+def test_sym_pass(batch_size=10, iter_num=10, quantize=True):
     logger = logging.getLogger("log.test.sym.pass")
     calib_ctx = mx.gpu(1)
-    ctx = [mx.gpu(int(i)) for i in "0,1,3,4,5".split(',') if i.strip()]
+    ctx = [mx.gpu(int(i)) for i in "1,2,3,4".split(',') if i.strip()]
     inputs_ext = { 'data': {
             'shape': (batch_size, 3, 224, 224),
     } }
@@ -52,7 +52,7 @@ def test_sym_pass(batch_size=10, iter_num=10):
         _, top5 = acc_top5.get()
         return "top1={:6.2%} top5={:6.2%}".format(top1, top5)
 
-    if False:
+    if quantize:
         # load original model
         sym_fname, param_fname = load_fname(version)
         sym, params = mx.sym.load(sym_fname), nd.load(param_fname)
@@ -121,8 +121,9 @@ def test_sym_nnvm(batch_size=10, iter_num=10):
 if __name__ == "__main__":
     utils.log_init()
 
-    # test_sym_pass(batch_size=640, iter_num=100)
-    test_sym_nnvm(1, 0)
+    test_sym_pass(batch_size=16, iter_num=10)
+    test_sym_pass(batch_size=160, iter_num=1000, quantize=False)
+    #  test_sym_nnvm(1, 0)
 
 
 

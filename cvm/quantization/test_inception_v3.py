@@ -41,11 +41,11 @@ def test_sym_nnvm(batch_size=10, iter_num=10):
 
     _mrt.std_dump(sym, params, inputs_ext, data, "inception_v3")
 
-def test_sym_pass(batch_size=10, iter_num=10):
+def test_sym_pass(batch_size=10, iter_num=10, quantize=True):
     logger = logging.getLogger("log.test.sym.pass")
 
     calib_ctx = mx.gpu(2)
-    ctx = [mx.gpu(int(i)) for i in "1,2,3,4,5,6,7".split(',') if i.strip()]
+    ctx = [mx.gpu(int(i)) for i in "1,2,3,4".split(',') if i.strip()]
     input_size = 299
     version = "v3"
     h, w = input_size, input_size
@@ -77,7 +77,7 @@ def test_sym_pass(batch_size=10, iter_num=10):
         _, top5 = acc_top5.get()
         return "top1={:6.2%} top5={:6.2%}".format(top1, top5)
 
-    if False:
+    if quantize:
         sym_file, param_file = load_fname(version)
         sym, params = mx.sym.load(sym_file), nd.load(param_file)
         sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
@@ -181,7 +181,8 @@ if __name__ == '__main__':
                     datadir="/data/wlt", ctx=mx.gpu(3))
         exit()
 
-    test_sym_nnvm(1, 0)
-    # test_sym_pass(350, 100000)
+    #  test_sym_nnvm(1, 0)
+    test_sym_pass(16, 10)
+    test_sym_pass(160, 1000, quantize=False)
     # test_mxnet_sym(1)
     # validate(700, 100000)

@@ -11,7 +11,7 @@ def load_real_data(data, name, inputs_ext):
     logger = logging.getLogger('log.data.load')
     data = load_sim_data(data, name, inputs_ext)
     return int_realize(data, inputs_ext[name]['target_bit'],
-            logger=logger)
+            logger=None)
 
 def save_ext(fname, *infos, logger=logging):
     fout = open(fname, "w")
