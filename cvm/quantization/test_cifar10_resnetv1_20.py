@@ -10,6 +10,7 @@ import sim_quant_helper as sim
 import utils
 import mrt as _mrt
 import logging
+import os
 
 version = "20_v1"
 gz.save_model("cifar_resnet"+version)
@@ -31,7 +32,8 @@ ctx = [mx.gpu(int(i)) for i in "1,2,3,4,5".split(',') if i.strip()]
 
 utils.log_init()
 
-data_iter = ds.load_cifar10(batch_size, input_size)
+data_iter = ds.load_cifar10(batch_size, input_size, dataset_dir=os.path.expanduser("~/.cvm_test"))
+# data_iter = ds.load_cifar10(batch_size, input_size)
 def data_iter_func():
     data, label = next(data_iter)
     return data, label
