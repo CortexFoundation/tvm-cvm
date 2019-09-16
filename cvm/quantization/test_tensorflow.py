@@ -81,7 +81,8 @@ def preprocess_image(image):
     image = tf.image.decode_jpeg(image, channels=3)
     image = tf.image.resize_images(image, [224, 224])
     # image /= 255.0  # normalize to [0,1] range
-    image = kapp.resnet.preprocess_input(image)
+    # image = kapp.resnet.preprocess_input(image)
+    image = tf.keras.applications.resnet50.preprocess_input(image)
     print (image.numpy().min(), image.numpy().max())
 
     return image
@@ -130,3 +131,6 @@ if __name__ == '__main__':
 
     resnet50_v1 = tf.keras.applications.ResNet50(weights='imagenet')
     load_imagenet()
+    tf.losses.softmax_cross_entropy
+    tf.metrics.accuracy
+    tf.keras.optimizers.SGD

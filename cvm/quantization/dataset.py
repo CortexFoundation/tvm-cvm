@@ -18,6 +18,8 @@ dataset_dir = os.path.expanduser("~/.cvm")
 src = "http://192.168.50.210:8827"
 
 def extract_file(tar_path, target_path):
+    if os.path.exists(target_path):
+        return
     tar = tarfile.open(tar_path, "r")
     tar.extractall(target_path)
     tar.close()
@@ -26,6 +28,7 @@ def download_files(category, files, baseUrl=src, root=dataset_dir):
     logger = logging.getLogger("dataset")
     root_dir = os.path.join(root, category)
     os.makedirs(root_dir, exist_ok=True)
+
     for df in files:
         url = os.path.join(baseUrl, category, df)
         fpath = os.path.join(root_dir, df)
