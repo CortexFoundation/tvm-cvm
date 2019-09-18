@@ -3,6 +3,8 @@ import tensorflow as tf
 import utils
 from tensorflow.keras import backend as K
 from tensorflow.keras.models import load_model
+# from keras import backend as K
+# from keras.models import load_model
 
 # from tensorflow.python.keras import backend as K
 
@@ -125,12 +127,57 @@ def load_imagenet():
     # ds = ds.prefetch(buffer_size=AUTOTUNE)
     print (ds)
 
+import keras
+def dump_model(net, root="/tmp/tfmodels/"):
+    os.makedirs(root, exist_ok=True)
+
+    # resnet50_v1 = tf.keras.applications.ResNet50(weights=None)
+    net.trainable = False
+    net.save(os.path.join(root, "model.h5"))
+
+    K.set_learning_phase(0)
+    model = load_model(os.path.join(root, "model.h5"))
+    print ("Model Output: ", model.outputs)
+    frozen_graph = freeze_session(K.get_session(),
+            output_names=[out.op.name for out in model.outputs])
+    tf.train.write_graph(frozen_graph, root, "model.pb", as_text=False)
+
+from from_tensorflow import TFParser
+def test_tf_parser():
+    def _tf_shape_to_list(shp):
+        return [1 if d.size < 0 else d.size for d in shp.dim]
+
+    model_path = "/data/tfmodels/resnet50_v1_new/model.pb"
+    parser = TFParser(model_path)
+    graph = parser.parse()
+
+    node_map = {}
+    input_shapes = {}
+    tf_ops = set()
+    for i, node in enumerate(graph.node):
+        node_map[node.name] = node.op
+        if node.op == 'Const':
+            val = node.attr['value'].tensor
+            input_shapes[node.name] = _tf_shape_to_list(val.tensor_shape)
+            # print (node.name, node.op, input_shapes[node.name])
+        elif node.op == 'Placeholder' or node.op == 'PlaceholderWithDefault':
+            input_shapes[node.name] = _tf_shape_to_list(node.attr['shape'].shape)
+            print (node.name, node.op, input_shapes[node.name])
+        else:
+            # print (node.op)
+            tf_ops.add(node.op)
+    print (tf_ops)
 
 if __name__ == '__main__':
     utils.log_init()
 
-    resnet50_v1 = tf.keras.applications.ResNet50(weights='imagenet')
-    load_imagenet()
-    tf.losses.softmax_cross_entropy
-    tf.metrics.accuracy
-    tf.keras.optimizers.SGD
+    # net = keras.applications.resnet.ResNet50(weights='imagenet')
+    # net = tf.keras.applications.ResNet50(weights='imagenet')
+    # net = tf.keras.applications.InceptionV3(weights='imagenet')
+
+    # net = keras.applications.InceptionV3(weights='imagenet')
+    # net = tf.keras.applications.MobileNet(weights='imagenet')
+    # dump_model(net, "/data/tfmodels/resnet50_v1_new")
+    # load_imagenet()
+
+    test_tf_parser()
