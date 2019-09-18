@@ -1,159 +1,159 @@
+from tensorflow_parser import TFParser
+from tensorflow.core.framework import tensor_pb2 as tpb2
+from tensorflow.core.framework import tensor_shape_pb2 as tspb2
+from tensorflow.core.framework import attr_value_pb2 as apb2
+import mxnet as mx
+
 import os
-from tensorflow.core.framework import graph_pb2
-from tvm.contrib import util
+import logging
+import utils
 
-class TFParser(object):
-    """
-    A Wrapper to handle tensorflow models parsing, TensorFlow is needed
+import heapq
 
-    Parameters
-    ----------
-    model_dir : tensorflow frozen pb file or a directory that contains saved
-    model or checkpoints.
+ts = set()
+fieldOrgTypes = (int, bool, float)
 
-    Examples
-    --------
-    .. code-block:: python
+def convert_field(node, attrName, attrFields):
+    fields = attrFields.ListFields()
+    if len(fields) > 1:
+        logger.error("Multiple AttrValue fields found in node '%s' --> " + \
+                "op '%s' --> attr '%s' which is not supported.",
+                node.name, node.op, attrName)
+        exit()
+    elif not len(fields):
+        logger.error("Null AttrValue field found in node '%s' --> " + \
+                "op '%s' --> attr '%s' which is not supported.",
+                node.name, node.op, attrName)
+        exit()
+    _, fieldValue = fields[0]
+    if isinstance(fieldValue, fieldOrgTypes):
+        return fieldValue
+    elif isinstance(fieldValue, bytes):
+        return str(fieldValue, encoding='utf-8')
+    elif isinstance(fieldValue, tspb2.TensorShapeProto):
+        return tuple([dim.size for dim in \
+                fieldValue.ListFields()[0][1]])
+    elif isinstance(fieldValue, tpb2.TensorProto):
+        # the length of ffields must be 3
+        # which is respectively: num, shape, tensor
+        ffields = fieldValue.ListFields()
+        ff = ffields[1][1].ListFields()
+        # the length of ff must be  
+        if len(ff) == 1:
+            shapes = tuple([dim.size for dim in ffields[1][1].ListFields()[0][1]])
+            return (ffields[0][1], shapes, ffields[2][1])
+        elif not len(ff):
+            return (ffields[0][1], None, ffields[2][1][0])
+    elif isinstance(fieldValue, apb2.AttrValue.ListValue):
+        return tuple(fieldValue.ListFields()[0][1])
+    else:
+        logger.error("Unsupported field type '%s' found in node '%s' --> " + \
+                "op '%s' --> attr '%s'.", type(fieldValue), node.name,
+                node.op, attrName)
+        # exit() 
 
-        parser = TfParser(model_dir)
-        graph = parser.parse()
-        # graph is related graphdef of the model
-    """
+def create_sym(node):
+    conv_attr = { 'layout': 'NCHW',
+    'pad': (1, 1),
+    'num_filter': 16,
+    'dilate': (1, 1),
+    'num_group': 1,
+    'stride': (1, 1),
+    'no_bias': False,
+    'kernel': (3, 3) }
+    node = mx.sym.Convolution(X, W, **conv_attr, name=conv_name)
 
-    def __init__(self, model_dir):
-        self._tmp_dir = util.tempdir()
-        self._model_dir = model_dir
-        self._graph = graph_pb2.GraphDef()
+currSupportedOps = {
+                'Const',
+                'Pad',
+                'Identity',
+                'FusedBatchNorm',
+                'MatMul',
+                'Relu', 'Relu6',
+                'Softmax', 'Mean',
+                'MaxPool', 'AvgPool',
+                'BiasAdd', 'Add', 'Placeholder',
+                'Conv2D', 'DepthwiseConv2dNative',
+                'Shape', 'Reshape',
+                'Fill',
+                'ConcatV2',
+                'StridedSlice',
+                'Pack'
+                }
 
-    def _set_graph(self, graph):
-        """Set Graph"""
-        self._graph = graph
+allAttrs = { 'Conv2D': { 'strides', 'data_format', 'padding',
+             'dilations', 'use_cudnn_on_gpu', 'T' },
+             'Const': { 'value', 'dtype' } }
 
-    def _get_graph(self):
-        """Get Graph"""
-        return self._graph
+currRealizedOps = { }
 
-    def _load_pb_file(self):
-        """Load single pb file"""
-        graph = self._get_graph()
-        with open(self._model_dir, "rb") as f:
-            graph.ParseFromString(f.read())
-        return graph
-
-    def _get_tag_set(self):
-        """Return the tag set of saved model, multiple metagraphs are not supported"""
-        try:
-            from tensorflow.contrib.saved_model.python.saved_model import reader
-        except ImportError:
-            raise ImportError(
-                "InputConfiguration: Unable to import saved_model.reader which is "
-                "required to get tag set from saved model.")
-        tag_sets = reader.get_saved_model_tag_sets(self._model_dir)
-        return tag_sets[0]
-
-    def _get_output_names(self):
-        """Return the concatenated output names"""
-        try:
-            import tensorflow as tf
-        except ImportError:
-            raise ImportError(
-                "InputConfiguration: Unable to import tensorflow which is "
-                "required to restore from saved model.")
-        tags = self._get_tag_set()
-        with tf.Session() as sess:
-            meta_graph_def = tf.saved_model.loader.load(sess,
-                                                        tags,
-                                                        self._model_dir)
-            output_names = set()
-            for sig_def in meta_graph_def.signature_def.values():
-                for output_tensor in sig_def.outputs.values():
-                    output_names.add(output_tensor.name.replace(":0", ""))
-            return ",".join(output_names)
-
-    def _load_saved_model(self):
-        """Load the tensorflow saved model."""
-        try:
-            from tensorflow.python.tools import freeze_graph
-            from tensorflow.python.framework import ops
-            from tensorflow.python.framework import graph_util
-        except ImportError:
-            raise ImportError(
-                "InputConfiguration: Unable to import tensorflow which is "
-                "required to restore from saved model.")
-
-        saved_model_dir = self._model_dir
-        output_graph_filename = self._tmp_dir.relpath("tf_frozen_model.pb")
-        input_saved_model_dir = saved_model_dir
-        output_node_names = self._get_output_names()
-
-        input_binary = False
-        input_saver_def_path = False
-        restore_op_name = None
-        filename_tensor_name = None
-        clear_devices = True
-        input_meta_graph = False
-        checkpoint_path = None
-        input_graph_filename = None
-        saved_model_tags = ",".join(self._get_tag_set())
-
-        freeze_graph.freeze_graph(input_graph_filename, input_saver_def_path,
-                                  input_binary, checkpoint_path, output_node_names,
-                                  restore_op_name, filename_tensor_name,
-                                  output_graph_filename, clear_devices, "", "", "",
-                                  input_meta_graph, input_saved_model_dir,
-                                  saved_model_tags)
-
-        with ops.Graph().as_default():
-            output_graph_def = graph_pb2.GraphDef()
-            with open(output_graph_filename, "rb") as f:
-                output_graph_def.ParseFromString(f.read())
-            output_graph_def = graph_util.remove_training_nodes(output_graph_def)
-            return output_graph_def
-
-    def _load_ckpt(self):
-        """TODO: Load checkpoint model."""
-        raise RuntimeError("InputConfiguration: Loading tf checkpoint model is "
-                           "not supported yet.")
-
-    def parse(self):
-        """
-        Parse tensorflow models: checkpoints, saved models, and single frozen pb file.
-
-        Returns
-        -------
-        GraphDef of the passed model
-        """
-
-        graph = None
-
-        if os.path.isdir(self._model_dir):
-            ckpt = os.path.join(self._model_dir, "checkpoint")
-            if not os.path.isfile(ckpt):
-                if not os.path.isdir(os.path.join(self._model_dir, "variables")):
-                    raise RuntimeError("InputConfiguration: Invalid model path.")
-                graph = self._load_saved_model()
-            else:
-                graph = self._load_ckpt()
-        elif os.path.isfile(self._model_dir):
-            # Only .pb or .pbtxt is a valid suffix name.
-            if self._model_dir.endswith(".pb") or \
-               self._model_dir.endswith(".pbtxt"):
-                cur_dir = os.path.dirname(self._model_dir)
-            else:
-                raise RuntimeError("InputConfiguration: Invalid model format.")
-
-            # It is a saved model if `variables` directory is present at the
-            # same directory with the pb or pbtxt file.
-            if os.path.isdir(os.path.join(cur_dir, "variables")):
-                self._model_dir = cur_dir
-                graph = self._load_saved_model()
-            else:
-                graph = self._load_pb_file()
+def topo_sort(tfgraph, logger=logging):
+    node_map = {}
+    deps, ninps, res = {}, [], {}
+    for node in tfgraph.node:
+        node_map[node.name] = node
+        if node.op not in currSupportedOps:
+            logger.error("the op '%s' of node '%s' is not supported",
+                    node.op, node.name)
+            exit()
+        # TODO(ryt): input name may concat output index such as:
+        #   'Model/cell_0/RnnCell' and 'Model/cell_0/RnnCell:0'
+        for inp in node.input:
+            inp = inp.split(":")[0]
+            if inp not in deps:
+                deps[inp] = set()
+            deps[inp].add(node.name)
+        if not len(node.input):
+            ninps.append(node.name)
         else:
-            raise RuntimeError("InputConfiguration: Unrecognized model "
-                               "file or path.")
+            res[node.name] = len(node.input)
 
-        self._set_graph(graph)
-        return graph
+    # topo sort
+    logger = logging.getLogger("Topo sort")
+    topos = []
+    while len(ninps):
+        cname = ninps.pop()
+        topos.append(node_map[cname])
+        if cname not in deps:
+            continue
+        for name in deps[cname]:
+            if res[name] > 1:
+                res[name] -= 1
+            else:
+                res.pop(name)
+                ninps.append(name)
+    if res:
+        logger.critical("deps cannot reduce -> %s", res)
+        exit()
+    logger.info("Topo sort completed.")
+    return topos
+
+def convert_model(pbfile):
+
+    # load the original model
+    logger = logging.getLogger("Loading Original Model")
+    tfparser = TFParser(pbfile)
+    tfgraph = tfparser.parse()
+    logger.info("Model successfully loaded from path [%s].", pbfile)
+
+    for tfnode in topo_sort(tfgraph):
+        print ("%-16s" % tfnode.op,
+               "%-40s" % tfnode.name,
+               tfnode.input)
 
 
+modelfile = {
+            # "/tmp/tf/resnet50_v1/model.pb",
+            "/data/tfmodels/inception_v3/model.pb",
+            # "/data/tfmodels/keras/inception_v3/model.pb",
+            # "/data/tfmodels/mobilenet/model.pb"
+            }
+
+utils.log_init()
+
+for pb in modelfile:
+    convert_model(pb)
+
+
+
+print(ts)

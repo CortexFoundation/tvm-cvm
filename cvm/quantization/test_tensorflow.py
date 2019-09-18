@@ -142,15 +142,49 @@ def dump_model(net, root="/tmp/tfmodels/"):
             output_names=[out.op.name for out in model.outputs])
     tf.train.write_graph(frozen_graph, root, "model.pb", as_text=False)
 
-from from_tensorflow import TFParser
+from tensorflow_parser import TFParser
+from tensorflow.python.framework import dtypes
+import mxnet as mx
 def test_tf_parser():
     def _tf_shape_to_list(shp):
         return [1 if d.size < 0 else d.size for d in shp.dim]
+    def _get_attr(buf):
+        fields = ["s", "i", "f", "b", "type", "shape", "tensor", "func"]
+
+        x = buf
+        ret = []
+
+        # Treat an empty oneof value as an empty list.
+        if not x.WhichOneof("value"):
+            return ret
+        if x.HasField("list"):
+            for f in fields:
+                if getattr(x.list, f):
+                    if f == "type":
+                        ret += [dtypes.as_dtype(x) for x in list(getattr(x.list, f))]
+                    else:
+                        ret += list(getattr(x.list, f))
+        else:
+            for f in fields:
+                if x.HasField(f):
+                    if f == "type":
+                        ret = dtypes.as_dtype(getattr(x, f))
+                    else:
+                        ret = getattr(x, f)
+        return ret
+    def _parse_attr(attr_proto):
+        """Convert a list of AttributeProto to a dict, with names as keys."""
+        attrs = {}
+        for key, value in attr_proto.items():
+            attrs[key] = _get_attr(value)
+            print (key, value, "---", attrs[key])
+        return attrs
 
     model_path = "/data/tfmodels/resnet50_v1_new/model.pb"
     parser = TFParser(model_path)
     graph = parser.parse()
 
+    nodes = {}
     node_map = {}
     input_shapes = {}
     tf_ops = set()
@@ -163,10 +197,13 @@ def test_tf_parser():
         elif node.op == 'Placeholder' or node.op == 'PlaceholderWithDefault':
             input_shapes[node.name] = _tf_shape_to_list(node.attr['shape'].shape)
             print (node.name, node.op, input_shapes[node.name])
+            nodes[node.name] = [mx.sym.var(node.name, shape=input_shapes[node.name])]
         else:
             # print (node.op)
             tf_ops.add(node.op)
     print (tf_ops)
+
+    for node in graph.node:
 
 if __name__ == '__main__':
     utils.log_init()
