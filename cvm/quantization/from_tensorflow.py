@@ -52,40 +52,41 @@ def convert_field(node, attrName, attrFields):
                 node.op, attrName)
         # exit() 
 
-def create_sym(node):
-    conv_attr = { 'layout': 'NCHW',
-    'pad': (1, 1),
-    'num_filter': 16,
-    'dilate': (1, 1),
-    'num_group': 1,
-    'stride': (1, 1),
-    'no_bias': False,
-    'kernel': (3, 3) }
-    node = mx.sym.Convolution(X, W, **conv_attr, name=conv_name)
+def create_symbol(name, nodes):
+    op, attrs, inputs = nodes[name]
+    mxattrs = {}
+    if op == 'Conv2D':
+        for inp in inputs:
+            [nodes[inp][0]
+        mxattrs['layout'] = attrs['data_format']
+    return 0
 
 currSupportedOps = {
-                'Const',
-                'Pad',
-                'Identity',
-                'FusedBatchNorm',
-                'MatMul',
-                'Relu', 'Relu6',
-                'Softmax', 'Mean',
-                'MaxPool', 'AvgPool',
-                'BiasAdd', 'Add', 'Placeholder',
-                'Conv2D', 'DepthwiseConv2dNative',
-                'Shape', 'Reshape',
-                'Fill',
-                'ConcatV2',
-                'StridedSlice',
-                'Pack'
-                }
+                       'Const',
+                       'Pad',
+                       'Identity',
+                       'FusedBatchNorm',
+                       'MatMul',
+                       'Relu', 'Relu6',
+                       'Softmax', 'Mean',
+                       'MaxPool', 'AvgPool',
+                       'BiasAdd', 'Add', 'Placeholder',
+                       'Conv2D', 'DepthwiseConv2dNative',
+                       'Shape', 'Reshape',
+                       'Fill',
+                       'ConcatV2',
+                       'StridedSlice',
+                       'Pack'
+                   }
 
-allAttrs = { 'Conv2D': { 'strides', 'data_format', 'padding',
-             'dilations', 'use_cudnn_on_gpu', 'T' },
-             'Const': { 'value', 'dtype' } }
+currSupportedAttrs = {
+                        'Conv2D': { 'strides', 'data_format', 'padding',
+                                   'dilations', 'use_cudnn_on_gpu', 'T' },
+                        'Const': { 'value', 'dtype' }
+                     }
 
 currRealizedOps = { }
+
 
 def convert_model(pbfile):
 
@@ -97,19 +98,21 @@ def convert_model(pbfile):
 
     # parse the original model
     logger = logging.getLogger("Parsing Original Graph")
-    inputs, outputs, attrs, ninps, res = {}, {}, {}, [], {}
+    inputs, outputs, nodes = {}, {}, {}
+    ninps, res = [], {}
     for node in tfgraph.node:
         if node.op not in currSupportedOps:
             logger.error("the op '%s' of node '%s' is not supported",
                     node.op, node.name)
             exit()
-        inputs[node.name] = set(node.input)
+        inputs = set(node.input)
         for inp in node.input:
             if inp not in outputs.keys():
                 outputs[inp] = set()
             outputs[inp].add(node.name)
-        attrs[node.name] = { attrName: convert_field(node, attrName, attrFields) \
-                           for attrName, attrFields in node.attr.items() }
+        attrs = { attrName: convert_field(node, attrName, attrFields) \
+                for attrName, attrFields in node.attr.items() }
+        nodes[node.name] = (node.op, attrs, inputs)
         if not len(node.input):
             ninps.append(node.name)
         else:
@@ -132,6 +135,11 @@ def convert_model(pbfile):
                 ninps.append(name)
     logger.info("Topo sort completed.")
 
+    # symbol
+    for name in topos:
+        sym = create_symbol(name, nodes)
+
+
 
 modelfile = {
             "/tmp/tf/resnet50_v1/model.pb",
@@ -140,11 +148,28 @@ modelfile = {
             "/data/tfmodels/mobilenet/model.pb"
             }
 
-utils.log_init()
+if True:
+    utils.log_init()
+    for pb in modelfile:
+        convert_model(pb)
 
-for pb in modelfile:
-    convert_model(pb)
+def dump_single_sym(sym,
+        path = os.path.expanduser("~/.dump/test_sym.json")):
+    with open(path, "w") as f:
+        f.write(sym.tojson())
 
-
+conv_attr = {
+    'layout': 'NCHW',
+    'pad': (1, 1),
+    'num_filter': 16,
+    'dilate': (1, 1),
+    'num_group': 1,
+    'stride': (1, 1),
+    'no_bias': False,
+    'kernel': (3, 3)
+}
+# sym = mx.sym.Convolution(X, W, **conv_attr, name=conv_name)
+sym = mx.sym.Convolution(**conv_attr, name='test_ryt')
+dump_single_sym(sym)
 
 print(ts)
