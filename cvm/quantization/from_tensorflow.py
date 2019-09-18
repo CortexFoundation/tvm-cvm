@@ -50,14 +50,19 @@ def convert_field(node, attrName, attrFields):
         logger.error("Unsupported field type '%s' found in node '%s' --> " + \
                 "op '%s' --> attr '%s'.", type(fieldValue), node.name,
                 node.op, attrName)
-        # exit() 
+        exit() 
 
-def create_symbol(name, tfnodes):
-    op, attrs, inputs = nodes[name]
+def create_symbol(tfnode, graph):
+    logger = logging.getLogger("Creating Symbol")
+    op, inputs = tfnode.op, tfnode.input
+    attrs = {k:convert_field(tfnode, k, v) for k, v in tfnode.attr.items()}
+    print(attrs.keys())
+    if op not in currSupportedOps:
+        logger.info("Not supported op '%s' in node '%s'", op, name)
     mxattrs = {}
     if op == 'Conv2D':
-        for inp in inputs:
-            [nodes[inp][0]
+        print(inputs) 
+        exit()
         mxattrs['layout'] = attrs['data_format']
     return 0
 
@@ -141,7 +146,8 @@ def convert_model(pbfile):
         print ("%-16s" % tfnode.op,
                "%-40s" % tfnode.name,
                tfnode.input)
-        sym = create_symbol(tfnode.name, nodes)
+        sym = create_symbol(tfnode, nodes)
+        nodes[tfnode.name] = sym
 
     # symbol
     # for name in topos:
