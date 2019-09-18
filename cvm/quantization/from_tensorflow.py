@@ -52,7 +52,7 @@ def convert_field(node, attrName, attrFields):
                 node.op, attrName)
         # exit() 
 
-def create_symbol(name, nodes):
+def create_symbol(name, tfnodes):
     op, attrs, inputs = nodes[name]
     mxattrs = {}
     if op == 'Conv2D':
@@ -87,6 +87,46 @@ currSupportedAttrs = {
 
 currRealizedOps = { }
 
+def topo_sort(tfgraph, logger=logging):
+    node_map = {}
+    deps, ninps, res = {}, [], {}
+    for node in tfgraph.node:
+        node_map[node.name] = node
+        if node.op not in currSupportedOps:
+            logger.error("the op '%s' of node '%s' is not supported",
+                    node.op, node.name)
+            exit()
+        # TODO(ryt): input name may concat output index such as:
+        #   'Model/cell_0/RnnCell' and 'Model/cell_0/RnnCell:0'
+        for inp in node.input:
+            inp = inp.split(":")[0]
+            if inp not in deps:
+                deps[inp] = set()
+            deps[inp].add(node.name)
+        if not len(node.input):
+            ninps.append(node.name)
+        else:
+            res[node.name] = len(node.input)
+
+    # topo sort
+    logger = logging.getLogger("Topo sort")
+    topos = []
+    while len(ninps):
+        cname = ninps.pop()
+        topos.append(node_map[cname])
+        if cname not in deps:
+            continue
+        for name in deps[cname]:
+            if res[name] > 1:
+                res[name] -= 1
+            else:
+                res.pop(name)
+                ninps.append(name)
+    if res:
+        logger.critical("deps cannot reduce -> %s", res)
+        exit()
+    logger.info("Topo sort completed.")
+    return topos
 
 def convert_model(pbfile):
 
@@ -96,56 +136,24 @@ def convert_model(pbfile):
     tfgraph = tfparser.parse()
     logger.info("Model successfully loaded from path [%s].", pbfile)
 
-    # parse the original model
-    logger = logging.getLogger("Parsing Original Graph")
-    inputs, outputs, nodes = {}, {}, {}
-    ninps, res = [], {}
-    for node in tfgraph.node:
-        if node.op not in currSupportedOps:
-            logger.error("the op '%s' of node '%s' is not supported",
-                    node.op, node.name)
-            exit()
-        inputs = set(node.input)
-        for inp in node.input:
-            if inp not in outputs.keys():
-                outputs[inp] = set()
-            outputs[inp].add(node.name)
-        attrs = { attrName: convert_field(node, attrName, attrFields) \
-                for attrName, attrFields in node.attr.items() }
-        nodes[node.name] = (node.op, attrs, inputs)
-        if not len(node.input):
-            ninps.append(node.name)
-        else:
-            res[node.name] = len(node.input)
-    logger.info("Model successfully parsed.")
-
-    # topo sort
-    logger = logging.getLogger("Topo sort")
-    topos = []
-    while len(ninps):
-        cname = ninps.pop()
-        topos.append(cname)
-        if cname not in outputs.keys():
-            continue
-        for name in outputs[cname]:
-            if res[name] > 1:
-                res[name] -= 1
-            else:
-                res.pop(name)
-                ninps.append(name)
-    logger.info("Topo sort completed.")
+    nodes = {}
+    for tfnode in topo_sort(tfgraph):
+        print ("%-16s" % tfnode.op,
+               "%-40s" % tfnode.name,
+               tfnode.input)
+        sym = create_symbol(tfnode.name, nodes)
 
     # symbol
-    for name in topos:
-        sym = create_symbol(name, nodes)
+    # for name in topos:
+        # sym = create_symbol(name, nodes)
 
 
 
 modelfile = {
-            "/tmp/tf/resnet50_v1/model.pb",
+            # "/tmp/tf/resnet50_v1/model.pb",
             "/data/tfmodels/inception_v3/model.pb",
-            "/data/tfmodels/keras/inception_v3/model.pb",
-            "/data/tfmodels/mobilenet/model.pb"
+            # "/data/tfmodels/keras/inception_v3/model.pb",
+            # "/data/tfmodels/mobilenet/model.pb"
             }
 
 if True:

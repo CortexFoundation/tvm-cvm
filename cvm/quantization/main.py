@@ -116,7 +116,7 @@ if __name__ == "__main__":
         val_loader = ds.load_mnist(batch_size)
         data_iter = iter(val_loader)
         def data_iter_func():
-            return next(data_iter) 
+            return next(data_iter)
     else:
          CHECK(False, "config error: dataset")
 
@@ -136,9 +136,6 @@ if __name__ == "__main__":
 
         CHECK("name_maps" in quant_flag, "config error: name_maps")
         name_maps = quant_flag.get("name_maps")
-
-        # CHECK("valid_thresh" in quant_flag, "config error: valid_thresh")
-        # valid_name = quant_flag.get("valid_thresh")
 
     if debug:
         with open(baseDir + "/mxnet.split.json", "w") as fout:
@@ -192,15 +189,6 @@ if __name__ == "__main__":
                 attr[k] = int(float(attr[k]) * oscales_dict[v])
                 node = sutils.get_mxnet_op(op_name)(*childs, **attr, name=name)
             return node
-
-        # def box_nms(node, params, graph):
-        #     name, op_name = node.attr('name'), node.attr('op_name')
-        #     childs, attr = sutils.sym_iter(node.get_children()), node.list_attr()
-        #     if op_name == '_contrib_box_nms':
-        #         valid_thresh = sutils.get_attr(attr, 'valid_thresh', 0)
-        #         attr['valid_thresh'] = int(valid_thresh * oscales_dict[valid_name])
-        #         node = sutils.get_mxnet_op(op_name)(*childs, **attr, name=name)
-        #     return node
         maps = mrt.get_maps()
         qsym, qparams = _mrt.merge_model(qsym, qparams, sym2, prm2, maps, op_scales)
 

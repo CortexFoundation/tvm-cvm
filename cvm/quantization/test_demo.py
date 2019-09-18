@@ -30,6 +30,7 @@ def save_model(): # load original model from network
 
 def test_sym_pass(batch_size=10, iter_num=10):
     logger = logging.getLogger("log.test.sym.pass")
+    print(type(logger))
     calib_ctx = mx.gpu(2)
     ctx = mx.gpu(2)
     inputs_ext = { 'data': {
