@@ -13,7 +13,7 @@ import heapq
 ts = set()
 fieldOrgTypes = (int, bool, float)
 
-def convert_field(node, attrName, attrFields):
+def convert_field(node, attrName, attrFields, logger):
     fields = attrFields.ListFields()
     if len(fields) > 1:
         logger.error("Multiple AttrValue fields found in node '%s' --> " + \
@@ -41,29 +41,48 @@ def convert_field(node, attrName, attrFields):
         # the length of ff must be  
         if len(ff) == 1:
             shapes = tuple([dim.size for dim in ffields[1][1].ListFields()[0][1]])
-            return (ffields[0][1], shapes, ffields[2][1])
+            data = ffields[2][1]
+            if isinstance(data, bytes):
+                return (ffields[0][1], shapes, data)
+            elif str(type(data)) == "<class 'google.protobuf.pyext._message.RepeatedScalarContainer'>":
+                return (ffields[0][1], shapes, data[0])
+            else:
+                logger.error("data error 2")
+                exit()
         elif not len(ff):
             return (ffields[0][1], None, ffields[2][1][0])
+        else:
+            logger.error("data error 1")
+            exit()
     elif isinstance(fieldValue, apb2.AttrValue.ListValue):
         return tuple(fieldValue.ListFields()[0][1])
     else:
         logger.error("Unsupported field type '%s' found in node '%s' --> " + \
                 "op '%s' --> attr '%s'.", type(fieldValue), node.name,
                 node.op, attrName)
-        exit() 
-
-def create_symbol(tfnode, graph):
-    logger = logging.getLogger("Creating Symbol")
-    op, inputs = tfnode.op, tfnode.input
-    attrs = {k:convert_field(tfnode, k, v) for k, v in tfnode.attr.items()}
-    print(attrs.keys())
-    if op not in currSupportedOps:
-        logger.info("Not supported op '%s' in node '%s'", op, name)
-    mxattrs = {}
-    if op == 'Conv2D':
-        print(inputs) 
         exit()
-        mxattrs['layout'] = attrs['data_format']
+
+node_map_out = {}
+
+def create_symbol(tfnode, graph, logger):
+    attrs = { k:convert_field(tfnode, k, v, logger) for k, v in tfnode.attr.items() }
+    if tfnode.op not in currSupportedOps:
+        logger.info("Not supported op '%s'", tfnode.op)
+    mxattrs = {}
+    if tfnode.op == 'Const':
+        dtype = attrs['dtype']
+        _, shape, data = attrs['value']
+        
+        # ts.add((dtype, type(data)))
+        
+        pass
+    elif tfnode.op == 'FusedBatchNorm':
+        pass
+    elif tfnode.op == 'Relu':
+        pass
+    elif tfnode.op == 'Conv2D':
+        pass
+         
     return 0
 
 currSupportedOps = {
@@ -92,11 +111,13 @@ currSupportedAttrs = {
 
 currRealizedOps = { }
 
+
 def topo_sort(tfgraph, logger=logging):
     node_map = {}
     deps, ninps, res = {}, [], {}
     for node in tfgraph.node:
         node_map[node.name] = node
+        node_map_out[node.name] = node
         if node.op not in currSupportedOps:
             logger.error("the op '%s' of node '%s' is not supported",
                     node.op, node.name)
@@ -142,11 +163,12 @@ def convert_model(pbfile):
     logger.info("Model successfully loaded from path [%s].", pbfile)
 
     nodes = {}
+    
     for tfnode in topo_sort(tfgraph):
-        print ("%-16s" % tfnode.op,
-               "%-40s" % tfnode.name,
-               tfnode.input)
-        sym = create_symbol(tfnode, nodes)
+        # print ("%-16s" % tfnode.op,
+        #        "%-40s" % tfnode.name,
+        #        tfnode.input)
+        sym = create_symbol(tfnode, nodes, logger)
         nodes[tfnode.name] = sym
 
     # symbol
