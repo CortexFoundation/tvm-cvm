@@ -28,7 +28,7 @@ inputs_ext = { 'data': {
 }}
 inputs = [mx.sym.var(n) for n in inputs_ext]
 calib_ctx = mx.gpu(2)
-ctx = [mx.gpu(int(i)) for i in "1,2,3,4,5,6".split(',') if i.strip()]
+ctx = [mx.gpu(int(i)) for i in "2,3,4,5".split(',') if i.strip()]
 
 utils.log_init()
 
@@ -70,7 +70,7 @@ if False:
 dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
 sym, params = mx.sym.load(dump_sym), nd.load(dump_params)
 (inputs_ext,) = sim.load_ext(dump_ext)
-if True:
+if False:
     #  data = data[0, :].reshape((1, 1, input_size, input_size))
     _mrt.std_dump(sym, params, inputs_ext, data, "animal_10",
             batch=False)

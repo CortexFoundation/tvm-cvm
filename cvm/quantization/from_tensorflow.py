@@ -3,6 +3,7 @@ from tensorflow.core.framework import tensor_pb2 as tpb2
 from tensorflow.core.framework import tensor_shape_pb2 as tspb2
 from tensorflow.core.framework import attr_value_pb2 as apb2
 import mxnet as mx
+from mxnet import nd
 
 import os
 import logging
@@ -64,7 +65,51 @@ def convert_field(node, attrName, attrFields, logger):
 
 node_map_out = {}
 
-def create_symbol(tfnode, graph, logger):
+import tensor_util
+def convert_tfnode(tfnode, graph, params, logger=logging):
+    name, op_name = tfnode.name, tfnode.op
+    attr, inputs = tfnode.attr, tfnode.input
+    if op_name not in currSupportedOps:
+        logger.critical("Not supported op '%s'", tfnode.op)
+        exit()
+
+    print ("%-16s" % op_name,
+           "%-40s" % name, [k for k, _ in attr.items()])
+    if op_name == 'Const':
+        for k, v in attr.items():
+            if k == 'value':
+                np_array = tensor_util.tensor_to_numpy(v.tensor)
+                assert len(np_array.shape) > 0, "value:%s and dtype:%s" \
+                    % (v.tensor, np_array.dtype)
+                params[name] = nd.array(np_array)
+                graph[name] = [mx.sym.var(name,
+                                          shape=params[name].shape,
+                                          dtype=params[name].dtype)]
+            elif k not in ('dtype', '_output_shapes', '_class'):
+                raise NotImplementedError \
+                    ("Other attributes for a Const(param) Node {} ? .".format(key))
+    elif op_name in ['Placeholder', 'PlaceholderWithDefault']:
+        input_shape = \
+            tensor_util.tensor_shape_proto_to_list(attr['shape'].shape)
+        dtype = tensor_util.tensor_type_to_numpy(attr['dtype'].type)
+        graph[name] = mx.sym.var(name, shape=input_shape, dtype=dtype)
+    else:
+        inputs = []
+        for in_name in inputs:
+            input_entry = in_name.split(":")
+            node_name = input_entry[0]
+            assert node_name in graph
+            child = graph[node_name]
+            if len(child) > 1 and len(input_entry) > 1:
+                eid = int(input_entry[1])
+            else:
+                eid = 0
+            inputs.append(child[eid])
+
+        # TODO(ryt): convert operators
+
+    return
+
     attrs = { k:convert_field(tfnode, k, v, logger) for k, v in tfnode.attr.items() }
     if tfnode.op not in currSupportedOps:
         logger.info("Not supported op '%s'", tfnode.op)
@@ -135,7 +180,6 @@ def topo_sort(tfgraph, logger=logging):
             res[node.name] = len(node.input)
 
     # topo sort
-    logger = logging.getLogger("Topo sort")
     topos = []
     while len(ninps):
         cname = ninps.pop()
@@ -155,21 +199,20 @@ def topo_sort(tfgraph, logger=logging):
     return topos
 
 def convert_model(pbfile):
-
     # load the original model
     logger = logging.getLogger("Loading Original Model")
     tfparser = TFParser(pbfile)
     tfgraph = tfparser.parse()
     logger.info("Model successfully loaded from path [%s].", pbfile)
 
-    nodes = {}
+    graph, params = {}, {}
     
     for tfnode in topo_sort(tfgraph):
         # print ("%-16s" % tfnode.op,
         #        "%-40s" % tfnode.name,
         #        tfnode.input)
-        sym = create_symbol(tfnode, nodes, logger)
-        nodes[tfnode.name] = sym
+        convert_tfnode(tfnode, graph, params)
+        # sym = create_symbol(tfnode, nodes, logger)
 
     # symbol
     # for name in topos:
@@ -177,35 +220,40 @@ def convert_model(pbfile):
 
 
 
-modelfile = {
+modelfile = [
             # "/tmp/tf/resnet50_v1/model.pb",
             "/data/tfmodels/inception_v3/model.pb",
             # "/data/tfmodels/keras/inception_v3/model.pb",
             # "/data/tfmodels/mobilenet/model.pb"
-            }
+            ]
 
-if True:
-    utils.log_init()
-    for pb in modelfile:
-        convert_model(pb)
+# if True:
+#     utils.log_init()
+#     for pb in modelfile:
+#         convert_model(pb)
 
 def dump_single_sym(sym,
         path = os.path.expanduser("~/.dump/test_sym.json")):
     with open(path, "w") as f:
         f.write(sym.tojson())
 
-conv_attr = {
-    'layout': 'NCHW',
-    'pad': (1, 1),
-    'num_filter': 16,
-    'dilate': (1, 1),
-    'num_group': 1,
-    'stride': (1, 1),
-    'no_bias': False,
-    'kernel': (3, 3)
-}
+# conv_attr = {
+#     'layout': 'NCHW',
+#     'pad': (1, 1),
+#     'num_filter': 16,
+#     'dilate': (1, 1),
+#     'num_group': 1,
+#     'stride': (1, 1),
+#     'no_bias': False,
+#     'kernel': (3, 3)
+# }
 # sym = mx.sym.Convolution(X, W, **conv_attr, name=conv_name)
-sym = mx.sym.Convolution(**conv_attr, name='test_ryt')
-dump_single_sym(sym)
+# sym = mx.sym.Convolution(**conv_attr, name='test_ryt')
+# dump_single_sym(sym)
+# 
+# print(ts)
 
-print(ts)
+if __name__ == '__main__':
+    utils.log_init()
+    model_path = modelfile[0]
+    convert_model(model_path)
