@@ -11,7 +11,7 @@ def tensor_type_to_numpy(dtype):
 def tensor_to_numpy(tensor):
     shape = tensor_shape_proto_to_list(tensor.tensor_shape)
     num_elements = np.prod(shape, dtype=np.int64)
-    dtype = tensor_type_to_numpy(tensor.dtype)
+    tensor_dtype = dtype = tensor_type_to_numpy(tensor.dtype)
 
     if tensor.tensor_content:
         return (np.frombuffer(tensor.tensor_content, dtype=dtype).copy()
