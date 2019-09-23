@@ -13,6 +13,7 @@ import utils
 import sym_utils as sutils
 
 ts = set()
+tl = []
 
 def argmin(data, axis=None, keepdims=False, exclude=False):
     """Returns the indices of the minimum values along an axis.
@@ -1261,36 +1262,65 @@ def convert_field(attrFields, logger=logging):
         exit()
 
 
-def convert_operator(op_name, inputs, attrs, params, logger=logging):
+def convert_operator(tfnode, node_map, graph, inputs, attrs, params, logger=logging):
+    name, op_name = tfnode.name, tfnode.op
     if op_name in _convert_map:
-        if 'dilations' in attrs.keys():
-            print(attrs['dilations'])
-        attr = { k: convert_field(v) for k, v in attrs.items() }
         if op_name == 'Conv2D':
-            print(attr['dilations'])
-            if len(inputs) not in {2, 3}:
-                logger.error("only support 2 or 3 inputs for Conv2D")
-                exit()
+            if len(inputs) == 2:
+                X, W = inputs
+            if len(inputs) == 3:
+                X, W, B = inputs
+            data_format = attrs['data_format'].decode(encoding='utf-8')
+            # dilate
+            dilations, dilate = attrs['dilations'], tuple()
+            if len(dilations) == 4:
+                if data_format == 'NHWC':
+                    dilate = dilations[1:3]
+                else:
+                    dilate = dilations[2:]
+            elif len(dilations) == 2:
+                dilate = dilations[:]
+            else:
+                dilate = (dilations[0], dilations[0])
+            # kernel
+             
+            # stride
+            strides, stride = attrs['strides'], tuple()
+            if len(strides) == 4:
+                if data_format == 'NHWC':
+                    stride = strides[1:3]
+                else:
+                    stride = strides[2:]
+            elif len(strides) == 2:
+                stride = strides[:]
+            else:
+                stride = (strides[0], strides[0])
+            # padding
+            padding = attrs['padding'].decode(encoding='utf-8')
+            print(inputs[1].attr('__shape__'))
+            exit()
             conv_attr = {
                 'no_bias': True if len(inputs) == 2 else False,
-                'dilate': '(1, 1)',
+                'dilate': str(dilate),
                 'kernel': (1, 1),
-                'stride': (1, 1),
+                'stride': stride,
                 'pad': (0, 0),
                 'layout': 'NCHW',
                 'num_filter': 0,
                 'num_group': 0,
             }
-        
-        sym = _convert_map[op_name](inputs, attr, params)
+            
+            return mx.sym.Convolution(**conv_attr, name=name)
+        #sym = _convert_map[op_name](inputs, attr, params)
     else:
         raise NotImplementedError("Operator {} not implemented.".format(op_name))
-    return sym
+    return 0
 
 import tensor_util
-def convert_tfnode(tfnode, graph, params, logger=logging):
+def convert_tfnode(node_map, tfnode, graph, params, logger=logging):
     name, op_name = tfnode.name, tfnode.op
     attr, org_inputs = tfnode.attr, tfnode.input
+
     if op_name not in currSupportedOps:
         logger.critical("Not supported op '%s'", tfnode.op)
         exit()
@@ -1309,12 +1339,15 @@ def convert_tfnode(tfnode, graph, params, logger=logging):
                                           dtype=params[name].dtype)]
             elif k not in ('dtype', '_output_shapes', '_class'):
                 raise NotImplementedError \
-                    ("Other attributes for a Const(param) Node {} ? .".format(key))
+                    ("Other attributes for a Const(param) Node {} ? .".format(k))
     elif op_name in ['Placeholder', 'PlaceholderWithDefault']:
         input_shape = \
             tensor_util.tensor_shape_proto_to_list(attr['shape'].shape)
         dtype = tensor_util.tensor_type_to_numpy(attr['dtype'].type)
-        graph[name] = mx.sym.var(name, shape=input_shape, dtype=dtype)
+        graph[name] = [mx.sym.var(name, shape=input_shape, dtype=dtype)]
+    elif op_name == 'Identity':
+        # assert len(org_inputs) == 1 and node_map[org_inputs[0]].op == 'Const'
+        graph[name] = graph[org_inputs[0]]
     else:
         inputs = []
         for in_name in org_inputs:
@@ -1328,8 +1361,9 @@ def convert_tfnode(tfnode, graph, params, logger=logging):
                 eid = 0
             inputs.append(child[eid])
         # TODO(ryt): convert operators
-        sym = convert_operator(op_name, inputs, attr, params)
-        graph[name] = sym
+        attrs = { k: convert_field(v) for k, v in attr.items() }
+        sym = convert_operator(tfnode, node_map, graph, inputs, attrs, params)
+        graph[name] = [sym]
     return
 
 currSupportedOps = {
@@ -1358,14 +1392,11 @@ currSupportedAttrs = {
 
 currRealizedOps = { }
 
-node_out_map = {}
 
-def topo_sort(tfgraph, logger=logging):
-    node_map = {}
+def topo_sort(node_map, tfgraph, logger=logging):
     deps, ninps, res = {}, [], {}
     for node in tfgraph.node:
         node_map[node.name] = node
-        node_out_map[node.name] = node
         if node.op not in currSupportedOps:
             logger.error("the op '%s' of node '%s' is not supported",
                     node.op, node.name)
@@ -1408,9 +1439,9 @@ def convert_model(pbfile):
     tfgraph = tfparser.parse()
     logger.info("Model successfully loaded from path [%s].", pbfile)
 
-    graph, params = {}, {}
+    node_map, graph, params = {}, {}, {}
 
-    for tfnode in topo_sort(tfgraph):
+    for tfnode in topo_sort(node_map, tfgraph):
         # if tfnode.op == "Conv2D":
             # inputs = tfnode.input
             # print(inputs[0])
@@ -1418,7 +1449,8 @@ def convert_model(pbfile):
         # op_name, attrs = tfnode.op, tfnode.attr
         # for k, _ in attrs.items():
         #     ts.add(k)
-        convert_tfnode(tfnode, graph, params)
+
+        convert_tfnode(node_map, tfnode, graph, params)
 
     logger.info("Operators successfully converted.")
 
@@ -1462,3 +1494,4 @@ if __name__ == '__main__':
     model_path = modelfile[0]
     convert_model(model_path)
     print(ts)
+    print(tl)
