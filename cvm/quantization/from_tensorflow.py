@@ -5,6 +5,7 @@ from tensorflow.core.framework import attr_value_pb2 as apb2
 from tensorflow.python.framework import dtypes
 import mxnet as mx
 from mxnet import nd
+import numpy as np
 
 import os
 import logging
@@ -244,16 +245,15 @@ def _batch_to_space_nd():
 
     return _impl
 
-def _bias_add():
-    def _impl(inputs, attr, params):
-        # Must expand for proper broadcasting in NCHW.
-        if attr['data_format'].decode("utf-8") == 'NCHW':
-            bias = _op.reshape(inputs[1], newshape=(1, -1, 1, 1))
-        else:
-            bias = inputs[1]
-        return _op.add(inputs[0], bias)
-    return _impl
-
+def _bias_add(inputs, attrs, params):
+    input_eids = attrs["_input_eids"]
+    infer_shapes = attrs["_infer_shapes"]
+    data_shp = infer_shapes[inputs[0].attr('name')][input_eids[0]]
+    bias_shp = infer_shapes[inputs[1].attr('name')][input_eids[1]]
+    data_format = attrs["data_format"].decode("utf-8")
+    if data_format == "NCHW":
+        inputs[1] = mx.sym.reshape(inputs[1], (1, bias_shp[0], 1, 1))
+    return mx.sym.broadcast_add(*inputs)
 
 def _broadcast_to():
     def _impl(inputs, attr, params):
@@ -696,26 +696,30 @@ def _lrn():
         return AttrCvt(op_name='lrn')(inputs, attr_new)
     return _impl
 
-def _matmul():
-    def _impl(inputs, attr, params):
-        channels = _infer_channels(inputs[1], params, not attr['transpose_b'])
-        if attr['transpose_a']:
-            inputs[0] = _op.transpose(inputs[0], axes=(1, 0))
-        if not attr['transpose_b']:
-            inputs[1] = _op.transpose(inputs[1], axes=(1, 0))
-        return AttrCvt(op_name="dense",
-                       extras={'units': channels},
-                       ignores=['transpose_a', 'transpose_b', 'T'])(inputs, attr)
+def _matmul(inputs, attrs, params):
+    input_eids = attrs["_input_eids"]
+    infer_shapes = attrs["_infer_shapes"]
+    bshp = infer_shapes[inputs[1].attr('name')][input_eids[1]]
+    if attrs["transpose_a"]:
+        inputs[0] = mx.sym.transpose(inputs[0], axes=(1, 0))
+    if not attrs["transpose_b"]:
+        inputs[1] = mx.sym.transpose(inputs[1], axes=(1, 0))
+        bshp = (bshp[1], bshp[0])
+    return mx.sym.FullyConnected(*inputs, num_hidden=bshp[0])
 
-    return _impl
-
-def _mean():
-    def _impl(inputs, attr, params):
-        axis = params.pop(inputs[1].name_hint)
-        return AttrCvt(op_name="mean", ignores=['Tdim', 'Tidx'],
-                       transforms={'keep_dims': 'keepdims'},
-                       extras={'axis': tuple(axis.asnumpy())})([inputs[0]], attr)
-    return _impl
+def _mean(inputs, attrs, params):
+    input_eids = attrs["_input_eids"]
+    infer_shapes = attrs["_infer_shapes"]
+    data_shp = infer_shapes[inputs[0].attr('name')][input_eids[0]]
+    axis = params.pop(inputs[1].attr('name')).asnumpy().astype('int')
+    sym = mx.sym.sum(inputs[0],
+            axis=tuple(axis),
+            keepdims=attrs["keep_dims"])
+    scalar = 1. / np.product([data_shp[ii] for ii in axis])
+    scale = mx.sym.var(sym.attr('name') + "_scale", shape=(1,))
+    params[scale.attr('name')] = nd.array([scalar])
+    sym = mx.sym.broadcast_mul(sym, scale)
+    return sym
 
 def _pack():
     def _impl(inputs, attr, params):
@@ -868,11 +872,9 @@ def _slice():
         return _op.strided_slice(inputs[0], begin=begin, end=size)
     return _impl
 
-def _softmax():
-    def _impl(inputs, attr, params):
-        return AttrCvt(op_name='softmax',
-                       transforms={'axis': ('axis', 1)})([inputs[0]], attr)
-    return _impl
+def _softmax(inputs, attrs, params):
+    axis = attrs.get("axis", -1)
+    return mx.sym.softmax(*inputs, axis=axis)
 
 def _softplus():
     # op description: https://www.tensorflow.org/api_docs/python/tf/math/softplus
@@ -1132,6 +1134,17 @@ def _unpack():
             for split_item in splitted]), len(splitted))
     return _impl
 
+def _get_pad_pair(input1d, kernel1d, stride1d):
+    if input1d % stride1d == 0:
+        pad = max(kernel1d - stride1d, 0)
+    else:
+        pad = max(kernel1d - (input1d % stride1d), 0)
+
+    pad_before = pad // 2
+    pad_after = pad - pad_before
+
+    return [pad_before, pad_after]
+
 def _conv2d(inputs, attrs, params):
     data_format = attrs['data_format'].decode("utf-8")
     input_eids = attrs['_input_eids']
@@ -1153,8 +1166,6 @@ def _conv2d(inputs, attrs, params):
     weight_shp = [weight_shp[ii] for ii in (3, 2, 0, 1)]
     # params[weight_name] = nd.transpose(params[weight_name], axes=(3, 2, 0, 1))
 
-    print ([x.attr('name') for x in inputs])
-
     H_idx, W_idx = data_format.find("H"), data_format.find("W")
     dilations = attrs.get('dilations', (1, 1))
     if isinstance(dilations, int):
@@ -1164,20 +1175,9 @@ def _conv2d(inputs, attrs, params):
 
     strides = attrs.get('strides')
     if isinstance(strides, int):
-        strides = (strides, strides[0])
+        strides = (strides, strides)
     elif len(strides) == 4:
         strides = (strides[H_idx], strides[W_idx])
-
-    def _get_pad_pair(input1d, kernel1d, stride1d):
-        if input1d % stride1d == 0:
-            pad = max(kernel1d - stride1d, 0)
-        else:
-            pad = max(kernel1d - (input1d % stride1d), 0)
-
-        pad_before = pad // 2
-        pad_after = pad - pad_before
-
-        return [pad_before, pad_after]
 
     padding = attrs['padding'].decode("utf-8")
     if padding == 'VALID':
@@ -1191,8 +1191,9 @@ def _conv2d(inputs, attrs, params):
         dilated_kernel_w = (kernel_w - 1) * dilation_w + 1
         pad_v = _get_pad_pair(in_h, dilated_kernel_h, stride_h)
         pad_h = _get_pad_pair(in_w, dilated_kernel_w, stride_w)
-        print ("Padding", pad_v, pad_h)
-        padding = (0, 0)
+        assert pad_v[0] == pad_v[1]
+        assert pad_h[0] == pad_h[1]
+        padding = (pad_v[0], pad_h[0])
 
     assert data_shp[1] % weight_shp[1] == 0
     groups = data_shp[1] // weight_shp[1]
@@ -1206,12 +1207,99 @@ def _conv2d(inputs, attrs, params):
         'num_filter': weight_shp[0],
         'num_group': groups,
     }
-    print (data_shp, weight_shp)
-    print (conv_attr)
     sym = mx.sym.Convolution(*inputs, **conv_attr)
 
     if data_format == "NHWC":
         sym = mx.sym.transpose(sym, axes=(0, 2, 3, 1))
+    return sym
+
+def _pool2d(pool_type):
+    def _impl(inputs, attrs, params):
+        data_format = attrs['data_format'].decode("utf-8")
+        input_eids = attrs['_input_eids']
+        infer_shapes = attrs['_infer_shapes']
+
+        assert data_format in ["NCHW", "NHWC"]
+        assert attrs['T'] in [dtypes.float32, dtypes.float16, dtypes.float64]
+
+        data_shp = infer_shapes[inputs[0].attr('name')][input_eids[0]]
+
+        if data_format == "NHWC":
+            inputs[0] = mx.sym.transpose(inputs[0], axes=(0, 3, 1, 2))
+            data_shp = [data_shp[ii] for ii in (0, 3, 1, 2)]
+
+        H_idx, W_idx = data_format.find("H"), data_format.find("W")
+        strides = attrs.get('strides')
+        if isinstance(strides, int):
+            strides = (strides, strides)
+        elif len(strides) == 4:
+            strides = (strides[H_idx], strides[W_idx])
+
+        kernel_size = attrs['ksize']
+        if isinstance(kernel_size, int):
+            kernel_size = (kernel_size, kernel_size)
+        elif len(kernel_size) == 4:
+            kernel_size = (kernel_size[H_idx], kernel_size[W_idx])
+
+        padding = attrs['padding'].decode("utf-8")
+        if padding == 'VALID':
+            padding = (0, 0)
+        elif padding == 'SAME':
+            stride_h, stride_w = strides
+            kernel_h, kernel_w = kernel_size
+            in_h, in_w = data_shp[2], data_shp[3]
+
+            pad_v = _get_pad_pair(in_h, kernel_h, stride_h)
+            pad_h = _get_pad_pair(in_w, kernel_w, stride_w)
+            assert pad_v[0] == pad_v[1]
+            assert pad_h[0] == pad_h[1]
+            padding = (pad_v[0], pad_h[0])
+
+        pool_attr = {
+            'pool_type': pool_type,
+            'stride': strides,
+            'pad': padding,
+            'kernel': kernel_size,
+        }
+
+        sym = mx.sym.Pooling(*inputs, **pool_attr)
+        if data_format == "NHWC":
+            sym = mx.sym.transpose(sym, axes=(0, 2, 3, 1))
+        return sym
+    return _impl
+
+def _batch_normalization(inputs, attrs, params):
+    data_format = attrs['data_format'].decode("utf-8")
+    input_eids = attrs['_input_eids']
+    infer_shapes = attrs['_infer_shapes']
+
+    assert data_format in ["NCHW", "NHWC"]
+    assert attrs['T'] in [dtypes.float32, dtypes.float16, dtypes.float64]
+    assert attrs["is_training"] == False
+
+    data_shp = infer_shapes[inputs[0].attr('name')][input_eids[0]]
+
+    if data_format == "NHWC":
+        inputs[0] = mx.sym.transpose(inputs[0], axes=(0, 3, 1, 2))
+        data_shp = [data_shp[ii] for ii in (0, 3, 1, 2)]
+
+    bn_attr = {
+        'eps': attrs["epsilon"],
+    }
+    sym = mx.sym.BatchNorm(*inputs, **bn_attr)
+
+    if data_format == "NHWC":
+        sym = mx.sym.transpose(sym, axes=(0, 2, 3, 1))
+    return sym
+
+def _relu(inputs, attrs, params):
+    return mx.sym.relu(*inputs)
+
+def _concat_v2(inputs, attrs, params):
+    axis_sym = inputs.pop(len(inputs) - 1)
+    axis = params.pop(axis_sym.attr('name'))
+    assert axis.shape == (1,)
+    sym = mx.sym.concat(*inputs, dim=int(axis.asscalar()))
     return sym
 
 _convert_map = {
@@ -1219,17 +1307,16 @@ _convert_map = {
     'All'                               : _reduce_all(),
     'ArgMax'                            : _argx(argmax, 'argmax'),
     'ArgMin'                            : _argx(argmin, 'argmin'),
-    'AvgPool'                           : _pooling('avg_pool'),
+    'AvgPool'                           : _pool2d("avg"),
     'BatchNormWithGlobalNormalization'  : _batch_norm(),
     'BatchToSpaceND'                    : _batch_to_space_nd(),
-    'BiasAdd'                           : _bias_add(),
+    'BiasAdd'                           : _bias_add,
     'BroadcastTo'                       : _broadcast_to(),
     'Cast'                              : _cast(),
     'Ceil'                              : AttrCvt('ceil'),
     'CheckNumerics'                     : _check_numerics(),
     'Concat'                            : _concat(),
-    'ConcatV2'                          : _concatV2(),
-    # 'Conv2D'                            : _conv('conv'),
+    'ConcatV2'                          : _concat_v2,
     'Conv2D'                            : _conv2d,
     'DecodeJpeg'                        : _decode_image(),
     'DepthwiseConv2dNative'             : _conv('depthwise'),
@@ -1240,7 +1327,7 @@ _convert_map = {
     'ExpandDims'                        : _expand_dims(),
     'Fill'                              : _fill(),
     'Floor'                             : AttrCvt('floor'),
-    'FusedBatchNorm'                    : _fused_batch_norm(),
+    'FusedBatchNorm'                    : _batch_normalization,
     'FusedBatchNormV2'                  : _fused_batch_norm(),
     'Gather'                            : _gather(),
     'GatherV2'                          : _gather(),
@@ -1255,10 +1342,10 @@ _convert_map = {
     'LogicalOr'                         : _logical('logical_or'),
     'LogicalNot'                        : _logical('logical_not'),
     'LRN'                               : _lrn(),
-    'MatMul'                            : _matmul(),
-    'MaxPool'                           : _pooling('max_pool'),
+    'MatMul'                            : _matmul,
+    'MaxPool'                           : _pool2d("max"),
     'Maximum'                           : _elemwise('maximum'),
-    'Mean'                              : _mean(),
+    'Mean'                              : _mean,
     'Minimum'                           : _elemwise('minimum'),
     'Mul'                               : _elemwise('multiply'),
     'NotEqual'                          : _broadcast('not_equal'),
@@ -1270,7 +1357,7 @@ _convert_map = {
     'Range'                             : _range(),
     'Rank'                              : _rank(),
     'RealDiv'                           : _elemwise('divide'),
-    'Relu'                              : AttrCvt('relu'),
+    'Relu'                              : _relu,
     'Relu6'                             : _relu6(),
     'Reshape'                           : _reshape(),
     'ResizeBilinear'                    : _resize_bilinear(),
@@ -1284,7 +1371,7 @@ _convert_map = {
     'Sigmoid'                           : AttrCvt('sigmoid'),
     'Sign'                              : AttrCvt('sign'),
     'Slice'                             : _slice(),
-    'Softmax'                           : _softmax(),
+    'Softmax'                           : _softmax,
     'Softplus'                          : _softplus(),
     'SpaceToBatchND'                    : _space_to_batch_nd(),
     'Split'                             : _split(False),
@@ -1399,7 +1486,6 @@ def convert_tfnode(tfnode, graph, params, infer_shapes, logger=logging):
                                           shape=params[name].shape,
                                           dtype=params[name].dtype)]
                 infer_shapes[name] = [tuple(np_array.shape)]
-                print (infer_shapes[name])
             elif k not in ('dtype', '_output_shapes', '_class'):
                 raise NotImplementedError \
                     ("Other attributes for a Const(param) Node {} ? .".format(k))
@@ -1429,8 +1515,7 @@ def convert_tfnode(tfnode, graph, params, infer_shapes, logger=logging):
         # TODO(ryt): convert operators
         sym = convert_operator(op_name, inputs, parsed_attrs, params)
         graph[name] = sym
-        _, infer_shapes[name], _ = sym.infer_shape()
-        print (infer_shapes[name])
+        _, infer_shapes[sym.attr('name')], _ = sym.infer_shape()
     return
 
 currSupportedOps = {
@@ -1508,6 +1593,7 @@ def convert_model(pbfile):
 
     ops = {n.op for n in topo_sort(tfgraph)}
     print ("Ops", ops)
+
     graph, params, infer_shapes = {}, {}, {}
     for tfnode in topo_sort(tfgraph):
         # if tfnode.op == "Conv2D":
