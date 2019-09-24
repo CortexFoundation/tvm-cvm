@@ -2,6 +2,7 @@ from tensorflow_parser import TFParser
 from tensorflow.core.framework import tensor_pb2 as tpb2
 from tensorflow.core.framework import tensor_shape_pb2 as tspb2
 from tensorflow.core.framework import attr_value_pb2 as apb2
+from tensorflow.python.framework import dtypes
 import mxnet as mx
 from mxnet import nd
 
@@ -1130,6 +1131,55 @@ def _unpack():
             for split_item in splitted]), len(splitted))
     return _impl
 
+def _conv2d(inputs, attrs, params):
+    data_format = attrs['data_format'].decode("utf-8")
+    input_shapes = attrs['_input_shapes']
+
+    assert data_format in ["NCHW", "NHWC"]
+    H_idx, W_idx = data_format.find("H"), data_format.find("W")
+    print (H_idx, W_idx)
+
+    # Transpose weight format into "OIHW"
+    weight_name = inputs[1].attr('name')
+    inputs[1] = mx.sym.transpose(inputs[1], axes=(3, 2, 0, 1))
+    # params[weight_name] = nd.transpose(params[weight_name], axes=(3, 2, 0, 1))
+
+    print (attrs)
+    print ([x.attr('name') for x in inputs])
+    print (params[weight_name].shape)
+    dilations = attrs.get('dilations', (1, 1))
+    if isinstance(dilations, int):
+        dilations = (dilations, dilations)
+    elif len(dilations) == 4:
+        dilations = (dilations[H_idx], dilations[W_idx])
+
+    strides = attrs.get('strides')
+    if isinstance(strides, int):
+        strides = (strides, strides[0])
+    elif len(strides) == 4:
+        strides = (strides[H_idx], strides[W_idx])
+
+    padding = attrs['padding'].decode("utf-8")
+    if padding == 'VALID':
+        padding = (0, 0)
+    elif padding == 'SAME':
+        stride_h, stride_w = attr['strides']
+        kernel_h, kernel_w = attr['kernel_shape']
+        pass
+    conv_attr = {
+        'no_bias': True if len(inputs) == 2 else False,
+        'dilate': dilations,
+        'kernel': params[weight_name].shape[2:],
+        'stride': strides,
+        'pad': (0, 0),
+        'layout': 'NCHW',
+        'num_filter': params[weight_name][0],
+        'num_group': 1,
+    }
+    return mx.sym.Convolution(*inputs, **conv_attr)
+    exit()
+
+
 _convert_map = {
     'Add'                               : _elemwise('add'),
     'All'                               : _reduce_all(),
@@ -1145,7 +1195,8 @@ _convert_map = {
     'CheckNumerics'                     : _check_numerics(),
     'Concat'                            : _concat(),
     'ConcatV2'                          : _concatV2(),
-    'Conv2D'                            : _conv('conv'),
+    # 'Conv2D'                            : _conv('conv'),
+    'Conv2D'                            : _conv2d,
     'DecodeJpeg'                        : _decode_image(),
     'DepthwiseConv2dNative'             : _conv('depthwise'),
     'DepthToSpace'                      : _depth_to_space(),
@@ -1260,35 +1311,40 @@ def convert_field(attrFields, logger=logging):
         logger.error("Unsupported field type '%s'", type(fieldValue))
         exit()
 
+def _parse_attr(attrs):
+    fields = ["s", "i", "f", "b", "type", "shape", "tensor", "func"]
+    new_attrs = {}
+    for k, v in attrs.items():
+        ret = []
+        if v.HasField("list"):
+            for f in fields:
+                if getattr(v.list, f):
+                    if f == "type":
+                        ret += [dtypes.as_dtype(x) for x in list(getattr(v.list, f))]
+                    else:
+                        ret += list(getattr(v.list, f))
+        else:
+            for f in fields:
+                if v.HasField(f):
+                    if f == "type":
+                        ret = dtypes.as_dtype(getattr(v, f))
+                    else:
+                        ret = getattr(v, f)
+        new_attrs[k] = ret
+    return new_attrs
+
 
 def convert_operator(op_name, inputs, attrs, params, logger=logging):
-    if op_name in _convert_map:
-        if 'dilations' in attrs.keys():
-            print(attrs['dilations'])
-        attr = { k: convert_field(v) for k, v in attrs.items() }
-        if op_name == 'Conv2D':
-            print(attr['dilations'])
-            if len(inputs) not in {2, 3}:
-                logger.error("only support 2 or 3 inputs for Conv2D")
-                exit()
-            conv_attr = {
-                'no_bias': True if len(inputs) == 2 else False,
-                'dilate': '(1, 1)',
-                'kernel': (1, 1),
-                'stride': (1, 1),
-                'pad': (0, 0),
-                'layout': 'NCHW',
-                'num_filter': 0,
-                'num_group': 0,
-            }
-        
-        sym = _convert_map[op_name](inputs, attr, params)
-    else:
+    if op_name not in _convert_map:
         raise NotImplementedError("Operator {} not implemented.".format(op_name))
+
+    # attr = { k: convert_field(v) for k, v in attrs.items() }
+
+    sym = _convert_map[op_name](inputs, attrs, params)
     return sym
 
 import tensor_util
-def convert_tfnode(tfnode, graph, params, logger=logging):
+def convert_tfnode(tfnode, graph, params, infer_shapes, logger=logging):
     name, op_name = tfnode.name, tfnode.op
     attr, org_inputs = tfnode.attr, tfnode.input
     if op_name not in currSupportedOps:
@@ -1307,6 +1363,7 @@ def convert_tfnode(tfnode, graph, params, logger=logging):
                 graph[name] = [mx.sym.var(name,
                                           shape=params[name].shape,
                                           dtype=params[name].dtype)]
+                infer_shapes[name] = [np_array.shape]
             elif k not in ('dtype', '_output_shapes', '_class'):
                 raise NotImplementedError \
                     ("Other attributes for a Const(param) Node {} ? .".format(key))
@@ -1314,9 +1371,10 @@ def convert_tfnode(tfnode, graph, params, logger=logging):
         input_shape = \
             tensor_util.tensor_shape_proto_to_list(attr['shape'].shape)
         dtype = tensor_util.tensor_type_to_numpy(attr['dtype'].type)
-        graph[name] = mx.sym.var(name, shape=input_shape, dtype=dtype)
+        graph[name] = [mx.sym.var(name, shape=input_shape, dtype=dtype)]
+        infer_shapes[name] = [input_shape]
     else:
-        inputs = []
+        inputs, input_shapes = [], []
         for in_name in org_inputs:
             input_entry = in_name.split(":")
             node_name = input_entry[0]
@@ -1327,9 +1385,15 @@ def convert_tfnode(tfnode, graph, params, logger=logging):
             else:
                 eid = 0
             inputs.append(child[eid])
+            input_shapes.append(infer_shapes[node_name][eid])
+
+        parsed_attrs = _parse_attr(attr)
+        parsed_attrs["_input_shapes"] = input_shapes
         # TODO(ryt): convert operators
-        sym = convert_operator(op_name, inputs, attr, params)
+        sym = convert_operator(op_name, inputs, parsed_attrs, params)
         graph[name] = sym
+        infer_shapes[name] = sym.infer_shape(
+                **{x.attr('name'):input_shapes[i] for i, x in enumerate(inputs)})
     return
 
 currSupportedOps = {
@@ -1398,7 +1462,6 @@ def topo_sort(tfgraph, logger=logging):
     if res:
         logger.critical("deps cannot reduce -> %s", res)
         exit()
-    logger.info("Topo sort completed.")
     return topos
 
 def convert_model(pbfile):
@@ -1408,8 +1471,9 @@ def convert_model(pbfile):
     tfgraph = tfparser.parse()
     logger.info("Model successfully loaded from path [%s].", pbfile)
 
-    graph, params = {}, {}
-
+    ops = {n.op for n in topo_sort(tfgraph)}
+    print ("Ops", ops)
+    graph, params, infer_shapes = {}, {}, {}
     for tfnode in topo_sort(tfgraph):
         # if tfnode.op == "Conv2D":
             # inputs = tfnode.input
@@ -1418,7 +1482,7 @@ def convert_model(pbfile):
         # op_name, attrs = tfnode.op, tfnode.attr
         # for k, _ in attrs.items():
         #     ts.add(k)
-        convert_tfnode(tfnode, graph, params)
+        convert_tfnode(tfnode, graph, params, infer_shapes)
 
     logger.info("Operators successfully converted.")
 
