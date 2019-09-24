@@ -14,6 +14,7 @@ import utils
 import sym_utils as sutils
 
 ts = set()
+tl = []
 
 def argmin(data, axis=None, keepdims=False, exclude=False):
     """Returns the indices of the minimum values along an axis.
@@ -1133,20 +1134,28 @@ def _unpack():
 
 def _conv2d(inputs, attrs, params):
     data_format = attrs['data_format'].decode("utf-8")
-    input_shapes = attrs['_input_shapes']
+    input_eids = attrs['_input_eids']
+    infer_shapes = attrs['_infer_shapes']
 
     assert data_format in ["NCHW", "NHWC"]
-    H_idx, W_idx = data_format.find("H"), data_format.find("W")
-    print (H_idx, W_idx)
+
+    data_shp = infer_shapes[inputs[0].attr('name')][input_eids[0]]
+    weight_shp = infer_shapes[inputs[1].attr('name')][input_eids[1]]
+
+    if data_format == "NHWC":
+        inputs[0] = mx.sym.transpose(inputs[0], axes=(0, 3, 1, 2))
+        data_shp = [data_shp[ii] for ii in (0, 3, 1, 2)]
 
     # Transpose weight format into "OIHW"
-    weight_name = inputs[1].attr('name')
+    # TODO(wlt): note if op is depthwise, 
+    #   original weight format is "HWOI" instead of "HWIO".
     inputs[1] = mx.sym.transpose(inputs[1], axes=(3, 2, 0, 1))
+    weight_shp = [weight_shp[ii] for ii in (3, 2, 0, 1)]
     # params[weight_name] = nd.transpose(params[weight_name], axes=(3, 2, 0, 1))
 
-    print (attrs)
     print ([x.attr('name') for x in inputs])
-    print (params[weight_name].shape)
+
+    H_idx, W_idx = data_format.find("H"), data_format.find("W")
     dilations = attrs.get('dilations', (1, 1))
     if isinstance(dilations, int):
         dilations = (dilations, dilations)
@@ -1159,26 +1168,51 @@ def _conv2d(inputs, attrs, params):
     elif len(strides) == 4:
         strides = (strides[H_idx], strides[W_idx])
 
+    def _get_pad_pair(input1d, kernel1d, stride1d):
+        if input1d % stride1d == 0:
+            pad = max(kernel1d - stride1d, 0)
+        else:
+            pad = max(kernel1d - (input1d % stride1d), 0)
+
+        pad_before = pad // 2
+        pad_after = pad - pad_before
+
+        return [pad_before, pad_after]
+
     padding = attrs['padding'].decode("utf-8")
     if padding == 'VALID':
         padding = (0, 0)
     elif padding == 'SAME':
-        stride_h, stride_w = attr['strides']
-        kernel_h, kernel_w = attr['kernel_shape']
-        pass
-    conv_attr = {
-        'no_bias': True if len(inputs) == 2 else False,
-        'dilate': dilations,
-        'kernel': params[weight_name].shape[2:],
-        'stride': strides,
-        'pad': (0, 0),
-        'layout': 'NCHW',
-        'num_filter': params[weight_name][0],
-        'num_group': 1,
-    }
-    return mx.sym.Convolution(*inputs, **conv_attr)
-    exit()
+        stride_h, stride_w = strides
+        kernel_h, kernel_w = weight_shp[2:]
+        in_h, in_w = data_shp[2], data_shp[3]
+        dilation_h, dilation_w = dilations
+        dilated_kernel_h = (kernel_h - 1) * dilation_h + 1
+        dilated_kernel_w = (kernel_w - 1) * dilation_w + 1
+        pad_v = _get_pad_pair(in_h, dilated_kernel_h, stride_h)
+        pad_h = _get_pad_pair(in_w, dilated_kernel_w, stride_w)
+        print ("Padding", pad_v, pad_h)
+        padding = (0, 0)
 
+    assert data_shp[1] % weight_shp[1] == 0
+    groups = data_shp[1] // weight_shp[1]
+    conv_attr = {
+        'no_bias': (len(inputs) == 2),
+        'dilate': dilations,
+        'kernel': weight_shp[2:],
+        'stride': strides,
+        'pad': padding,
+        'layout': 'NCHW',
+        'num_filter': weight_shp[0],
+        'num_group': groups,
+    }
+    print (data_shp, weight_shp)
+    print (conv_attr)
+    sym = mx.sym.Convolution(*inputs, **conv_attr)
+
+    if data_format == "NHWC":
+        sym = mx.sym.transpose(sym, axes=(0, 2, 3, 1))
+    return sym
 
 _convert_map = {
     'Add'                               : _elemwise('add'),
@@ -1347,6 +1381,7 @@ import tensor_util
 def convert_tfnode(tfnode, graph, params, infer_shapes, logger=logging):
     name, op_name = tfnode.name, tfnode.op
     attr, org_inputs = tfnode.attr, tfnode.input
+
     if op_name not in currSupportedOps:
         logger.critical("Not supported op '%s'", tfnode.op)
         exit()
@@ -1363,18 +1398,19 @@ def convert_tfnode(tfnode, graph, params, infer_shapes, logger=logging):
                 graph[name] = [mx.sym.var(name,
                                           shape=params[name].shape,
                                           dtype=params[name].dtype)]
-                infer_shapes[name] = [np_array.shape]
+                infer_shapes[name] = [tuple(np_array.shape)]
+                print (infer_shapes[name])
             elif k not in ('dtype', '_output_shapes', '_class'):
                 raise NotImplementedError \
-                    ("Other attributes for a Const(param) Node {} ? .".format(key))
+                    ("Other attributes for a Const(param) Node {} ? .".format(k))
     elif op_name in ['Placeholder', 'PlaceholderWithDefault']:
         input_shape = \
             tensor_util.tensor_shape_proto_to_list(attr['shape'].shape)
         dtype = tensor_util.tensor_type_to_numpy(attr['dtype'].type)
         graph[name] = [mx.sym.var(name, shape=input_shape, dtype=dtype)]
-        infer_shapes[name] = [input_shape]
+        infer_shapes[name] = [tuple(input_shape)]
     else:
-        inputs, input_shapes = [], []
+        inputs, input_eids = [], []
         for in_name in org_inputs:
             input_entry = in_name.split(":")
             node_name = input_entry[0]
@@ -1385,15 +1421,16 @@ def convert_tfnode(tfnode, graph, params, infer_shapes, logger=logging):
             else:
                 eid = 0
             inputs.append(child[eid])
-            input_shapes.append(infer_shapes[node_name][eid])
+            input_eids.append(eid)
 
         parsed_attrs = _parse_attr(attr)
-        parsed_attrs["_input_shapes"] = input_shapes
+        parsed_attrs["_input_eids"] = input_eids
+        parsed_attrs["_infer_shapes"] = infer_shapes
         # TODO(ryt): convert operators
         sym = convert_operator(op_name, inputs, parsed_attrs, params)
         graph[name] = sym
-        infer_shapes[name] = sym.infer_shape(
-                **{x.attr('name'):input_shapes[i] for i, x in enumerate(inputs)})
+        _, infer_shapes[name], _ = sym.infer_shape()
+        print (infer_shapes[name])
     return
 
 currSupportedOps = {
@@ -1422,14 +1459,12 @@ currSupportedAttrs = {
 
 currRealizedOps = { }
 
-node_out_map = {}
 
 def topo_sort(tfgraph, logger=logging):
     node_map = {}
     deps, ninps, res = {}, [], {}
     for node in tfgraph.node:
         node_map[node.name] = node
-        node_out_map[node.name] = node
         if node.op not in currSupportedOps:
             logger.error("the op '%s' of node '%s' is not supported",
                     node.op, node.name)
@@ -1526,3 +1561,4 @@ if __name__ == '__main__':
     model_path = modelfile[0]
     convert_model(model_path)
     print(ts)
+    print(tl)

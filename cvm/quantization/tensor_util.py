@@ -2,7 +2,7 @@ import numpy as np
 from tensorflow.python.framework import dtypes
 
 def tensor_shape_proto_to_list(shape):
-    shp = [d.size for d in shape.dim]
+    shp = [d.size if d.size > 0 else 1 for d in shape.dim]
     return (1,) if len(shp) == 0 else shp
 
 def tensor_type_to_numpy(dtype):
