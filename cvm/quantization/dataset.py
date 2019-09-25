@@ -34,6 +34,9 @@ def download_files(category, files, baseUrl=src, root=dataset_dir):
         fpath = os.path.join(root_dir, df)
         if os.path.exists(fpath):
             continue
+        fdir = os.path.dirname(fpath)
+        if not os.path.exists(fdir):
+            os.makedirs(fdir)
 
         logger.info("Downloading dateset %s into %s from url[%s]",
                 df, root_dir, url)
@@ -81,12 +84,14 @@ def load_imagenet(batch_size):
         num_workers=30)
 
 def load_imagenet_rec(batch_size, input_size=224, **kwargs):
-    files = ["val.rec", "val.idx"]
-    download_files("imagenet", files, **kwargs)
+    files = ["rec/val.rec", "rec/val.idx"]
+    root_dir = download_files("imagenet", files, **kwargs)
     crop_ratio = 0.875
     resize = int(math.ceil(input_size / crop_ratio))
     mean_rgb = [123.68, 116.779, 103.939]
     std_rgb = [58.393, 57.12, 57.375]
+    rec_val = os.path.join(root_dir, files[0])
+    rec_val_idx = os.path.join(root_dir, files[1])
 
     val_data = mx.io.ImageRecordIter(
 	path_imgrec         = rec_val,
