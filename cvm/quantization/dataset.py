@@ -126,7 +126,7 @@ def load_cifar10(batch_size, input_size=224, num_workers=4, **kwargs):
     return data_iter()
 
 def load_quickdraw10(batch_size, num_workers=4, **kwargs):
-    files = ["quickdraw_X_test.npy", "quickdraw_y_test.npy"]
+    files = ["quickdraw_X.npy", "quickdraw_y.npy", "quickdraw_X_test.npy", "quickdraw_y_test.npy"]
     root_dir = download_files("quickdraw", files, **kwargs)
     X = nd.array(np.load(os.path.join(root_dir, files[0])))
     y = nd.array(np.load(os.path.join(root_dir, files[1])))
