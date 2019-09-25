@@ -132,15 +132,19 @@ def load_quickdraw10(batch_size, num_workers=4, is_train=False, **kwargs):
     X = nd.array(np.load(os.path.join(root_dir, files[0])))
     y = nd.array(np.load(os.path.join(root_dir, files[1])))
     val_data = gluon.data.DataLoader(
-             mx.gluon.data.dataset.ArrayDataset(X, y),
-            batch_size=batch_size, shuffle=False, num_workers=num_workers)
-    def data_iter():
-        for i, batch in enumerate(val_data):
-            data = gluon.utils.split_and_load(batch[0], ctx_list=[mx.cpu()], batch_axis=0)
-            label = gluon.utils.split_and_load(batch[1], ctx_list=[mx.cpu()], batch_axis=0)
-            data, label = data[0], label[0]
-            yield data, label
-    return data_iter()
+            mx.gluon.data.dataset.ArrayDataset(X, y),
+            batch_size=batch_size,
+            last_batch='discard',
+            shuffle=is_train,
+            num_workers=num_workers)
+    return val_data
+    # def data_iter():
+    #     for i, batch in enumerate(val_data):
+    #         data = gluon.utils.split_and_load(batch[0], ctx_list=[mx.cpu()], batch_axis=0)
+    #         label = gluon.utils.split_and_load(batch[1], ctx_list=[mx.cpu()], batch_axis=0)
+    #         data, label = data[0], label[0]
+    #         yield data, label
+    # return data_iter()
 
 def load_trec(batch_size, is_train = False, **kwargs):
     #  if is_train:
