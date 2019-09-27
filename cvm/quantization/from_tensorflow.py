@@ -703,7 +703,11 @@ def _matmul(inputs, attrs, params):
     if not attrs["transpose_b"]:
         inputs[1] = mx.sym.transpose(inputs[1], axes=(1, 0))
         bshp = (bshp[1], bshp[0])
-    return mx.sym.FullyConnected(*inputs, num_hidden=bshp[0])
+    dense_attr = {
+        'no_bias': len(inputs) == 2,
+        'num_hidden': bshp[0],
+    }
+    return mx.sym.FullyConnected(*inputs, **dense_attr)
 
 def _mean(inputs, attrs, params):
     input_eids = attrs["_input_eids"]
@@ -1492,8 +1496,9 @@ def convert_tfnode(tfnode, graph, params, infer_shapes, logger=logging):
         input_shape = \
             tensor_util.tensor_shape_proto_to_list(attr['shape'].shape)
         dtype = tensor_util.tensor_type_to_numpy(attr['dtype'].type)
-        graph[name] = [mx.sym.var(name, shape=input_shape, dtype=dtype)]
-        infer_shapes[name] = [tuple(input_shape)]
+        graph[name] = [mx.sym.var("data", shape=input_shape, dtype=dtype)]
+        assert "data" not in infer_shapes
+        infer_shapes["data"] = [tuple(input_shape)]
     else:
         inputs, input_eids = [], []
         for in_name in org_inputs:
@@ -1613,10 +1618,6 @@ def convert_model(pbfile):
             has_output.add(name)
     nodes = [name for name in graph.keys() if name not in has_output]
     '''
-    ts = set()
-    for name, syms in graph.items():
-        
-    print(len(graph))
     nodes = [graph['predictions_1/Softmax'][0]]
 
     symbol = mx.sym.Group(nodes) if len(nodes) > 1 else nodes[0]

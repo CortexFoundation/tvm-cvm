@@ -116,8 +116,19 @@ def load_model(sym_fname, param_fname, inputs, ctx=mx.gpu()):
 def load_parameters(graph, params, prefix="", ctx=None, dtype=None):
     params_dict = graph.collect_params()
     params_dict.initialize(ctx=ctx)
-    print("params: ", len(params))
+    ts = set()
+    for p in params:
+        if p not in params_dict:
+            ts.add(p)
+    '''
+    for p in params_dict:
+        if p not in params:
+            ts.add(p)
+    print(p)
+    print(ts)
     exit()
+    
+    '''
 
     ret_params = {}
     for name in params_dict:
