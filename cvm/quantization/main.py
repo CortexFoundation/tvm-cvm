@@ -117,6 +117,11 @@ if __name__ == "__main__":
         data_iter = iter(val_loader)
         def data_iter_func():
             return next(data_iter)
+    elif dataset == "quickdraw":
+        val_data = ds.load_quickdraw10(batch_size)
+        data_iter = iter(val_data)
+        def data_iter_func():
+            return next(data_iter)
     else:
          CHECK(False, "config error: dataset")
 

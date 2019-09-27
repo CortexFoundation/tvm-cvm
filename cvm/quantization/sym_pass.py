@@ -534,8 +534,6 @@ def _sym_rewrite(sym, params, graph, inputs_ext, infer_shapes):
             B = graph[B_name] = mx.sym.var(B_name, shape=bias.shape)
 
             conv_attr['no_bias'] = 'False'
-            print(type(W))
-            exit()
             node = mx.sym.Convolution(conv_childs[0], W,
                    B, **conv_attr, name=conv_name)
             logger.info("fuse Convolution=%-40s and batchnorm=%-40s",
