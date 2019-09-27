@@ -42,6 +42,7 @@ def test_sym_nnvm(batch_size=10, iter_num=10):
     _mrt.std_dump(sym, params, inputs_ext, data, "inception_v3")
 
 def test_sym_pass(batch_size=10, iter_num=10, quantize=True):
+
     logger = logging.getLogger("log.test.sym.pass")
 
     calib_ctx = mx.gpu(2)

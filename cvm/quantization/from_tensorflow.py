@@ -14,8 +14,6 @@ import utils
 # import heapq
 import sym_utils as sutils
 
-ts = set()
-tl = []
 
 def argmin(data, axis=None, keepdims=False, exclude=False):
     """Returns the indices of the minimum values along an axis.
@@ -705,7 +703,11 @@ def _matmul(inputs, attrs, params):
     if not attrs["transpose_b"]:
         inputs[1] = mx.sym.transpose(inputs[1], axes=(1, 0))
         bshp = (bshp[1], bshp[0])
-    return mx.sym.FullyConnected(*inputs, num_hidden=bshp[0])
+    dense_attr = {
+        'no_bias': len(inputs) == 2,
+        'num_hidden': bshp[0],
+    }
+    return mx.sym.FullyConnected(*inputs, **dense_attr)
 
 def _mean(inputs, attrs, params):
     input_eids = attrs["_input_eids"]
@@ -1295,6 +1297,7 @@ def _batch_normalization(inputs, attrs, params):
 def _relu(inputs, attrs, params):
     return mx.sym.relu(*inputs)
 
+
 def _concat_v2(inputs, attrs, params):
     axis_sym = inputs.pop(len(inputs) - 1)
     axis = params.pop(axis_sym.attr('name'))
@@ -1473,8 +1476,8 @@ def convert_tfnode(tfnode, graph, params, infer_shapes, logger=logging):
         logger.critical("Not supported op '%s'", tfnode.op)
         exit()
 
-    print ("%-16s" % op_name,
-           "%-40s" % name, [k for k, _ in attr.items()])
+    # print ("%-16s" % op_name,
+    #        "%-40s" % name, [k for k, _ in attr.items()])
     if op_name == 'Const':
         for k, v in attr.items():
             if k == 'value':
@@ -1493,8 +1496,9 @@ def convert_tfnode(tfnode, graph, params, infer_shapes, logger=logging):
         input_shape = \
             tensor_util.tensor_shape_proto_to_list(attr['shape'].shape)
         dtype = tensor_util.tensor_type_to_numpy(attr['dtype'].type)
-        graph[name] = [mx.sym.var(name, shape=input_shape, dtype=dtype)]
-        infer_shapes[name] = [tuple(input_shape)]
+        graph[name] = [mx.sym.var("data", shape=input_shape, dtype=dtype)]
+        assert "data" not in infer_shapes
+        infer_shapes["data"] = [tuple(input_shape)]
     else:
         inputs, input_eids = [], []
         for in_name in org_inputs:
@@ -1514,7 +1518,7 @@ def convert_tfnode(tfnode, graph, params, infer_shapes, logger=logging):
         parsed_attrs["_infer_shapes"] = infer_shapes
         # TODO(ryt): convert operators
         sym = convert_operator(op_name, inputs, parsed_attrs, params)
-        graph[name] = sym
+        graph[name] = [sym]
         _, infer_shapes[sym.attr('name')], _ = sym.infer_shape()
     return
 
@@ -1596,18 +1600,41 @@ def convert_model(pbfile):
 
     graph, params, infer_shapes = {}, {}, {}
     for tfnode in topo_sort(tfgraph):
-        # if tfnode.op == "Conv2D":
-            # inputs = tfnode.input
-            # print(inputs[0])
-            # test = [atk for k, v in node_out_map[]]
-        # op_name, attrs = tfnode.op, tfnode.attr
-        # for k, _ in attrs.items():
-        #     ts.add(k)
         convert_tfnode(tfnode, graph, params, infer_shapes)
 
     logger.info("Operators successfully converted.")
 
+    # TODO(ryt): locate the symbols which have no outpus:
+    #   save the symbols into the list 'nodes'
+    #   Currently 'nodes' is set to predictions_1/Softmax
+    '''
+    has_output = set()
+    for name, sym in graph.items():
+        childs = sym[0].get_children()
+        if childs is not None:
+            for csym in childs:
+                has_output.add(csym.attr('name'))
+        else:
+            has_output.add(name)
+    nodes = [name for name in graph.keys() if name not in has_output]
+    '''
+    nodes = [graph['predictions_1/Softmax'][0]]
 
+    symbol = mx.sym.Group(nodes) if len(nodes) > 1 else nodes[0]
+    sym_file, params_file = load_fname()
+    with open(sym_file, "w") as f:
+        f.write(symbol.tojson())
+    nd.save(params_file, params)
+    logger.info("Model successfully dumped.")
+
+
+dataset = "inceptionv3"
+version = ""
+
+def load_fname(suffix=None, with_ext=False):
+    suffix = "."+suffix if suffix is not None else ""
+    prefix = "./data/%s%s%s" % (dataset, version, suffix)
+    return utils.extend_fname(prefix, with_ext=with_ext)
 
 modelfile = [
             # "/tmp/tf/resnet50_v1/model.pb",
@@ -1622,7 +1649,7 @@ modelfile = [
 #         convert_model(pb)
 
 def dump_single_sym(sym,
-        path = os.path.expanduser("~/.dump/test_sym.json")):
+    path = os.path.expanduser("~/.dump/test_sym.json")):
     with open(path, "w") as f:
         f.write(sym.tojson())
 
@@ -1646,5 +1673,3 @@ if __name__ == '__main__':
     utils.log_init()
     model_path = modelfile[0]
     convert_model(model_path)
-    print(ts)
-    print(tl)
