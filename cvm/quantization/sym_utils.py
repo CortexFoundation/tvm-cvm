@@ -375,6 +375,8 @@ mx_identity_ext = {
     'Activation': {
         'act_type': [False, 'relu'], # Only supported relu
     },
+    'relu': {},
+    'sum': {},
     'Dropout': {
         'mode': [True, 'training'],
     },

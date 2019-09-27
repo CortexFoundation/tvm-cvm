@@ -323,7 +323,38 @@ def sym_infer_shape(symbol, params, inputs_ext):
             callback=_infer_shape, infer_shapes=infer_shapes)
 
     return infer_shapes
-    
+
+def convert_input_format(symbol, params, inputs_ext, logger,
+        src_format="NHWC", des_format="NCHW"):
+    # for single input named 'data'
+    assert src_format in ["NCHW", "NHWC"]
+    assert des_format in ["NCHW", "NHWC"]
+    axes = tuple()
+    if src_format == "NCHW" and des_format == "NHWC":
+        axes = (0, 2, 3, 1)
+    elif src_format == "NHWC" and des_format == "NCHW":
+        axes = (0, 3, 1, 2)
+    graph, inp = {}, {}
+    for sym in topo_sort(symbol, logger=logger):
+        name, op_name = sym.attr('name'), sym.attr('op_name')
+        childs, attr = sym_iter(sym.get_children()), sym.list_attr()
+        if childs is not None:
+            nchilds = []
+            for c in childs:
+                if c.attr('name') == 'data':
+                    tname = 'data_transpose'
+                    csym = mx.sym.transpose(data=graph['data'], axes=axes, name=tname)
+                    nchilds.append(csym)
+                    graph[tname] = csym
+                else:
+                    nchilds.append(graph[c.attr('name')])
+            sym = get_mxnet_op(op_name)(*nchilds, **attr, name=name)
+        graph[name] = sym
+
+    nodes = [get_node(sym, graph) for sym in symbol]
+    ret = mx.sym.Group(nodes) if len(nodes) > 1 else nodes[0]
+    return ret, params
+
 def sym_robust_infer_shape(symbol, params, inputs_ext):
     logger = logging.getLogger('log.symbol.infer_shape')
     check_ext_deps(inputs_ext, 'shape')
@@ -356,6 +387,7 @@ def sym_robust_infer_shape(symbol, params, inputs_ext):
     inputs = symbol.list_inputs()
     args, auxs = symbol.list_arguments(), symbol.list_auxiliary_states()
     inputs_shape = {k:tuple(v['shape']) for k, v in inputs_ext.items() if k in inputs}
+    print (symbol.attr('name'), inputs_shape)
     arg_shapes, _, aux_shapes = symbol.infer_shape(**inputs_shape)
     infer_shapes = {args[i]:arg_shapes[i] for i in range(len(args))}
     infer_shapes.update({auxs[i]:aux_shapes[i] for i in range(len(auxs))})
@@ -701,6 +733,7 @@ def _reduce_graph(sym, params, graph, inputs_ext):
 
 def fuse_multiple_outputs(symbol, params, inputs_ext, logger):
     infer_shapes = sym_robust_infer_shape(symbol, params, inputs_ext)
+    print ("Robust infer shape")
     channel, graph = {}, {}
     for sym in topo_sort(symbol, logger=logger):
         name, op_name = sym.attr('name'), sym.attr('op_name')

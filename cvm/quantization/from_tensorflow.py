@@ -13,6 +13,7 @@ import utils
 
 # import heapq
 import sym_utils as sutils
+import sym_pass as spass
 
 
 def argmin(data, axis=None, keepdims=False, exclude=False):
@@ -1621,11 +1622,19 @@ def convert_model(pbfile):
     nodes = [graph['predictions_1/Softmax'][0]]
 
     symbol = mx.sym.Group(nodes) if len(nodes) > 1 else nodes[0]
+    inputs_ext = {
+        'data': {
+            'shape': (16, 3, 299, 299),
+        }
+    }
+    symbol, params = spass.convert_input_format(symbol, params, \
+            inputs_ext, logger, src_format="NCHW", des_format="NHWC")
     sym_file, params_file = load_fname()
     with open(sym_file, "w") as f:
         f.write(symbol.tojson())
     nd.save(params_file, params)
     logger.info("Model successfully dumped.")
+
 
 
 dataset = "inceptionv3"

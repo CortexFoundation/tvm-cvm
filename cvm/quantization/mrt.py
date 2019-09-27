@@ -119,6 +119,8 @@ def _simulate(sym, params, graph, inputs_ext, self):
     def _requant_operator(X, def_prec, oscale=None):
         xopn, xn = X.attr('op_name'), X.attr('name')
         X_name = _uniq_name(xn)
+        print(xopn, xn, X.list_attr())
+        print(precs[xn])
         oprec = _get_prec(precs[xn], name, def_prec)
         exactly = True if oscale else False
         oscale = oscale if oscale else scale(th_dict[xn], oprec.p)
@@ -280,7 +282,7 @@ def _simulate(sym, params, graph, inputs_ext, self):
         sym = sym.astype('int32').astype('float32')
         #  sym = mx.sym.floor(sym) # simulate integer division
         sym = _mrt_sim_quantize(sym, 0, params, graph, oprec)
-        precs[name][out_key] = oprec
+        precs[name][out_key] = PREC(oprec)
         scales[name]= oscale
     elif op_name in ['Convolution', 'FullyConnected']:
         iprec = op_input_precs[op_name]
@@ -349,6 +351,7 @@ def _simulate(sym, params, graph, inputs_ext, self):
     th_dict[oname] = th_dict[name]
     precs[oname] = precs[name]
     scales[oname] = scales[name]
+
     return sym, params
 
 def _realize(sym, params, graph, inputs_ext):
