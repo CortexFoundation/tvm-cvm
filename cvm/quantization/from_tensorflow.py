@@ -1468,6 +1468,24 @@ def convert_operator(op_name, inputs, attrs, params, logger=logging):
     sym = _convert_map[op_name](inputs, attrs, params)
     return sym
 
+currSupportedOps = {
+                       'Const',
+                       'Pad',
+                       'Identity',
+                       'FusedBatchNorm',
+                       'MatMul',
+                       'Relu', 'Relu6',
+                       'Softmax', 'Mean',
+                       'MaxPool', 'AvgPool',
+                       'BiasAdd', 'Add', 'Placeholder',
+                       'Conv2D', 'DepthwiseConv2dNative',
+                       'Shape', 'Reshape',
+                       'Fill',
+                       'ConcatV2',
+                       'StridedSlice',
+                       'Pack'
+                   }
+
 import tensor_util
 def convert_tfnode(tfnode, graph, params, infer_shapes, logger=logging):
     name, op_name = tfnode.name, tfnode.op
@@ -1477,8 +1495,6 @@ def convert_tfnode(tfnode, graph, params, infer_shapes, logger=logging):
         logger.critical("Not supported op '%s'", tfnode.op)
         exit()
 
-    # print ("%-16s" % op_name,
-    #        "%-40s" % name, [k for k, _ in attr.items()])
     if op_name == 'Const':
         for k, v in attr.items():
             if k == 'value':
@@ -1517,48 +1533,16 @@ def convert_tfnode(tfnode, graph, params, infer_shapes, logger=logging):
         parsed_attrs = _parse_attr(attr)
         parsed_attrs["_input_eids"] = input_eids
         parsed_attrs["_infer_shapes"] = infer_shapes
-        # TODO(ryt): convert operators
         sym = convert_operator(op_name, inputs, parsed_attrs, params)
         graph[name] = [sym]
         _, infer_shapes[sym.attr('name')], _ = sym.infer_shape()
-    return
-
-currSupportedOps = {
-                       'Const',
-                       'Pad',
-                       'Identity',
-                       'FusedBatchNorm',
-                       'MatMul',
-                       'Relu', 'Relu6',
-                       'Softmax', 'Mean',
-                       'MaxPool', 'AvgPool',
-                       'BiasAdd', 'Add', 'Placeholder',
-                       'Conv2D', 'DepthwiseConv2dNative',
-                       'Shape', 'Reshape',
-                       'Fill',
-                       'ConcatV2',
-                       'StridedSlice',
-                       'Pack'
-                   }
-
-currSupportedAttrs = {
-                        'Conv2D': { 'strides', 'data_format', 'padding',
-                                   'dilations', 'use_cudnn_on_gpu', 'T' },
-                        'Const': { 'value', 'dtype' }
-                     }
-
-currRealizedOps = { }
-
+    return graph[name]
 
 def topo_sort(tfgraph, logger=logging):
     node_map = {}
     deps, ninps, res = {}, [], {}
     for node in tfgraph.node:
         node_map[node.name] = node
-        if node.op not in currSupportedOps:
-            logger.error("the op '%s' of node '%s' is not supported",
-                    node.op, node.name)
-            exit()
         # TODO(ryt): input name may concat output index such as:
         #   'Model/cell_0/RnnCell' and 'Model/cell_0/RnnCell:0'
         for inp in node.input:
@@ -1589,7 +1573,7 @@ def topo_sort(tfgraph, logger=logging):
         exit()
     return topos
 
-def convert_model(pbfile):
+def convert_model(pbfile, layout="NHWC", outputs=None):
     # load the original model
     logger = logging.getLogger("Loading Original Model")
     tfparser = TFParser(pbfile)
@@ -1605,44 +1589,36 @@ def convert_model(pbfile):
 
     logger.info("Operators successfully converted.")
 
-    # TODO(ryt): locate the symbols which have no outpus:
-    #   save the symbols into the list 'nodes'
-    #   Currently 'nodes' is set to predictions_1/Softmax
-    '''
-    has_output = set()
-    for name, sym in graph.items():
-        childs = sym[0].get_children()
-        if childs is not None:
-            for csym in childs:
-                has_output.add(csym.attr('name'))
+    # The last node of tfgraph is assumed as output by default.
+    if outputs is None:
+        outputs = [tfgraph.node[-1].name]
+    nodes = []
+    for oname in outputs:
+        if ":" in oname:
+            oname, onum = oname.split(":")
+            eid = int(onum)
+            nodes.append(graph[oname][eid])
         else:
-            has_output.add(name)
-    nodes = [name for name in graph.keys() if name not in has_output]
-    '''
-    nodes = [graph['predictions_1/Softmax'][0]]
-
+            nodes.append(graph[oname][0])
     symbol = mx.sym.Group(nodes) if len(nodes) > 1 else nodes[0]
-    inputs_ext = {
-        'data': {
-            'shape': (16, 3, 299, 299),
-        }
-    }
-    symbol, params = spass.convert_input_format(symbol, params, \
-            inputs_ext, logger, src_format="NCHW", des_format="NHWC")
+
+    if layout == "NHWC":
+        symbol, params = spass.convert_input_format(symbol, params)
+
     sym_file, params_file = load_fname()
     with open(sym_file, "w") as f:
         f.write(symbol.tojson())
     nd.save(params_file, params)
     logger.info("Model successfully dumped.")
 
-
+    return symbol, params
 
 dataset = "inceptionv3"
 version = ""
 
 def load_fname(suffix=None, with_ext=False):
     suffix = "."+suffix if suffix is not None else ""
-    prefix = "./data/%s%s%s" % (dataset, version, suffix)
+    prefix = "./data/tf_%s%s%s" % (dataset, version, suffix)
     return utils.extend_fname(prefix, with_ext=with_ext)
 
 modelfile = [
@@ -1651,32 +1627,6 @@ modelfile = [
             # "/data/tfmodels/keras/inception_v3/model.pb",
             # "/data/tfmodels/mobilenet/model.pb"
             ]
-
-# if True:
-#     utils.log_init()
-#     for pb in modelfile:
-#         convert_model(pb)
-
-def dump_single_sym(sym,
-    path = os.path.expanduser("~/.dump/test_sym.json")):
-    with open(path, "w") as f:
-        f.write(sym.tojson())
-
-# conv_attr = {
-#     'layout': 'NCHW',
-#     'pad': (1, 1),
-#     'num_filter': 16,
-#     'dilate': (1, 1),
-#     'num_group': 1,
-#     'stride': (1, 1),
-#     'no_bias': False,
-#     'kernel': (3, 3)
-# }
-# sym = mx.sym.Convolution(X, W, **conv_attr, name=conv_name)
-# sym = mx.sym.Convolution(**conv_attr, name='test_ryt')
-# dump_single_sym(sym)
-# 
-# print(ts)
 
 if __name__ == '__main__':
     utils.log_init()

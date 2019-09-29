@@ -324,36 +324,57 @@ def sym_infer_shape(symbol, params, inputs_ext):
 
     return infer_shapes
 
-def convert_input_format(symbol, params, inputs_ext, logger,
+def convert_input_format(symbol, params, logger=logging,
         src_format="NHWC", des_format="NCHW"):
-    # for single input named 'data'
-    assert src_format in ["NCHW", "NHWC"]
-    assert des_format in ["NCHW", "NHWC"]
-    axes = tuple()
-    if src_format == "NCHW" and des_format == "NHWC":
-        axes = (0, 2, 3, 1)
-    elif src_format == "NHWC" and des_format == "NCHW":
-        axes = (0, 3, 1, 2)
-    graph, inp = {}, {}
-    for sym in topo_sort(symbol, logger=logger):
-        name, op_name = sym.attr('name'), sym.attr('op_name')
-        childs, attr = sym_iter(sym.get_children()), sym.list_attr()
-        if childs is not None:
-            nchilds = []
-            for c in childs:
-                if c.attr('name') == 'data':
-                    tname = 'data_transpose'
-                    csym = mx.sym.transpose(data=graph['data'], axes=axes, name=tname)
-                    nchilds.append(csym)
-                    graph[tname] = csym
-                else:
-                    nchilds.append(graph[c.attr('name')])
-            sym = get_mxnet_op(op_name)(*nchilds, **attr, name=name)
-        graph[name] = sym
+    assert sorted(src_format) == sorted(des_format)
+    assert len(set(src_format)) == len(src_format)
 
-    nodes = [get_node(sym, graph) for sym in symbol]
-    ret = mx.sym.Group(nodes) if len(nodes) > 1 else nodes[0]
-    return ret, params
+    if src_format == des_format:
+        return symbol, params
+
+    axes = [des_format.find(c) for c in src_format]
+    def _data_convert(sym, params, graph, inputs_ext):
+        name, attr = sym.attr("name"), sym.list_attr()
+        if name == "data":
+            shp = None
+            if "__shape__" in attr:
+                shp_axes = [src_format.find(c) for c in des_format]
+                src_shp = eval(attr["__shape__"])
+                shp = [src_shp[ax] for ax in shp_axes]
+            sym = mx.sym.var("data", shape=shp)
+            sym = mx.sym.transpose(sym, axes=axes, name="data_transpose")
+        return sym, params
+
+    return topo_visit(symbol, params, {},
+            callback=_data_convert, logger=logger)
+
+    # assert src_format in ["NCHW", "NHWC"]
+    # assert des_format in ["NCHW", "NHWC"]
+    # axes = tuple()
+    # if src_format == "NCHW" and des_format == "NHWC":
+    #     axes = (0, 2, 3, 1)
+    # elif src_format == "NHWC" and des_format == "NCHW":
+    #     axes = (0, 3, 1, 2)
+    # graph, inp = {}, {}
+    # for sym in topo_sort(symbol, logger=logger):
+    #     name, op_name = sym.attr('name'), sym.attr('op_name')
+    #     childs, attr = sym_iter(sym.get_children()), sym.list_attr()
+    #     if childs is not None:
+    #         nchilds = []
+    #         for c in childs:
+    #             if c.attr('name') == 'data':
+    #                 tname = 'data_transpose'
+    #                 csym = mx.sym.transpose(data=graph['data'], axes=axes, name=tname)
+    #                 nchilds.append(csym)
+    #                 graph[tname] = csym
+    #             else:
+    #                 nchilds.append(graph[c.attr('name')])
+    #         sym = get_mxnet_op(op_name)(*nchilds, **attr, name=name)
+    #     graph[name] = sym
+
+    # nodes = [get_node(sym, graph) for sym in symbol]
+    # ret = mx.sym.Group(nodes) if len(nodes) > 1 else nodes[0]
+    # return ret, params
 
 def sym_robust_infer_shape(symbol, params, inputs_ext):
     logger = logging.getLogger('log.symbol.infer_shape')
