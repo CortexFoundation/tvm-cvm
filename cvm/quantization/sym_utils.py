@@ -12,31 +12,49 @@ INT8_MIN, INT8_MAX = -127, 127
 
 INT8_TYPE, INT32_TYPE= ('int8', 'int32')
 
+def is_op(sym, params):
+    return (sym.attr('op_name') != 'null')
+def is_var(sym, params):
+    return (sym.attr('op_name') == 'null')
+def is_params(sym, params):
+    return is_var(sym, params) and \
+        (sym.attr('name') in params)
+def is_inputs(sym, params):
+    return is_var(sym, params) and \
+        (sym.attr('name') not in params)
+
 def check_graph(symbol, params, logger):
-    inps, prms, nodes = set(), set(), set()
+    # check duplicate name
+    vst, names = set(), set()
+    '''
+    def dfs_vst(sym):
+        name = sym.attr('name')
+        
+        if name in vst:
+            return
+        assert name not in names, "NameError, duplicate name '%s'" % name
+        names.add(name)
+        childs = sym_iter(sym.get_children())
+        if childs is not None:
+            for c in childs:
+                dfs_vst(c)
+        vst.add(name)
+
+    for entry in symbol:
+        dfs_vst(entry)
+    '''
+    # check input name and params name
     for sym in topo_sort(symbol, logger==logger):
         name, op_name = sym.attr('name'), sym.attr('op_name')
         childs, attr = sym_iter(sym.get_children()), sym.list_attr()
-        assert name not in nodes, "NameError: duplicate name [%s]" % name
-        nodes.add(name)
-        if childs is None:
-            inps.add(name)
-        else:
-            cname = childs[0].attr('name')
-            if cname in inps:
-                assert cname == 'data', \
-                    "NameError: input [%s] should be named by 'data'" \
-                    % cname
-            for c in childs[i:]:
-                cname = c.attr('name')
-                assert cname not in ['data'], \
-                    "NameError: param [%s] should not be named by 'data'" \
-                    % cname
-                inps.remove(cname)
-                prms.add(cname)
-    assert len(inps) == 1, "InputError: graph should contain exactly" + \
-        "one input, input set: %s" % inps
+        if is_params(sym, params):
+            assert name not in ['data'], \
+                "NameError, param should not be named by 'data'"
+        elif is_inputs(sym, params):
+            assert name == 'data', \
+                "NameError, input '%s' should be named by 'data'" % name
     logger.info("Model Checked Passed.")
+
     return symbol, params
 
 class OpExt():
