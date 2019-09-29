@@ -705,10 +705,6 @@ def _reduce_graph(sym, params, graph, inputs_ext):
     #        \   /                    operator
     #       operator
     node = sym
-    struct = [
-        ['broadcast_mul'],
-        ['broadcast_add', 'broadcast_sub'],
-    ]
     if op_name in ['broadcast_mul']:
         A, B = childs[0], childs[1]
         if A.attr('op_name') not in ['broadcast_mul']:

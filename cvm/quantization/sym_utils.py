@@ -12,6 +12,33 @@ INT8_MIN, INT8_MAX = -127, 127
 
 INT8_TYPE, INT32_TYPE= ('int8', 'int32')
 
+def check_graph(symbol, params, logger):
+    inps, prms, nodes = set(), set(), set()
+    for sym in topo_sort(symbol, logger==logger):
+        name, op_name = sym.attr('name'), sym.attr('op_name')
+        childs, attr = sym_iter(sym.get_children()), sym.list_attr()
+        assert name not in nodes, "NameError: duplicate name [%s]" % name
+        nodes.add(name)
+        if childs is None:
+            inps.add(name)
+        else:
+            cname = childs[0].attr('name')
+            if cname in inps:
+                assert cname == 'data', \
+                    "NameError: input [%s] should be named by 'data'" \
+                    % cname
+            for c in childs[i:]:
+                cname = c.attr('name')
+                assert cname not in ['data'], \
+                    "NameError: param [%s] should not be named by 'data'" \
+                    % cname
+                inps.remove(cname)
+                prms.add(cname)
+    assert len(inps) == 1, "InputError: graph should contain exactly" + \
+        "one input, input set: %s" % inps
+    logger.info("Model Checked Passed.")
+    return symbol, params
+
 class OpExt():
     def __init__(self, op_name='null',
             in_types=[], out_types=[]):
