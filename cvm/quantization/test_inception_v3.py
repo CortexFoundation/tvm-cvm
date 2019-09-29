@@ -81,7 +81,6 @@ def test_sym_pass(batch_size=10, iter_num=10, quantize=True):
     if quantize:
         sym_file, param_file = load_fname(version)
         sym, params = mx.sym.load(sym_file), nd.load(param_file)
-        inputs = sym.list_inputs()
         sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
         data, _ = data_iter_func()
         if True:

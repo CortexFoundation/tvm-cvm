@@ -251,10 +251,12 @@ def _simulate(sym, params, graph, inputs_ext, self):
         alpha = int(lambd * xs)
         max_axis = mx.sym.max(X, axis=axis, keepdims=True)
         var = mx_const(alpha, graph, params)
-        offset_name = _uniq_name("softmax_offset")
-        offset = mx.sym.broadcast_sub(max_axis, var, name=offset_name)
+        offset = mx.sym.broadcast_sub(max_axis, var,
+                name=_uniq_name("softmax_offset"))
         offset = _mrt_sim_quantize(offset, 0, params, graph, xprec.p)
-        norm = mx.sym.relu(mx.sym.broadcast_sub(X, offset))
+        norm = mx.sym.relu(mx.sym.broadcast_sub(X, offset,
+                    name=_uniq_name("softmax_normalize")),
+                name=_uniq_name("softmax_filter"))
         norm = _mrt_sim_quantize(norm, 0, params, graph, xprec.p)
 
         data = nd.arange(0, alpha+1)
@@ -267,18 +269,20 @@ def _simulate(sym, params, graph, inputs_ext, self):
         wattr = { 'precision': str(tprec) }
         W = graph[W_name] = mx.sym.var(W_name, shape=weight.shape, attr=wattr)
         lut = mx.sym.Custom(norm, W, in_dim=alpha+1, name=name, op_type='cvm_lut')
-        sum_lut = mx.sym.sum(lut, axis=axis, keepdims=True)
+        sum_lut = mx.sym.sum(lut, axis=axis, keepdims=True,
+                name=_uniq_name("softmax_sum"))
 
         oprec = min(15, 31 - tprec)
         assert oprec > 8, "operator softmax(%s) lambda(%d) is too large" \
             % (name, lambd)
         oscale = _get_range(oprec)
         var_scale = mx_const(oscale, graph, params)
-        prob = mx.sym.broadcast_mul(lut, var_scale)
+        prob = mx.sym.broadcast_mul(lut, var_scale,
+                name=_uniq_name("softmax_output_scale"))
         var_one = mx_const(1, graph, params)
         half_lut = _mrt_sim_quantize(sum_lut, 1, params, graph, 31)
-        prob = mx.sym.broadcast_add(prob, half_lut)
-        sym = mx.sym.broadcast_div(prob, sum_lut)
+        prob = mx.sym.broadcast_add(prob, half_lut, name=_uniq_name("softmax_round"))
+        sym = mx.sym.broadcast_div(prob, sum_lut, name=_uniq_name("softmax_prob"))
         sym = sym.astype('int32').astype('float32')
         #  sym = mx.sym.floor(sym) # simulate integer division
         sym = _mrt_sim_quantize(sym, 0, params, graph, oprec)
@@ -339,18 +343,24 @@ def _simulate(sym, params, graph, inputs_ext, self):
     logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
            op_name, name, scales[name], cns)
 
-    # Requantize output symbol
-    if name in precs[name]:
-        oprec = precs[name][name]
-        os = scale(th_dict[name], oprec.p)
-        sym, oprec, os = _requant_operator(sym, PREC(oprec), os)
-        scales[name] = os
-
     oname = sym.attr('name')
     infer_shapes[oname] = infer_shapes[name]
     th_dict[oname] = th_dict[name]
     precs[oname] = precs[name]
     scales[oname] = scales[name]
+
+    # Requantize output symbol
+    if name in precs[name]:
+        oprec = precs[name][name]
+        os = scale(th_dict[name], oprec.p)
+        sym, oprec, os = _requant_operator(sym, PREC(oprec), os)
+
+        oname = sym.attr('name')
+        scales[oname] = os
+        infer_shapes[oname] = infer_shapes[name]
+        th_dict[oname] = th_dict[name]
+        precs[oname] = oprec
+        scales[oname] = os
 
     return sym, params
 
