@@ -830,7 +830,7 @@ def sym_quant_prepare(symbol, params, inputs_ext, graph_ext={}):
            logger=logger, inputs_ext=inputs_ext,
            callback=_reduce_graph)
 
-    params = examine_parameters(sym, params, inputs_ext)
+    sym, params = check_graph(sym, params)
     return sym, params
 
 def sym_attach_attrs(symbol, params, inputs_ext, **kwargs):

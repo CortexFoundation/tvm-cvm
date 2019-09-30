@@ -49,13 +49,6 @@ def check_graph(symbol, params, logger=logging):
 
     return symbol, new_params
 
-class OpExt():
-    def __init__(self, op_name='null',
-            in_types=[], out_types=[]):
-        self.op_name = op_name
-        self.in_types = in_types
-        self.out_types = out_types
-
 def combile_name(n1, n2):
     t1, t2 = n1.split("_"), n2.split("_")
     len1, len2 = len(t1), len(t2)
@@ -342,58 +335,27 @@ cvm_left_shift:
     In[Int8|Int32|Int64] << P_shift_bits[Int8] -> Out[Int8]
 
 """
-nnvm_identity_ext = {
-    'null': OpExt(out_types=[INT8_TYPE, INT32_TYPE]),
+nnvm_identity_ext = [
+    'null',
+    'relu', 'upsampling', 'max_pool2d',
+    'conv2d', 'dense', 'sum', 'elemwise_add', 'elemwise_sub',
+    'reshape', 'flatten', 'strided_slice', 'slice_like',
 
-    'relu': OpExt('relu', [INT8_TYPE], [INT8_TYPE]),
-    'upsampling': {},
-    'max_pool2d': OpExt('max_pool2d', [INT8_TYPE], [INT8_TYPE]),
+    'broadcast_left_shift', 'broadcast_right_shift',
+    'broadcast_div', 'broadcast_mul', 'broadcast_add', 'broadcast_sub',
+    'broadcast_max',
 
-    'conv2d': OpExt('conv2d', [INT8_TYPE], [INT32_TYPE]),
-    'dense': OpExt('dense', [INT8_TYPE], [INT32_TYPE]),
-    'sum': OpExt('sum', [INT8_TYPE], [INT32_TYPE]),
-    'elemwise_add': OpExt('elemwise_add', [INT8_TYPE], [INT32_TYPE]),
-    'elemwise_sub': {},
+    '__add_scalar__',
 
-    'reshape': OpExt('reshape', [INT8_TYPE, INT32_TYPE], [INT8_TYPE, INT32_TYPE]),
-    'flatten': OpExt('flatten', [INT8_TYPE, INT32_TYPE], [INT8_TYPE, INT32_TYPE]),
-    'strided_slice': OpExt('strided_slice', [INT8_TYPE], [INT8_TYPE]),
-    'slice_like': {},
+    'max', 'abs', 'log2',
+    'clip', 'concatenate', 'negative',
+    'cvm_clip', 'cvm_left_shift', 'cvm_right_shift',
+    'cvm_lut',
 
-    'broadcast_right_shift': OpExt('broadcast_right_shift', [INT32_TYPE], [INT8_TYPE]),
-    'broadcast_left_shift': OpExt('broadcast_left_shift', [INT32_TYPE], [INT8_TYPE]),
-    'broadcast_div': OpExt('broadcast_div', [INT32_TYPE], [INT32_TYPE]),
-    'broadcast_mul': OpExt('broadcast_mul', [INT32_TYPE], [INT32_TYPE]),
-    'broadcast_add': OpExt('broadcast_add', [INT32_TYPE], [INT32_TYPE]),
-    'broadcast_sub': OpExt('broadcast_sub', [INT32_TYPE], [INT32_TYPE]),
-    'broadcast_max': OpExt('broadcast_max', [INT32_TYPE], [INT32_TYPE]),
-
-    '__add_scalar__': {},
-
-    'max': {},
-    'abs': {},
-    'log2': {},
-
-    'clip': OpExt('clip', [INT32_TYPE], [INT8_TYPE]),
-    'concatenate': {},
-    'negative': {},
-
-    'cvm_clip': {},
-    'cvm_left_shift': {},
-    'cvm_right_shift': {},
-    'cvm_lut': {},
-
-    'take': {},
-    'repeat': {},
-    'tile': {},
-    'transpose': {},
-    'expand_dims': {},
-    'squeeze': {},
-    'squeeze': {},
-
-    'get_valid_counts': {},
-    'non_max_suppression': {},
-}
+    'take', 'repeat', 'tile', 'transpose',
+    'expand_dims', 'squeeze',
+    'get_valid_counts', 'non_max_supression',
+]
 
 """Mxnet Symbol Operator Extension
 Attribute Options:

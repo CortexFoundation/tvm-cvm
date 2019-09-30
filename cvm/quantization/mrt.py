@@ -638,7 +638,8 @@ class MRT():
 
 
     def _realize(self):
-        qsym, qparams = topo_visit(self.qsym, self.qprm, self.ins_ext,
+        qsym, qparams = check_graph(self.qsym, self.qprm)
+        qsym, qparams = topo_visit(qsym, qparams, self.ins_ext,
                 get_op=get_mxnet_op, logger=self._lgr,
                 callback=_realize)
 
