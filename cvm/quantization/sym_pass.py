@@ -755,18 +755,14 @@ def fuse_transpose(symbol, params, logger=logging):
     # transpose2
     def _fuse_transpose(sym, params, graph, inputs_ext):
         if sym.attr('op_name') == 'transpose':
-            consec, csym, deps = True, sym, 1
-            axes = eval(sym.attr('axes'))
-            while deps < 2:
-                childs, consec = sym_iter(csym.get_children()), False
-                if childs[0].attr('op_name') == 'transpose':
-                    caxes = eval(childs[0].attr('axes'))
-                    axes = tuple([caxes[ii] for ii in axes])
-                    csym, consec, deps = childs[0], True, deps + 1
-                else:
-                    break
+            axes, consec = eval(sym.attr('axes')), False
+            childs = sym_iter(sym.get_children())
+            if childs[0].attr('op_name') == 'transpose':
+                caxes = eval(childs[0].attr('axes'))
+                axes = tuple([caxes[ii] for ii in axes])
+                consec = True
             if consec:
-                sym = sym_iter(csym.get_children())[0]
+                sym = sym_iter(childs[0].get_children())[0]
                 if axes != tuple(sorted(axes)):
                     name = sym.attr('name') + "_fusetranspose"
                     sym = mx.sym.transpose(sym, axes=axes, name=name)
@@ -777,6 +773,7 @@ def fuse_transpose(symbol, params, logger=logging):
 
 def fuse_multiple_outputs(symbol, params, inputs_ext, logger):
     infer_shapes = sym_robust_infer_shape(symbol, params, inputs_ext)
+    print ("Robust infer shape")
     channel, graph = {}, {}
     for sym in topo_sort(symbol, logger=logger):
         name, op_name = sym.attr('name'), sym.attr('op_name')
