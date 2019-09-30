@@ -49,14 +49,6 @@ class PREC():
 
 out_key = 'out_key'
 target_key = 'target_key'
-def is_inputs(sym, params, inputs_ext):
-    return (sym.attr('name') in inputs_ext)
-def is_params(sym, params, inputs_ext):
-    return (sym.attr('name') in params)
-def is_var(sym, params, inputs_ext):
-    return (sym.attr('op_name') == 'null')
-def is_op(sym, params, inputs_ext):
-    return (sym.attr('op_name') != 'null')
 
 def scale(threshold, precision):
     assert threshold >= 0
@@ -67,10 +59,10 @@ def scale(threshold, precision):
 
 def _mrt_sim_quantize(sym, sb, params, graph, prec):
     name = "%s_%d_%d" % (sym.attr('name'), sb, prec)
-    if name in graph:
-        return graph[name]
-    return mx.sym.Custom(sym, sb=sb, prec=prec,
+    if name not in graph:
+        graph[name] = mx.sym.Custom(sym, sb=sb, prec=prec,
                 name=name, op_type='mrt_sim_quant')
+    return graph[name]
 
 MAX_BIT = 32
 id_counts = {}
@@ -80,11 +72,6 @@ def _uniq_name(name):
     else:
         id_counts[name] = 0
     return "%s_%d" % (name, id_counts[name])
-def _get_prec(precs, name, prec=None):
-    if name not in precs:
-        assert prec is not None
-        precs[name] = PREC(prec)
-    return precs[name]
 def _get_range(prec):
     return (2 ** (prec - 1)) - 1
 def _get_bit(opt):
@@ -106,7 +93,7 @@ def _simulate(sym, params, graph, inputs_ext, self):
     cns = [c.attr('name') for c in childs] if childs else []
     def _requant_parameter(pname, def_prec, oscale=None):
         P_name = _uniq_name(pname)
-        P_prec = _get_prec(precs[pname], name, def_prec)
+        P_prec = precs[pname].get(name, PREC(def_prec))
         xs = oscale if oscale else scale(th_dict[pname], P_prec.p)
         params[P_name] = params[pname] * xs
         P_attr = { 'precision': str(P_prec.p) }
@@ -119,9 +106,7 @@ def _simulate(sym, params, graph, inputs_ext, self):
     def _requant_operator(X, def_prec, oscale=None):
         xopn, xn = X.attr('op_name'), X.attr('name')
         X_name = _uniq_name(xn)
-        print(xopn, xn, X.list_attr())
-        print(precs[xn])
-        oprec = _get_prec(precs[xn], name, def_prec)
+        oprec = precs[xn].get(name, PREC(def_prec))
         exactly = True if oscale else False
         oscale = oscale if oscale else scale(th_dict[xn], oprec.p)
         iscale = scales[xn]
@@ -161,30 +146,27 @@ def _simulate(sym, params, graph, inputs_ext, self):
                 " iprec=%s, iscale=%-10.5f, oprec=%s, oscale=%-10.5f",
                     xopn, xn, rescale, frac, exp, iprec, iscale,
                     oprec, oscale)
-        # elif (iprec > oprec and iscale <= oscale):
         else:
             X = _mrt_sim_quantize(X, 0, params, graph, oprec.p)
             oscale = iscale
             logger.debug(
                 "Operator  %-20s name=%-40s clip with iprec=%s, oprec=%s",
                     xopn, xn, iprec, oprec)
-        # else:
-            # oscale = iscale
         return X, oprec, oscale
     def _requant(X, def_prec, oscale=None):
-        if is_params(X, params, inputs_ext):
+        if is_params(X, params):
             return _requant_parameter(X.attr('name'), def_prec, oscale)
         else:
             return _requant_operator(X, def_prec, oscale)
 
     # Update four attributes: th_dict, precs, scales, sym
-    if is_inputs(sym, params, inputs_ext):
+    if is_inputs(sym, params):
         prec = precs[name][out_key]
         scales[name] = scale(th_dict[name], prec.p)
         attr = { 'precision': str(prec.p) }
         sym = mx.sym.var(name, attr=attr)
         return sym, params
-    elif is_params(sym, params, inputs_ext):
+    elif is_params(sym, params):
         return sym, params
     elif op_name in disable_requant_ops:
         # TODO: pass through thresholds
@@ -199,7 +181,7 @@ def _simulate(sym, params, graph, inputs_ext, self):
 
         data = nd.arange(-alpha, alpha+1)
         out = get_nd_op(op_name)(data / xs)
-        oprec = _get_prec(precs[name], out_key, PREC(16, L0))
+        oprec = precs[name].get(out_key, PREC(16, L0))
         opt = out.abs().max().asscalar()
         # opt = th_dict[name]
         oscale = scales[name] = scale(opt, oprec.p)
@@ -215,19 +197,6 @@ def _simulate(sym, params, graph, inputs_ext, self):
         sym = mx.sym.Custom(X, W, in_dim=2*alpha+1,
                 name=name, op_type='cvm_lut')
         precs[name][out_key] = oprec
-    # elif op_name in ['softmax']:
-    #     X = childs[0]
-    #     alpha = int(15 * scales[cns[0]])
-    #     offset = mx.sym.max(X) - alpha
-    #     norm = mx.sym.broadcast_sub(X, offset)
-    #     neg, pos = mx.sym.minimum(norm, 0), mx.sym.maximum(norm, 0)
-    #     neg = neg * 1000000
-    #     norm = neg + pos
-    #     norm = norm / scales[cns[0]]
-    #     sym = mx.sym.softmax(norm, **attr, name=name)
-    #     sym = sym * 127
-    #     precs[name][out_key] = 8
-    #     scales[name] = 127
     elif op_name in ['softmax']:
         """  Softmax Quantization
         ::math
@@ -319,7 +288,6 @@ def _simulate(sym, params, graph, inputs_ext, self):
         iprec = op_input_precs[op_name]
         in_th = max([th_dict[n] for n in cns])
         oscale = scales[name] = scale(in_th, iprec.p)
-        #  print ([th_dict[n] for n in cns], iprec, oscale)
         new_childs = []
         for c in childs:
             c, cprec, _ = _requant(c, iprec, oscale=oscale)
@@ -371,7 +339,7 @@ def _realize(sym, params, graph, inputs_ext):
 
     is_mrt_simq = lambda : op_name=='Custom' and \
         get_attr(attr, 'op_type', 'null')=='mrt_sim_quant'
-    if is_params(sym, params, inputs_ext):
+    if is_params(sym, params):
         if 'precision' in attr:
             prec = get_attr(attr, 'precision')
         else:
@@ -470,6 +438,8 @@ class MRT():
         print (sym_collect_attr(self.sym))
 
         qsym, qparams = self._simulate()
+        with open("/tmp/sim.json", "w") as fout:
+            fout.write(qsym.tojson())
         if not no_realize:
             qsym, qparams = self._realize()
         qext = self._get_ext()
@@ -630,6 +600,7 @@ class MRT():
         self.qsym, self.qprm = topo_visit(self.sym, self.prm, self.ins_ext,
                 get_op=get_mxnet_op, logger=self._lgr,
                 callback=_simulate, self=self)
+        self.qsym, self.qprm = check_graph(self.qsym, self.qprm)
 
         return self.qsym, self.qprm
 
@@ -638,10 +609,11 @@ class MRT():
 
 
     def _realize(self):
-        qsym, qparams = check_graph(self.qsym, self.qprm)
-        qsym, qparams = topo_visit(qsym, qparams, self.ins_ext,
+        self._lgr.info("MRT realize graph into int model")
+        qsym, qparams = topo_visit(self.qsym, self.qprm, self.ins_ext,
                 get_op=get_mxnet_op, logger=self._lgr,
                 callback=_realize)
+        qsym, qparams = check_graph(qsym, qparams)
 
         def _check_int_params(params, arg):
            param = params[arg]
@@ -656,6 +628,8 @@ class MRT():
         return self.qsym, self.qprm
 
     def _set_prerequisites(self):
+        self.sym, self.prm = check_graph(self.sym, self.prm)
+
         for sym in topo_sort(self.sym):
             name, op_name = sym.attr('name'), sym.attr('op_name')
             self.precs[name] = {}
@@ -683,7 +657,7 @@ class MRT():
             if name not in self._fixed:
                 continue
             assert op_name == 'null'
-            if is_params(sym, self.prm, self.ins_ext):
+            if is_params(sym, self.prm):
                 bit = _get_bit(self.prm[name])
                 if out_key in self.precs[name]:
                     prec = self.precs[name][out_key]

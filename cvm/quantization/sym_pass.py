@@ -748,7 +748,6 @@ def _reduce_graph(sym, params, graph, inputs_ext):
 
 def fuse_multiple_outputs(symbol, params, inputs_ext, logger):
     infer_shapes = sym_robust_infer_shape(symbol, params, inputs_ext)
-    print ("Robust infer shape")
     channel, graph = {}, {}
     for sym in topo_sort(symbol, logger=logger):
         name, op_name = sym.attr('name'), sym.attr('op_name')
