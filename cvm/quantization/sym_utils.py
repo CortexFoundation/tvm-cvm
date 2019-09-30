@@ -23,7 +23,7 @@ def is_inputs(sym, params):
     return is_var(sym, params) and \
         (sym.attr('name') not in params)
 
-def check_graph(symbol, params, logger):
+def check_graph(symbol, params, logger=logging):
     # check duplicate name
     graph_str = json.loads(symbol.tojson())
     nodes = graph_str['nodes']
@@ -33,19 +33,21 @@ def check_graph(symbol, params, logger):
             "NameError, duplicate name '%s'" % node['name']
         name_set.append(node['name'])
 
-    # check input name and params name
+    # check input name and params name, remove unused params name
+    new_params = {}
     for sym in topo_sort(symbol, logger==logger):
         name, op_name = sym.attr('name'), sym.attr('op_name')
         childs, attr = sym_iter(sym.get_children()), sym.list_attr()
         if is_params(sym, params):
             assert name not in ['data'], \
                 "NameError, param should not be named by 'data'"
+            new_params[name] = params[name]
         elif is_inputs(sym, params):
             assert name == 'data', \
                 "NameError, input '%s' should be named by 'data'" % name
     logger.info("Model Checked Passed.")
 
-    return symbol, params
+    return symbol, new_params
 
 class OpExt():
     def __init__(self, op_name='null',
@@ -133,6 +135,7 @@ def sym_iter(sym):
         size = len(sym.list_output_names())
         sym = [sym[i] for i in range(size)]
     return sym
+
 
 def examine_parameters(symbol, params, inputs_ext, allows=[], callback=None):
     args, new_params = symbol.list_inputs(), {}
