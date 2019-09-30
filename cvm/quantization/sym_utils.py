@@ -25,24 +25,14 @@ def is_inputs(sym, params):
 
 def check_graph(symbol, params, logger):
     # check duplicate name
-    vst, names = set(), set()
-    '''
-    def dfs_vst(sym):
-        name = sym.attr('name')
-        
-        if name in vst:
-            return
-        assert name not in names, "NameError, duplicate name '%s'" % name
-        names.add(name)
-        childs = sym_iter(sym.get_children())
-        if childs is not None:
-            for c in childs:
-                dfs_vst(c)
-        vst.add(name)
+    graph_str = json.loads(symbol.tojson())
+    nodes = graph_str['nodes']
+    name_set = []
+    for node in nodes:
+        assert node['name'] not in name_set, \
+            "NameError, duplicate name '%s'" % node['name']
+        name_set.append(node['name'])
 
-    for entry in symbol:
-        dfs_vst(entry)
-    '''
     # check input name and params name
     for sym in topo_sort(symbol, logger==logger):
         name, op_name = sym.attr('name'), sym.attr('op_name')
