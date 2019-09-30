@@ -23,6 +23,7 @@ def is_inputs(sym, params):
     return is_var(sym, params) and \
         (sym.attr('name') not in params)
 
+DATA_NAME = "data"
 def check_graph(symbol, params, logger=logging):
     # check duplicate name
     graph_str = json.loads(symbol.tojson())
@@ -39,11 +40,11 @@ def check_graph(symbol, params, logger=logging):
         name, op_name = sym.attr('name'), sym.attr('op_name')
         childs, attr = sym_iter(sym.get_children()), sym.list_attr()
         if is_params(sym, params):
-            assert name not in ['data'], \
+            assert name != DATA_NAME, \
                 "NameError, param should not be named by 'data'"
             new_params[name] = params[name]
         elif is_inputs(sym, params):
-            assert name == 'data', \
+            assert name == DATA_NAME, \
                 "NameError, input '%s' should be named by 'data'" % name
     logger.info("Model Checked Passed.")
 

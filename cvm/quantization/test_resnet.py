@@ -149,7 +149,7 @@ if __name__ == "__main__":
         exit()
 
     test_sym_pass(batch_size=16, iter_num=10)
-    test_sym_pass(batch_size=160, iter_num=1000, quantize=False)
+    # test_sym_pass(batch_size=160, iter_num=1000, quantize=False)
     #  test_sym_nnvm(batch_size=1)
     # test_performance(16, 10)
 
