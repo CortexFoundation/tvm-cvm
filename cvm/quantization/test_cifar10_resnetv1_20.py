@@ -32,8 +32,8 @@ ctx = [mx.gpu(int(i)) for i in "1,2,3,4,5".split(',') if i.strip()]
 
 utils.log_init()
 
-# data_iter = ds.load_cifar10(batch_size, input_size, root=os.path.expanduser("~/.cvm_test"))
-data_iter = ds.load_cifar10(batch_size, input_size)
+val_data = ds.load_cifar10(batch_size, input_size)
+data_iter = iter(val_data)
 def data_iter_func():
     data, label = next(data_iter)
     return data, label
@@ -68,7 +68,7 @@ mrt.calibrate(ctx=calib_ctx)                # calibration
 mrt.set_output_prec(8)                      # set output prec, do nothing by default
 qsym, qparams, inputs_ext = mrt.quantize()  # quantization
 
-if True:
+if False:
     # dump quantized model
     dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
     sim.save_ext(dump_ext, inputs_ext)

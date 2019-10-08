@@ -72,17 +72,6 @@ def load_voc(batch_size, input_size=416, **kwargs):
 def load_voc_metric():
     return VOC07MApMetric(iou_thresh=0.5, class_names=gdata.VOCDetection.CLASSES)
 
-
-def load_imagenet(batch_size):
-    val_dataset = ImageNet(train=False)
-    val_loader = gluon.data.DataLoader(
-        val_dataset,
-        batch_size,
-        False,
-        batchify_fn=val_batchify_fn,
-        last_batch='keep',
-        num_workers=30)
-
 def load_imagenet_rec(batch_size, input_size=224, **kwargs):
     files = ["rec/val.rec", "rec/val.idx"]
     root_dir = download_files("imagenet", files, **kwargs)
@@ -123,12 +112,7 @@ def load_cifar10(batch_size, input_size=224, num_workers=4, **kwargs):
             gluon.data.vision.CIFAR10(root=root_dir,
                 train=False).transform_first(transform_test),
             batch_size=batch_size, shuffle=False, num_workers=num_workers)
-    def data_iter():
-        for i, batch in enumerate(val_data):
-            data = gluon.utils.split_and_load(batch[0], ctx_list=[mx.cpu()], batch_axis=0)
-            label = gluon.utils.split_and_load(batch[1], ctx_list=[mx.cpu()], batch_axis=0)
-            yield data[0], label[0]
-    return data_iter()
+    return val_data
 
 def load_quickdraw10(batch_size, num_workers=4, is_train=False, **kwargs):
     files = ["quickdraw_X.npy", "quickdraw_y.npy"] if is_train else \
@@ -143,23 +127,11 @@ def load_quickdraw10(batch_size, num_workers=4, is_train=False, **kwargs):
             shuffle=is_train,
             num_workers=num_workers)
     return val_data
-    # def data_iter():
-    #     for i, batch in enumerate(val_data):
-    #         data = gluon.utils.split_and_load(batch[0], ctx_list=[mx.cpu()], batch_axis=0)
-    #         label = gluon.utils.split_and_load(batch[1], ctx_list=[mx.cpu()], batch_axis=0)
-    #         data, label = data[0], label[0]
-    #         yield data, label
-    # return data_iter()
 
 def load_trec(batch_size, is_train = False, **kwargs):
-    #  if is_train:
-        #  fname = dataset_dir + "/trec/TREC.train.pk"
-    #  else:
-        #  fname = dataset_dir + "/trec/TREC.test.pk"
     files = ["TREC.train.pk", "TREC.test.pk"]
     root_dir = download_files("trec", files, **kwargs)
     fname = os.path.join(root_dir, files[0] if is_train else files[1])
-    #  download_file(fname, dataset_dir=dataset_dir)
     with open(fname, "rb") as fin:
         dataset = pickle.load(fin)
         data, label = [], []
