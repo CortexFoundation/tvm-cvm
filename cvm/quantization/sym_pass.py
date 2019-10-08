@@ -333,6 +333,7 @@ def convert_input_format(symbol, params, logger=logging,
         return symbol, params
 
     axes = [des_format.find(c) for c in src_format]
+    axes = tuple(axes)
     def _data_convert(sym, params, graph, inputs_ext):
         name, attr = sym.attr("name"), sym.list_attr()
         if name == "data":
@@ -746,8 +747,33 @@ def _reduce_graph(sym, params, graph, inputs_ext):
         node = get_mxnet_op(op_name)(A_A, fuse_sym, **attr, name=name)
     return node, params
 
+def fuse_transpose(symbol, params, logger=logging):
+    # node                           node            node
+    #  |                 reduce       |
+    # transpose1       =========>  transpose    or
+    #  |
+    # transpose2
+    def _fuse_transpose(sym, params, graph, inputs_ext):
+        if sym.attr('op_name') == 'transpose':
+            axes, consec = eval(sym.attr('axes')), False
+            childs = sym_iter(sym.get_children())
+            if childs[0].attr('op_name') == 'transpose':
+                caxes = eval(childs[0].attr('axes'))
+                axes = tuple([caxes[ii] for ii in axes])
+                consec = True
+            if consec:
+                sym = sym_iter(childs[0].get_children())[0]
+                if axes != tuple(sorted(axes)):
+                    name = sym.attr('name') + "_fusetranspose"
+                    sym = mx.sym.transpose(sym, axes=axes, name=name)
+        return sym, params
+
+    return topo_visit(symbol, params, {},
+            callback=_fuse_transpose, logger=logger)
+
 def fuse_multiple_outputs(symbol, params, inputs_ext, logger):
     infer_shapes = sym_robust_infer_shape(symbol, params, inputs_ext)
+    print ("Robust infer shape")
     channel, graph = {}, {}
     for sym in topo_sort(symbol, logger=logger):
         name, op_name = sym.attr('name'), sym.attr('op_name')
