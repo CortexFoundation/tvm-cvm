@@ -593,29 +593,16 @@ def _sym_rewrite(sym, params, graph, inputs_ext, infer_shapes):
             logger.info("fuse Convolution=%-40s and batchnorm=%-40s",
                    X.attr('name'), name)
         else:
-            # TODO: use multiply and add
-            conv_attr = {
-                'no_bias': 'False',
-                'dilate': '(1, 1)',
-                'kernel': (1, 1),
-                'stride': (1, 1),
-                'pad': (0, 0),
-                'layout': 'NCHW',
-                'num_filter': in_channel,
-                'num_group': in_channel,
-            }
-            conv_name = name.replace('batchnorm', 'bn_conv')
-            W_name = conv_name + '_weight'
-            assert W_name not in graph
-            W_shape = (in_channel, 1, 1, 1)
-            graph[W_name] = W = mx.sym.var(W_name, shape=W_shape)
-            params[W_name] = scale.reshape(W_shape)
-            B_name = conv_name + '_bias'
-            assert B_name not in graph
-            params[B_name] = bias
-            graph[B_name] = B = mx.sym.var(B_name, shape=bias.shape)
-            node = mx.sym.Convolution(X, W, B, **conv_attr, name=conv_name)
-            logger.info("fuse BatchNorm=%-40s into depth-wise conv2d", name)
+            w_name = name + "_weight"
+            params[w_name] = scale.reshape((1, in_channel, 1, 1))
+            graph[w_name] = W = mx.sym.var(w_name, shape=(1, in_channel, 1, 1))
+            node = mx.sym.broadcast_mul(X, W, name=name+"_mul")
+            bias_name = name + "_bias"
+            params[bias_name] = bias.reshape((1, in_channel, 1, 1))
+            graph[bias_name] = B = mx.sym.var(bias_name,
+                    shape=(1, in_channel, 1, 1))
+            node = mx.sym.broadcast_add(node, B, name=name+"_add")
+            logger.info("rewrite BatchNorm=%-40s into alpha * X + beta", name)
     elif op_name == 'Dropout':
         # dropout is identity during testing
         node = childs[0]

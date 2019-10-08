@@ -422,11 +422,11 @@ class MRT():
     def set_th_dict(self, th_dict):
         self.th_dict = th_dict
 
-    def calibrate(self, ctx=mx.cpu()):
+    def calibrate(self, ctx=mx.cpu(), lambd=None):
         for k in self.ins_ext:
             assert k in self._datas, "Input data `%s` not set"%k
         self._lgr.info("calibrate model outputs")
-        self.th_dict = self._sym_calibrate(ctx=ctx)
+        self.th_dict = self._sym_calibrate(ctx=ctx, lambd=lambd)
         return self.th_dict
 
     def quantize(self, no_realize=False):
@@ -438,8 +438,6 @@ class MRT():
         print (sym_collect_attr(self.sym))
 
         qsym, qparams = self._simulate()
-        with open("/tmp/sim.json", "w") as fout:
-            fout.write(qsym.tojson())
         if not no_realize:
             qsym, qparams = self._realize()
         qext = self._get_ext()
@@ -534,22 +532,24 @@ class MRT():
         opt_th = thresholds[min_divergence_idx]
         return opt_th
 
-    def _get_opt(self, out, lambd=10):
+    def _get_opt(self, out, lambd):
+        absmax = out.abs().max().asscalar()
+        if lambd is None:
+            return absmax
+
         mean = nd.mean(out).asscalar()
         std = nd.norm(out - mean).asscalar() / math.sqrt(np.product(out.shape))
         alpha = abs(mean) + lambd * std
-        absmax = out.abs().max().asscalar()
 
-        # return absmax # For normal model network
-        # if alpha < 0.95 * absmax:
-        #     print ("[", mean, std, "]", alpha, absmax)
-        #     return alpha
+        if alpha < 0.95 * absmax:
+            print ("[", mean, std, "]", alpha, absmax)
+            return alpha
         return absmax
 
         #  kldiverge = self._kldiverge(out, 10) # For mobilenet
         #  return sorted([kldiverge, alpha, absmax])[1]
 
-    def _sym_calibrate(self, ctx):
+    def _sym_calibrate(self, ctx, lambd):
         order, deps = topo_sort(self.sym, logger=self._lgr, with_deps=True)
         old_ths = self.th_dict if self.th_dict else {}
         self.th_dict, out_cache = {}, {}
@@ -572,8 +572,7 @@ class MRT():
                         del out_cache[n]
             out = [out] if len(sym) == 1 else out
             out_cache[name] = [o.as_in_context(ctx) for o in out]
-            #  opts = [float(o.abs().max().asscalar()) for o in out][0]
-            opts = float(self._get_opt(out[0], lambd=10))
+            opts = float(self._get_opt(out[0], lambd))
             # TODO: out may be multiple
             if name in old_ths:
                 #  th_dict[name] = [max(old_ths[name][i], o) for i,o in enumerate(opts)]

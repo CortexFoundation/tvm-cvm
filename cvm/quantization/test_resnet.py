@@ -15,8 +15,6 @@ import numpy as np
 import logging
 import os
 
-from quant_op import *
-from quant_utils import *
 import utils
 import dataset as ds
 import sym_utils as sutils
@@ -38,7 +36,7 @@ def load_fname(version, suffix=None, with_ext=False):
     fname = "./data/resnet%s%s"%(version, suffix)
     return utils.extend_fname(fname, with_ext)
 
-version = "50_v1"
+version = "50_v2"
 
 def test_sym_nnvm(batch_size=10):
     dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
@@ -52,7 +50,7 @@ def test_sym_nnvm(batch_size=10):
 def test_sym_pass(batch_size=10, iter_num=10, quantize=True):
     logger = logging.getLogger("log.test.sym.pass")
     calib_ctx = mx.gpu(2)
-    ctx = [mx.gpu(int(i)) for i in "1,2,3".split(',') if i.strip()]
+    ctx = [mx.gpu(int(i)) for i in "1,2,3,4".split(',') if i.strip()]
     inputs_ext = { 'data': {
             'shape': (batch_size, 3, 224, 224),
     } }
@@ -85,18 +83,13 @@ def test_sym_pass(batch_size=10, iter_num=10, quantize=True):
     sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
 
     if quantize:
-        if True:
-            mrt = _mrt.MRT(sym, params, inputs_ext)
-            #  mrt.set_pure_int8()
-            mrt.set_data('data', data)
-            mrt.calibrate(ctx=calib_ctx)
-            mrt.set_output_prec(8)
-            qsym, qparams, inputs_ext = mrt.quantize()
-        else:
-            inputs_ext['data']['data'] = data
-            th_dict = calib.sym_calibrate(sym, params, inputs_ext, ctx=calib_ctx)
-            qsym, qparams, precs, _ = calib.sym_simulate(sym, params, inputs_ext, th_dict)
-            qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, precs, "cvm")
+        mrt = _mrt.MRT(sym, params, inputs_ext)
+        #  mrt.set_pure_int8()
+        mrt.set_data('data', data)
+        mrt.calibrate(ctx=calib_ctx)
+        mrt.set_output_prec(8)
+        qsym, qparams, inputs_ext = mrt.quantize()
+
         dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
         sim.save_ext(dump_ext, inputs_ext)
         nd.save(dump_params, qparams)
@@ -128,7 +121,7 @@ if __name__ == "__main__":
     utils.log_init()
 
     # resnet.save_graph(mx.gpu())
-    zoo.save_model('resnet50_v1')
+    # zoo.save_model('resnet50_v1')
     # zoo.save_model('resnet18_v1')
     # zoo.save_model('resnet50_v1d_0.86')
     # zoo.save_model('resnet18_v1b_0.89')
@@ -149,7 +142,7 @@ if __name__ == "__main__":
         exit()
 
     test_sym_pass(batch_size=16, iter_num=10)
-    # test_sym_pass(batch_size=160, iter_num=1000, quantize=False)
+    test_sym_pass(batch_size=160, iter_num=1000, quantize=False)
     #  test_sym_nnvm(batch_size=1)
     # test_performance(16, 10)
 

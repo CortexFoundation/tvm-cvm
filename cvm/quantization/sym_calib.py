@@ -10,10 +10,9 @@ import tvm
 
 from sym_utils import *
 from sym_pass import *
-from quant_utils import *
 from utils import *
 import sim_quant_helper as sim
-import cvm_op as cvm
+import cvm_op
 
 max_bit = 32 # INT32
 default_target_bit = 8 # INT8
