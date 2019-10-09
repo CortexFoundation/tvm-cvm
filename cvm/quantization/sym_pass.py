@@ -737,6 +737,7 @@ def _reduce_graph(sym, params, graph, inputs_ext):
 def fuse_transpose(symbol, params, logger=logging):
     def _fuse_transpose(sym, params, graph, inputs_ext):
         name, op = sym.attr('name'), sym.attr('op_name')
+        childs = sym_iter(sym.get_children())
 
         #   node                                 node              node
         #     |                reduce              |
@@ -744,25 +745,21 @@ def fuse_transpose(symbol, params, logger=logging):
         #     |
         # transpose2
         if op == 'transpose':
-            axes, consec = eval(sym.attr('axes')), False
-            childs = sym_iter(sym.get_children())
+            axes = eval(sym.attr('axes'))
             if childs[0].attr('op_name') == 'transpose':
                 caxes = eval(childs[0].attr('axes'))
                 axes = tuple([caxes[ii] for ii in axes])
-                consec = True
-            if consec:
                 sym = sym_iter(childs[0].get_children())[0]
                 if axes != tuple(sorted(axes)):
                     name = sym.attr('name') + "_fusetranspose"
                     sym = mx.sym.transpose(sym, axes=axes, name=name)
 
         #   node                                 node
-        #     |                reduce              |
+        #     |                switch              |
         # transpose1         =========>          relu
         #     |                                    |
         #   relu                               transpose1
-        if op == 'relu':
-            childs = sym_iter(sym.get_children())
+        elif op == 'relu':
             if childs[0].attr('op_name') == 'transpose':
                 axes, name = eval(childs[0].attr('axes')), childs[0].attr('name')
                 sym = sym_iter(childs[0].get_children())[0]
@@ -776,7 +773,41 @@ def fuse_transpose(symbol, params, logger=logging):
         #             concat                 =========>        concat
         #                                                        |
         #                                                    transpose1
-        if 
+        elif op == 'Concat':
+            same, axeses = True, set()
+            for child in childs:
+                if child.attr('op_name') != 'transpose':
+                    same = False
+                    break
+                axeses.add(child.attr('axes'))
+            if same and len(axeses) == 1:
+                clist, dim = [], int(sym.attr('dim'))
+                axes = eval(list(axeses)[0])
+                for child in childs:
+                    cchild = sym_iter(child.get_children())[0]
+                    clist.append(cchild)
+                sym = mx.sym.concat(*clist, dim=axes[dim])
+                name = 'fusetranspose_' + name
+                sym = mx.sym.transpose(sym, axes=axes, name=name)
+
+        #    node                           node             
+        #      |              reduce          |
+        #  transpose1       =========>       sum
+        #      |
+        #     sum
+        # 
+        # only when 'keepdims' == False
+        # defalt: 'exclude' == False
+        elif op == 'sum':
+            axis, keepdims = eval(sym.attr('axis')), eval(sym.attr('keepdims'))
+            if childs[0].attr('op_name') == 'transpose' and not keepdims:
+                axes = eval(childs[0].attr('axes'))
+                sym = sym_iter(childs[0].get_children())[0]
+                axis = tuple([axes[i] for i in axis])
+                sym = mx.sym.sum(sym, axis=axis, keepdims=keepdims)
+            #  TODO(ryt): if an op 'sum' has attr 'exclude=True'
+            #  change it to 'False'
+
         return sym, params
 
     return topo_visit(symbol, params, {},
