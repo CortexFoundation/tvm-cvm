@@ -733,6 +733,8 @@ def _pack():
 
 def _pad(name):
     def _impl(inputs, attr, params):
+        padding = params[inputs[1].attr('name')]
+        print (padding.asnumpy(), padding.shape)
         padlist_key = inputs[1].name_hint
         if padlist_key in params:
             padlist = params.pop(padlist_key).asnumpy()
@@ -1585,6 +1587,7 @@ def convert_model(pbfile, layout="NHWC", outputs=None):
 
     graph, params, infer_shapes = {}, {}, {}
     for tfnode in topo_sort(tfgraph):
+        print("name: {}, op: {}, inputs: {}".format(tfnode.name, tfnode.op, tfnode.input))
         convert_tfnode(tfnode, graph, params, infer_shapes)
 
     logger.info("Operators successfully converted.")
@@ -1606,11 +1609,10 @@ def convert_model(pbfile, layout="NHWC", outputs=None):
         symbol, params = spass.convert_input_format(symbol, params)
 
     sym_file, params_file = load_fname()
-    print(sym_file)
     with open(sym_file, "w") as f:
         f.write(symbol.tojson())
     nd.save(params_file, params)
-    logger.info("Model successfully dumped.")
+    logger.info("Model successfully dumped to '%s'", sym_file)
 
     return symbol, params
 
@@ -1624,9 +1626,9 @@ def load_fname(suffix=None, with_ext=False):
 
 modelfile = [
             # "/tmp/tf/resnet50_v1/model.pb",
-            "/data/tfmodels/inception_v3/model.pb",
+            # "/data/tfmodels/inception_v3/model.pb",
             # "/data/tfmodels/keras/inception_v3/model.pb",
-            # "/data/tfmodels/mobilenet/model.pb"
+            "/data/tfmodels/mobilenet/model.pb"
             ]
 
 if __name__ == '__main__':
