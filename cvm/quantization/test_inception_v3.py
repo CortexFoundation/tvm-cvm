@@ -25,7 +25,7 @@ def get_dump_fname(suffix="quant"):
 
 def load_fname(version, suffix=None, with_ext=False):
     suffix = "."+suffix if suffix is not None else ""
-    fname = "./data/inception%s%s"%(version, suffix)
+    fname = "./data/tf_inception%s%s"%(version, suffix)
     return utils.extend_fname(fname, with_ext)
 
 def test_sym_nnvm(batch_size=10, iter_num=10):

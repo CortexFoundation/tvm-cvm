@@ -748,13 +748,15 @@ def _reduce_graph(sym, params, graph, inputs_ext):
     return node, params
 
 def fuse_transpose(symbol, params, logger=logging):
-    # node                           node            node
-    #  |                 reduce       |
-    # transpose1       =========>  transpose    or
-    #  |
-    # transpose2
     def _fuse_transpose(sym, params, graph, inputs_ext):
-        if sym.attr('op_name') == 'transpose':
+        name, op = sym.attr('name'), sym.attr('op_name')
+
+        #   node                                 node              node
+        #     |                reduce              |
+        # transpose1         =========>        transpose3     or
+        #     |
+        # transpose2
+        if op == 'transpose':
             axes, consec = eval(sym.attr('axes')), False
             childs = sym_iter(sym.get_children())
             if childs[0].attr('op_name') == 'transpose':
@@ -766,6 +768,28 @@ def fuse_transpose(symbol, params, logger=logging):
                 if axes != tuple(sorted(axes)):
                     name = sym.attr('name') + "_fusetranspose"
                     sym = mx.sym.transpose(sym, axes=axes, name=name)
+
+        #   node                                 node
+        #     |                reduce              |
+        # transpose1         =========>          relu
+        #     |                                    |
+        #   relu                               transpose1
+        if op == 'relu':
+            childs = sym_iter(sym.get_children())
+            if childs[0].attr('op_name') == 'transpose':
+                axes, name = eval(childs[0].attr('axes')), childs[0].attr('name')
+                sym = sym_iter(childs[0].get_children())[0]
+                sym = mx.sym.relu(sym)
+                sym = mx.sym.transpose(sym, axes=axes, name=name)
+
+        #     node     ...    node
+        #       |               |
+        #   transpose1 ...  transpose1                     node    node
+        #       \               /              reduce        \       /
+        #             concat                 =========>        concat
+        #                                                        |
+        #                                                    transpose1
+        if 
         return sym, params
 
     return topo_visit(symbol, params, {},

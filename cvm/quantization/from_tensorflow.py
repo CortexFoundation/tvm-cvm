@@ -1606,6 +1606,7 @@ def convert_model(pbfile, layout="NHWC", outputs=None):
         symbol, params = spass.convert_input_format(symbol, params)
 
     sym_file, params_file = load_fname()
+    print(sym_file)
     with open(sym_file, "w") as f:
         f.write(symbol.tojson())
     nd.save(params_file, params)
