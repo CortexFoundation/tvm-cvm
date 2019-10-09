@@ -32,7 +32,6 @@ ctx = [mx.gpu(int(i)) for i in "2,3,4,5".split(',') if i.strip()]
 
 utils.log_init()
 
-#data_iter = ds.load_cifar10(batch_size, input_size)
 val_data = ds.load_quickdraw10(batch_size)
 data_iter = iter(val_data)
 def data_iter_func():

@@ -15,8 +15,6 @@ import numpy as np
 import logging
 import os
 
-from quant_op import *
-from quant_utils import *
 import utils
 import dataset as ds
 import sym_utils as sutils

@@ -6,7 +6,6 @@ import nnvm
 import tvm
 from tvm.contrib import graph_runtime
 
-from quant_op import *
 from quant_utils import *
 import utils
 import mrt as _mrt
