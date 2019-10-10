@@ -86,7 +86,7 @@ def test_sym_pass(batch_size=10, iter_num=10, quantize=True):
         mrt = _mrt.MRT(sym, params, inputs_ext)
         #  mrt.set_pure_int8()
         mrt.set_data('data', data)
-        mrt.calibrate(ctx=calib_ctx)
+        mrt.calibrate(ctx=calib_ctx, lambd=16)
         mrt.set_output_prec(8)
         qsym, qparams, inputs_ext = mrt.quantize()
 
@@ -142,7 +142,7 @@ if __name__ == "__main__":
         exit()
 
     test_sym_pass(batch_size=16, iter_num=10)
-    test_sym_pass(batch_size=160, iter_num=1000, quantize=False)
+    # test_sym_pass(batch_size=160, iter_num=1000, quantize=False)
     #  test_sym_nnvm(batch_size=1)
     # test_performance(16, 10)
 
