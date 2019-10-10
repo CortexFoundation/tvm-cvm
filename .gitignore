@@ -221,3 +221,5 @@ patched.txt
 # pipenv file
 Pipfile
 Pipfile.lock
+
+.ycm_extra_conf.py
