@@ -54,14 +54,23 @@ def squeezenet(data, label):
     acc_top5.update(label, res)
     _, top5 = acc_top5.get()
     return "top1={:6.2%} top5={:6.2%}".format(top1, top5)
-if False:
+
+if True:
     sym, params = mx.sym.load(sym_file), nd.load(param_file)
     infer_shapes = (spass.sym_infer_shape(sym, params, inputs_ext))
     sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
-    inputs_ext['data']['data'] = data
-    th_dict = calib.sym_calibrate(sym, params, inputs_ext, ctx=calib_ctx)
-    qsym, qparams, precs, _ = calib.sym_simulate(sym, params, inputs_ext, th_dict)
-    qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, precs, "cvm")
+
+    if True:
+        mrt = _mrt.MRT(sym, params, inputs_ext)
+        mrt.set_data('data', data)
+        mrt.calibrate(ctx=calib_ctx)
+        mrt.set_output_prec(8)
+        qsym, qparams, inputs_ext = mrt.quantize()
+    else:
+        inputs_ext['data']['data'] = data
+        th_dict = calib.sym_calibrate(sym, params, inputs_ext, ctx=calib_ctx)
+        qsym, qparams, precs, _ = calib.sym_simulate(sym, params, inputs_ext, th_dict)
+        qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, precs, "cvm")
     dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
     sim.save_ext(dump_ext, inputs_ext)
     nd.save(dump_params, qparams)
@@ -70,6 +79,7 @@ if False:
 dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
 sym, params = mx.sym.load(dump_sym), nd.load(dump_params)
 (inputs_ext,) = sim.load_ext(dump_ext)
+
 if False:
     #  data = data[0, :].reshape((1, 1, input_size, input_size))
     _mrt.std_dump(sym, params, inputs_ext, data, "animal_10",
@@ -83,6 +93,7 @@ if False:
     #         "cifarresnetv215_stage1_bn_conv2_fwd.attr",
     #         root="/data/std_out/qd10_resnet20_v2")
     exit()
+
 inputs = [mx.sym.var(n) for n in inputs_ext]
 net2 = utils.load_model(dump_sym, dump_params, inputs, ctx=ctx)
 qacc_top1 = mx.metric.Accuracy()
