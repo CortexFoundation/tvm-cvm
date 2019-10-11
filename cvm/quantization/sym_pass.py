@@ -488,10 +488,6 @@ def _sym_rewrite(sym, params, graph, inputs_ext, infer_shapes):
     elif op_name == 'Pooling':
         pool_type = attr['pool_type']
         is_global = get_attr(attr, "global_pool", False)
-        # if get_attr(attr, 'pooling_convention', 'valid') != 'valid':
-        #     logger.warn("operator %-20s name=%-40s pooling_convention set to be valid",
-        #             op_name, name)
-        #     attr['pooling_convention'] = 'valid'
         node = get_mxnet_op(op_name)(*childs, **attr, name=name)
         if pool_type == 'avg' and is_global:
             input_name = childs[0].attr('name')
