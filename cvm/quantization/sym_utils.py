@@ -79,12 +79,13 @@ def check_ext_deps(ext, deps=[], logger=logging):
                         dep, ext)
                 assert False
 
-def get_attr(attr, name, default=None):
+NoneAttr = object()
+def get_attr(attr, name, default=NoneAttr):
     if name in attr:
         if isinstance(default, str):
             return attr[name]
         return eval(attr[name])
-    if default is None:
+    if default == NoneAttr:
         assert False, "attr %s is not exists in %s" % (name, attr)
     return default
 
