@@ -10,6 +10,9 @@ import numpy as np
 import os
 import logging
 import utils
+import cvm_op as cvm
+import numpy as np
+# from python.tvm.relay.op import op as _op
 
 # import heapq
 import sym_utils as sutils
@@ -418,6 +421,80 @@ def _concatV2():
     return _impl
 
 def _conv(opname):
+    def _impl(inputs, attrs, params):
+        data_format = attrs['data_format'].decode("utf-8")
+        input_eids = attrs['_input_eids']
+        infer_shapes = attrs['_infer_shapes']
+
+        assert data_format in ["NCHW", "NHWC"]
+
+        data_shp = infer_shapes[inputs[0].attr('name')][input_eids[0]]
+        weight_shp = infer_shapes[inputs[1].attr('name')][input_eids[1]]
+
+        if data_format == "NHWC":
+            inputs[0] = mx.sym.transpose(inputs[0], axes=(0, 3, 1, 2))
+            data_shp = [data_shp[ii] for ii in (0, 3, 1, 2)]
+
+        # Transpose weight format into "OIHW"
+        # TODO(wlt): note if op is depthwise, 
+        #   original weight format is "HWOI" instead of "HWIO".
+        inputs[1] = mx.sym.transpose(inputs[1], axes=(3, 2, 0, 1))
+        weight_shp = [weight_shp[ii] for ii in (3, 2, 0, 1)]
+        # params[weight_name] = nd.transpose(params[weight_name], axes=(3, 2, 0, 1))
+
+        H_idx, W_idx = data_format.find("H"), data_format.find("W")
+        dilations = attrs.get('dilations', (1, 1))
+        if isinstance(dilations, int):
+            dilations = (dilations, dilations)
+        elif len(dilations) == 4:
+            dilations = (dilations[H_idx], dilations[W_idx])
+
+        strides = attrs.get('strides')
+        if isinstance(strides, int):
+            strides = (strides, strides)
+        elif len(strides) == 4:
+            strides = (strides[H_idx], strides[W_idx])
+
+        # if opname == 'depthwise':
+        #    attrs['groups'] = attrs['channels']
+
+        padding = attrs['padding'].decode("utf-8")
+        if padding == 'VALID':
+            padding = (0, 0)
+        elif padding == 'SAME':
+            stride_h, stride_w = strides
+            kernel_h, kernel_w = weight_shp[2:]
+            in_h, in_w = data_shp[2], data_shp[3]
+            dilation_h, dilation_w = dilations
+            dilated_kernel_h = (kernel_h - 1) * dilation_h + 1
+            dilated_kernel_w = (kernel_w - 1) * dilation_w + 1
+            pad_v = _get_pad_pair(in_h, dilated_kernel_h, stride_h)
+            pad_h = _get_pad_pair(in_w, dilated_kernel_w, stride_w)
+            assert pad_v[0] == pad_v[1]
+            assert pad_h[0] == pad_h[1]
+            padding = (pad_v[0], pad_h[0])
+
+        assert data_shp[1] % weight_shp[1] == 0
+        groups = data_shp[1] // weight_shp[1]
+        conv_attr = {
+            'no_bias': (len(inputs) == 2),
+            'dilate': dilations,
+            'kernel': weight_shp[2:],
+            'stride': strides,
+            'pad': padding,
+            'layout': 'NCHW',
+            'num_filter': weight_shp[0],
+            'num_group': groups,
+        }
+        sym = mx.sym.Convolution(*inputs, **conv_attr)
+
+        if data_format == "NHWC":
+            sym = mx.sym.transpose(sym, axes=(0, 2, 3, 1))
+        return sym
+    return _impl
+
+'''
+def _conv(opname):
     def _impl(inputs, attr, params):
         attr['data_format'] = attr['data_format'].decode("utf-8")
         flip_layout = False
@@ -555,6 +632,7 @@ def _decode_image():
         warnings.warn("DecodeJpeg: It's a pass through, please handle preprocessing before input")
         return inputs[0]
     return _impl
+'''
 
 def _depth_to_space():
     def _impl(inputs, attr, params):
@@ -732,9 +810,8 @@ def _pack():
     return _impl
 
 def _pad(name):
+    '''
     def _impl(inputs, attr, params):
-        padding = params[inputs[1].attr('name')]
-        print (padding.asnumpy(), padding.shape)
         padlist_key = inputs[1].name_hint
         if padlist_key in params:
             padlist = params.pop(padlist_key).asnumpy()
@@ -751,6 +828,11 @@ def _pad(name):
         return AttrCvt(
             op_name='pad',
             ignores=['Tpaddings'],)(new_inputs, attr)
+    '''
+    def _impl(inputs, attr, params):
+        paddings = params[inputs[1].attr('name')]
+        # print (padding.asnumpy(), padding.shape)
+        return cvm.Pad(paddings=paddings)(inputs[0])
     return _impl
 
 def _prod():
@@ -787,7 +869,7 @@ def _rank():
 
 def _relu6():
     def _impl(inputs, attr, params):
-        return _op.clip(inputs[0], a_min=0, a_max=6)
+        return np.clip(inputs[0], a_min=0, a_max=6)
     return _impl
 
 def _shape():
@@ -1324,7 +1406,7 @@ _convert_map = {
     'Concat'                            : _concat(),
     'ConcatV2'                          : _concat_v2,
     'Conv2D'                            : _conv2d,
-    'DecodeJpeg'                        : _decode_image(),
+    #'DecodeJpeg'                        : _decode_image(),
     'DepthwiseConv2dNative'             : _conv('depthwise'),
     'DepthToSpace'                      : _depth_to_space(),
     'Equal'                             : _broadcast('equal'),
@@ -1464,10 +1546,15 @@ def _parse_attr(attrs):
 def convert_operator(op_name, inputs, attrs, params, logger=logging):
     if op_name not in _convert_map:
         raise NotImplementedError("Operator {} not implemented.".format(op_name))
-
-    # attr = { k: convert_field(v) for k, v in attrs.items() }
-
+    '''
+    elif op_name == 'Pad':
+        padding = params[inputs[1].attr('name')]
+        # print (padding.asnumpy(), padding.shape)
+        cusPad = cvm.Pad(padding=padding)
+        sym = cusPad(inputs[0])
+    '''
     sym = _convert_map[op_name](inputs, attrs, params)
+    # attr = { k: convert_field(v) for k, v in attrs.items() }
     return sym
 
 currSupportedOps = {
@@ -1489,9 +1576,11 @@ currSupportedOps = {
                    }
 
 import tensor_util
+ts = set()
 def convert_tfnode(tfnode, graph, params, infer_shapes, logger=logging):
     name, op_name = tfnode.name, tfnode.op
     attr, org_inputs = tfnode.attr, tfnode.input
+    ts.add(op_name)
 
     if op_name not in currSupportedOps:
         logger.critical("Not supported op '%s'", tfnode.op)
@@ -1635,3 +1724,4 @@ if __name__ == '__main__':
     utils.log_init()
     model_path = modelfile[0]
     convert_model(model_path)
+    print(ts)
