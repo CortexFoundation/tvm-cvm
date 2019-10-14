@@ -17,6 +17,9 @@ class Transformer(object):
     def _pass(self, op):
         return op
 
+    def validate(self, op, **kwargs):
+        return self._error("validate")
+
     def rewrite(self, op, **kwargs):
         return self._error("rewrite")
 
@@ -138,6 +141,13 @@ def fuse_transpose(symbol, params):
     def _impl(op, **kwargs):
         return get_transformer(op).fuse_transpose(op, **kwargs)
     return topo_visit_transformer(symbol, params, _impl)
+
+def validate(symbol, params):
+    infer_shapes = infer_shape(symbol, params)
+    def _impl(op, **kwargs):
+        return get_transformer(op).validate(op, **kwargs)
+    return topo_visit_transformer(symbol, params, _impl,
+            infer_shapes=infer_shapes)
 
 def rewrite(symbol, params):
     infer_shapes = infer_shape(symbol, params)

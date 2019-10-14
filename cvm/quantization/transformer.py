@@ -7,6 +7,7 @@ def init(symbol, params, input_shape=None):
     if input_shape is not None:
         sym, params = attach_input_shape(sym, params, input_shape)
     infer_shape(sym, params) # check infer_shape is correct.
+    sym, params = validate(sym, params)
     return sym, params
 
 if __name__ == "__main__":
