@@ -123,6 +123,16 @@ class MRTSimQuant(mx.operator.CustomOp):
         Y = X / self.denominator
         self.assign(out_data[0], req[0], Y)
 
+class Pad(mx.operator.CustomOp):
+    def __init__(self, padding):
+        super(Pad, self).__init__()
+        self.padding = padding
+
+    def forward(self, is_train, req, in_data, out_data):
+        assert is_train == False
+        self.assign(out_data[0], req[0], in_data[0])
+
+
 @mx.operator.register("cvm_clip")
 class ClipProp(mx.operator.CustomOpProp):
     def __init__(self, precision=8, shift_bit=0, cvm_name='clip'):
@@ -269,7 +279,24 @@ class MRTSimQuantProp(mx.operator.CustomOpProp):
     def create_operator(self, ctx, shapes, dtypes):
         return MRTSimQuant(self.sb, self.prec)
 
-
+@mx.operator.register("cvm_pad")
+class PadProp(mx.operator.CustomOpProp):
+    def __init__(self, padding):
+        self.padding = padding
+        super(PadProp, self).__init__(need_top_grad=False)
+    def list_arguments(self):
+        return ['data']
+    def list_outputs(self):
+        return ['output']
+    def infer_shape(self, in_shape):
+        X_shape = in_shape[0]
+        out_shape = in_shape[0]
+        return [X_shape], [out_shape], []
+    def infer_type(self, in_type):
+        X_type = in_type[0]
+        return [X_type], [X_type], []
+    def create_operator(self, ctx, shapes, dtypes):
+        return Pad(self.padding)
 
 
 
