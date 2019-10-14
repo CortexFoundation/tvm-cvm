@@ -9,6 +9,9 @@ import numpy as np
 
 @register_transformer("null")
 class Null(Transformer):
+    def validate(self, op, **kwargs):
+        return op
+
     def rewrite(self, op, **kwargs):
         return op
 
@@ -31,6 +34,9 @@ class Null(Transformer):
 
 @register_transformer("transpose")
 class Transpose(Transformer):
+    def validate(self, op, **kwargs):
+        return op
+
     def rewrite(self, op, **kwargs):
         return op
 
@@ -50,6 +56,9 @@ class Transpose(Transformer):
 
 @register_transformer("relu")
 class Relu(Transformer):
+    def validate(self, op, **kwargs):
+        return op
+
     def rewrite(self, op, **kwargs):
         return op
 
@@ -65,13 +74,17 @@ class Relu(Transformer):
 
 @register_transformer("Convolution")
 class Convolution(Transformer):
-    def rewrite(self, op, **kwargs):
+    def validate(self, op, **kwargs):
         op = self._validate_layout(op)
+        return op
+
+    def rewrite(self, op, **kwargs):
         #TODO: matrix decomposition
         # op = self._fuse_bias(op, kwargs["infer_shapes"])
         return op
 
     def _validate_layout(self, op):
+        name = op.attr('name')
         childs, attr = sym_iter(op.get_children()), op.list_attr()
         X, W = childs[0], childs[1]
         X_name, W_name = X.attr('name'), W.attr('name')
@@ -95,8 +108,8 @@ class Convolution(Transformer):
             op = get_mxnet_op(op_name)(X, W, B, **attr, name=name)
             op = mx.sym.squeeze(op, axis=3)
         else:
-            assert layout == "NCHW", "Operator convolution only supported \
-                    NCHW layout vs. %s" % (layout)
+            assert layout == "NCHW", "Convolution(%s) only supported \
+                    NCHW layout vs. %s" % (name, layout)
         return op
 
     def _fuse_bias(self, op, infer_shapes):
@@ -124,6 +137,9 @@ class Convolution(Transformer):
 
 @register_transformer("FullyConnected")
 class FullyConnected(Transformer):
+    def validate(self, op, **kwargs):
+        return op
+
     def calculate_ops(self, op, **kwargs):
         W = sym_iter(op.get_children())[1]
         infer_shapes = kwargs['infer_shapes']
@@ -136,11 +152,29 @@ class FullyConnected(Transformer):
 
 @register_transformer("softmax")
 class Softmax(Transformer):
+    def validate(self, op, **kwargs):
+        return op
+
     # TODO: need to consider ops calculation.
-    pass
 
 @register_transformer("Pooling")
 class Pooling(Transformer):
+    def validate(self, op, **kwargs):
+        name, attr = op.attr('name'), op.list_attr()
+        pool_type = get_attr(attr, 'pool_type', 'max')
+        assert pool_type in ['max', 'avg'], \
+            "Pooling(%s) only supported type for max and avg." % name
+        count_include_pad = get_attr(attr, 'count_include_pad', True)
+        assert get_attr(attr, 'count_include_pad', True), \
+            "Pooling(%s) only supported count_include_pad for True." % name
+
+        global_pool = get_attr(attr, 'global_pool', False)
+        pooling_convention = get_attr(attr, 'pooling_convention', 'valid')
+        assert pooling_convention == 'valid' or global_pool, \
+            "Pooling(%s) only supported convention for valid." % name
+
+        return op
+
     def calculate_ops(self, op, **kwargs):
         X, attr = sym_iter(op.get_children())[0], op.list_attr()
         pool_type = get_attr(attr, 'pool_type', 'max')
@@ -156,18 +190,37 @@ class Pooling(Transformer):
 
 @register_transformer("broadcast_mul")
 class BroadcastMul(Transformer):
-    pass
+    def validate(self, op, **kwargs):
+        return op
+
 
 @register_transformer("broadcast_add")
 class BroadcastAdd(Transformer):
-    pass
+    def validate(self, op, **kwargs):
+        return op
+
 
 @register_transformer("Concat")
 class Concat(Transformer):
-    pass
+    def validate(self, op, **kwargs):
+        return op
+
 
 @register_transformer("sum")
 class Sum(Transformer):
+    def validate(self, op, **kwargs):
+        X, attr = sym_iter(op.get_children())[0], op.list_attr()
+        xshp = kwargs['infer_shapes'][X.attr('name')][get_entry_id(X)]
+        axis = get_attr(attr, 'axis', [])
+        # convert exclude into False
+        if get_attr(attr, 'exclude', False):
+            attr['axis'] = [i for i, _ in enumerate(xshp) if i not in axis]
+            attr['exclude'] = False
+            if len(attr['axis']) == 0:
+                return X
+        op = mx.sym.sum(X, **attr)
+        return op
+
     #TODO: convert exclude attribute
     def calculate_ops(self, op, **kwargs):
         infer_shapes = kwargs['infer_shapes']
@@ -179,6 +232,9 @@ class Sum(Transformer):
 
 @register_transformer("BatchNorm")
 class BatchNorm(Transformer):
+    def validate(self, op, **kwargs):
+        return op
+
     def rewrite(self, op, **kwargs):
         params, infer_shapes = kwargs["params"], kwargs["infer_shapes"]
         name = op.attr('name')
