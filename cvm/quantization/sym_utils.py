@@ -278,6 +278,24 @@ def topo_visit(symbol, params, inputs_ext, callback,
     else:
         return ret, params
 
+def topo_visit_transformer(symbol, params, callback,
+        get_op=get_mxnet_op, logger=logging, **kwargs):
+    graph = {}
+    params = {k:v[:] for k, v in params.items()}
+    for op in topo_sort(symbol, logger=logger):
+        name, op_name = op.attr('name'), op.attr('op_name')
+        childs, attr = sym_iter(op.get_children()), op.list_attr()
+        if childs is not None:
+            childs = [get_node(c, graph) for c in childs]
+            op = get_op(op_name)(*childs, **attr, name=name)
+
+        graph[name] = callback(op, params=params, graph=graph, **kwargs)
+        if graph[name] is None:
+            graph[name] = op
+    nodes = [get_node(op, graph) for op in symbol]
+    ret = get_op("Group")(nodes) if len(nodes) > 1 else nodes[0]
+    return ret, params
+
 
 """Deterministic Op Description
 The specific op for quantization with Int8 or Int32, more details
