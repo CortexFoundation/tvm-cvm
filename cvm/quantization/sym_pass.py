@@ -741,13 +741,12 @@ def fuse_transpose(symbol, params, logger=logging):
         #     |
         # transpose2
         if op == 'transpose':
-            axes = eval(sym.attr('axes'))
+            axes = get_attr(sym.list_attr(), 'axes')
             if childs[0].attr('op_name') == 'transpose':
-                caxes = eval(childs[0].attr('axes'))
+                caxes = get_attr(childs[0].list_attr(), 'axes')
                 axes = [caxes[ii] for ii in axes]
                 sym = sym_iter(childs[0].get_children())[0]
                 if axes != sorted(axes):
-                    name = sym.attr('name') + "_fusetranspose_" + name
                     sym = mx.sym.transpose(sym, axes=axes, name=name)
 
         #   node                                 node
