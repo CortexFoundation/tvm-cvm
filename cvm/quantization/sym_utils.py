@@ -24,6 +24,13 @@ def is_inputs(sym, params):
         (sym.attr('name') not in params)
 
 DATA_NAME = "data"
+_name_dict = {}
+def gen_name(name):
+    if name not in _name_dict:
+        _name_dict[name] = 0
+    _name_dict[name] += 1
+    return name + '_' + str(_name_dict[name] - 1)
+
 def check_graph(symbol, params, logger=logging):
     # check duplicate name
     graph_str = json.loads(symbol.tojson())

@@ -420,212 +420,7 @@ def _concatV2():
             extras={'axis': int(axis.asnumpy()[0])})([inputs], attr)
     return _impl
 
-def _conv(opname):
-    def _impl(inputs, attrs, params):
-        data_format = attrs['data_format'].decode("utf-8")
-        input_eids = attrs['_input_eids']
-        infer_shapes = attrs['_infer_shapes']
-
-        assert data_format in ["NCHW", "NHWC"]
-
-        data_shp = infer_shapes[inputs[0].attr('name')][input_eids[0]]
-        weight_shp = infer_shapes[inputs[1].attr('name')][input_eids[1]]
-
-        if data_format == "NHWC":
-            inputs[0] = mx.sym.transpose(inputs[0], axes=(0, 3, 1, 2))
-            data_shp = [data_shp[ii] for ii in (0, 3, 1, 2)]
-
-        # Transpose weight format into "OIHW"
-        # TODO(wlt): note if op is depthwise, 
-        #   original weight format is "HWOI" instead of "HWIO".
-        inputs[1] = mx.sym.transpose(inputs[1], axes=(3, 2, 0, 1))
-        weight_shp = [weight_shp[ii] for ii in (3, 2, 0, 1)]
-        # params[weight_name] = nd.transpose(params[weight_name], axes=(3, 2, 0, 1))
-
-        H_idx, W_idx = data_format.find("H"), data_format.find("W")
-        dilations = attrs.get('dilations', (1, 1))
-        if isinstance(dilations, int):
-            dilations = (dilations, dilations)
-        elif len(dilations) == 4:
-            dilations = (dilations[H_idx], dilations[W_idx])
-
-        strides = attrs.get('strides')
-        if isinstance(strides, int):
-            strides = (strides, strides)
-        elif len(strides) == 4:
-            strides = (strides[H_idx], strides[W_idx])
-
-        # if opname == 'depthwise':
-        #    attrs['groups'] = attrs['channels']
-
-        padding = attrs['padding'].decode("utf-8")
-        if padding == 'VALID':
-            padding = (0, 0)
-        elif padding == 'SAME':
-            stride_h, stride_w = strides
-            kernel_h, kernel_w = weight_shp[2:]
-            in_h, in_w = data_shp[2], data_shp[3]
-            dilation_h, dilation_w = dilations
-            dilated_kernel_h = (kernel_h - 1) * dilation_h + 1
-            dilated_kernel_w = (kernel_w - 1) * dilation_w + 1
-            pad_v = _get_pad_pair(in_h, dilated_kernel_h, stride_h)
-            pad_h = _get_pad_pair(in_w, dilated_kernel_w, stride_w)
-            assert pad_v[0] == pad_v[1]
-            assert pad_h[0] == pad_h[1]
-            padding = (pad_v[0], pad_h[0])
-
-        assert data_shp[1] % weight_shp[1] == 0
-        groups = data_shp[1] // weight_shp[1]
-        conv_attr = {
-            'no_bias': (len(inputs) == 2),
-            'dilate': dilations,
-            'kernel': weight_shp[2:],
-            'stride': strides,
-            'pad': padding,
-            'layout': 'NCHW',
-            'num_filter': weight_shp[0],
-            'num_group': groups,
-        }
-        sym = mx.sym.Convolution(*inputs, **conv_attr)
-
-        if data_format == "NHWC":
-            sym = mx.sym.transpose(sym, axes=(0, 2, 3, 1))
-        return sym
-    return _impl
-
 '''
-def _conv(opname):
-    def _impl(inputs, attr, params):
-        attr['data_format'] = attr['data_format'].decode("utf-8")
-        flip_layout = False
-
-        # NCHW Layout require weights transpose
-        if attr['data_format'] == 'NCHW':
-            tmp_shape = attr['_input_shapes'][inputs[1]]
-            tmp_shape = [tmp_shape[ii] for ii in (3, 2, 0, 1)]
-            inputs[1] = _op.transpose(inputs[1], axes=(3, 2, 0, 1))
-            attr['_input_shapes'][inputs[1]] = tmp_shape
-
-        input_shape = attr['_input_shapes'][inputs[0]]
-        weights_shape = attr['_input_shapes'][inputs[1]]
-
-        if attr['_target_layout'] == "NCHW" and attr['data_format'] == "NHWC":
-            input_shape = [input_shape[ii] for ii in (0, 3, 1, 2)]
-            inputs[0] = _op.transpose(inputs[0], axes=(0, 3, 1, 2))
-            if opname == 'conv':
-                weights_shape = [weights_shape[ii] for ii in (3, 2, 0, 1)]
-                inputs[1] = _op.transpose(inputs[1], axes=(3, 2, 0, 1))
-            else:
-                weights_shape = [weights_shape[ii] for ii in (2, 3, 0, 1)]
-                inputs[1] = _op.transpose(inputs[1], axes=(2, 3, 0, 1))
-
-            attr['data_format'] = "NCHW"
-            attr['strides'] = [attr['strides'][ii] for ii in (0, 3, 1, 2)]
-            flip_layout = True
-
-        if attr['data_format'] == 'NHWC':
-            kernel_h, kernel_w, _, depth_mult = weights_shape
-            attr['kernel_shape'] = (weights_shape[0], weights_shape[1])
-            if opname == 'conv':
-                attr['channels'] = weights_shape[3]
-            else:
-                attr['channels'] = input_shape[3] * depth_mult
-
-            if 'dilations' in attr:
-                attr['dilations'] = (attr['dilations'][1], attr['dilations'][2])
-            attr['strides'] = (attr['strides'][1], attr['strides'][2])
-        elif attr['data_format'] == 'NCHW':
-            depth_mult, _, kernel_h, kernel_w = weights_shape
-            attr['kernel_shape'] = (weights_shape[2], weights_shape[3])
-            if opname == 'conv':
-                attr['channels'] = weights_shape[0]
-            else:
-                attr['channels'] = input_shape[0] * depth_mult
-                if attr['channels'] < 0:
-                    attr['channels'] *= -1
-
-            if 'dilations' in attr:
-                attr['dilations'] = (attr['dilations'][2], attr['dilations'][3])
-            attr['strides'] = (attr['strides'][2], attr['strides'][3])
-        else:
-            msg = 'Value {} in attribute "data_format" of operator Conv is ' \
-                  'not valid.'
-            raise tvm.error.OpAttributeInvalid(msg.format(attr['data_format']))
-
-
-        if opname == 'depthwise':
-            attr['groups'] = attr['channels']
-
-        # Fix padding
-        attr['padding'] = attr['padding'].decode("utf-8")
-
-        if attr['padding'] == 'VALID':
-            attr['padding'] = [0, 0]
-        elif attr['padding'] == 'SAME':
-            stride_h, stride_w = attr['strides']
-            kernel_h, kernel_w = attr['kernel_shape']
-            if attr['data_format'] == 'NHWC':
-                in_h = input_shape[1]
-                in_w = input_shape[2]
-            else:
-                in_h = input_shape[2]
-                in_w = input_shape[3]
-
-            dilation_h = attr['dilations'][0]
-            dilation_w = attr['dilations'][1]
-            dilated_kernel_h = (kernel_h - 1) * dilation_h + 1
-            dilated_kernel_w = (kernel_w - 1) * dilation_w + 1
-            pad_v = _get_pad_pair(in_h, dilated_kernel_h, stride_h)
-            pad_h = _get_pad_pair(in_w, dilated_kernel_w, stride_w)
-
-
-            if attr['data_format'] == 'NHWC':
-                inputs[0] = _op.nn.pad(data=inputs[0],
-                                       pad_width=((0, 0),
-                                                  (pad_v[0], pad_v[1]),
-                                                  (pad_h[0], pad_h[1]),
-                                                  (0, 0)))
-            else:
-                inputs[0] = _op.nn.pad(data=inputs[0],
-                                       pad_width=((0, 0),
-                                                  (0, 0),
-                                                  (pad_v[0], pad_v[1]),
-                                                  (pad_h[0], pad_h[1])))
-
-            attr['padding'] = [0, 0]
-
-        else:
-            msg = 'Value {} in attribute "padding" of operator Conv is not ' \
-                  'valid.'
-            raise tvm.error.OpAttributeInvalid(msg.format(attr['padding']))
-
-        if 'kernel_layout' not in attr:
-            if opname == 'conv':
-                attr['kernel_layout'] = 'HWIO' if attr['data_format'] == 'NHWC' else 'OIHW'
-            else:
-                attr['kernel_layout'] = 'HWOI' if attr['data_format'] == 'NHWC' else 'OIHW'
-
-        use_bias = len(inputs) == 3
-        channel_axis = 1 if attr['data_format'] == "NCHW" else 3
-
-        out = AttrCvt(
-            op_name=_dimension_picker('conv'),
-            transforms={
-                'kernel_shape': 'kernel_size',
-                'data_format': 'data_layout',
-                'dilations': ('dilation', (0, 0)),
-                'group': ('groups', 1)},
-            custom_check=_dimension_constraint())([inputs[0], inputs[1]], attr)
-
-        if use_bias:
-            out = _op.nn.bias_add(out, inputs[2], axis=channel_axis)
-
-        if flip_layout:
-            out = _op.transpose(out, axes=(0, 2, 3, 1))
-
-        return out
-    return _impl
-
 def _decode_image():
     def _impl(inputs, attr, params):
         # Image decode wrapper: Expecting user to feed decoded input to next layer drop this layer.
@@ -810,29 +605,12 @@ def _pack():
     return _impl
 
 def _pad(name):
-    '''
     def _impl(inputs, attr, params):
-        padlist_key = inputs[1].name_hint
-        if padlist_key in params:
-            padlist = params.pop(padlist_key).asnumpy()
-        else:
-            raise tvm.error.OpAttributeRequired(
-                'Attribute {} not found in operator Pad.'.format(padlist_key))
-        paddings = tuple([tuple(l) for l in padlist])
-        attr['pad_width'] = paddings
-        attr['pad_value'] = 0
-        new_inputs = [inputs[0]]
-        if name == 'PadV2':
-            constant_values = params.pop(inputs[2].name_hint).asnumpy()
-            attr['pad_value'] = constant_values[0]
-        return AttrCvt(
-            op_name='pad',
-            ignores=['Tpaddings'],)(new_inputs, attr)
-    '''
-    def _impl(inputs, attr, params):
-        paddings = params[inputs[1].attr('name')]
-        # print (padding.asnumpy(), padding.shape)
-        return cvm.Pad(paddings=paddings)(inputs[0])
+        padding = params[inputs[1].attr('name')]
+        sym = mx.sym.Custom(inputs[0],
+                padding=padding.asnumpy().astype(attr['Tpaddings']).tolist(),
+                op_type="cvm_pad")
+        return sym
     return _impl
 
 def _prod():
@@ -872,10 +650,10 @@ def _relu6():
         return np.clip(inputs[0], a_min=0, a_max=6)
     return _impl
 
-def _shape():
-    def _impl(inputs, attr, params):
-        return np.array(attr['_input_shapes'][inputs[0]], dtype='int32')
-    return _impl
+def _shape(inputs, attr, params):
+    name = sutils.gen_name('shape')
+    params[name] = nd.array(attr['_infer_shapes'][inputs[0].attr('name')])
+    return mx.sym.var(name=name, shape=params[name].shape)
 
 def _reshape():
     def _impl(inputs, attr, params):
@@ -1232,73 +1010,80 @@ def _get_pad_pair(input1d, kernel1d, stride1d):
 
     return [pad_before, pad_after]
 
-def _conv2d(inputs, attrs, params):
-    data_format = attrs['data_format'].decode("utf-8")
-    input_eids = attrs['_input_eids']
-    infer_shapes = attrs['_infer_shapes']
+def _conv2d(opname):
+    def _impl(inputs, attrs, params):
+        data_format = attrs['data_format'].decode("utf-8")
+        input_eids = attrs['_input_eids']
+        infer_shapes = attrs['_infer_shapes']
 
-    assert data_format in ["NCHW", "NHWC"]
+        assert data_format in ["NCHW", "NHWC"]
 
-    data_shp = infer_shapes[inputs[0].attr('name')][input_eids[0]]
-    weight_shp = infer_shapes[inputs[1].attr('name')][input_eids[1]]
+        data_shp = infer_shapes[inputs[0].attr('name')][input_eids[0]]
+        weight_shp = infer_shapes[inputs[1].attr('name')][input_eids[1]]
 
-    if data_format == "NHWC":
-        inputs[0] = mx.sym.transpose(inputs[0], axes=(0, 3, 1, 2))
-        data_shp = [data_shp[ii] for ii in (0, 3, 1, 2)]
+        if data_format == "NHWC":
+            inputs[0] = mx.sym.transpose(inputs[0], axes=(0, 3, 1, 2))
+            data_shp = [data_shp[ii] for ii in (0, 3, 1, 2)]
 
-    # Transpose weight format into "OIHW"
-    # TODO(wlt): note if op is depthwise, 
-    #   original weight format is "HWOI" instead of "HWIO".
-    inputs[1] = mx.sym.transpose(inputs[1], axes=(3, 2, 0, 1))
-    weight_shp = [weight_shp[ii] for ii in (3, 2, 0, 1)]
-    # params[weight_name] = nd.transpose(params[weight_name], axes=(3, 2, 0, 1))
+        # Transpose weight format into "OIHW"
+        # TODO(wlt): note if op is depthwise, 
+        #   original weight format is "HWOI" instead of "HWIO".
+        if opname == 'conv':
+            inputs[1] = mx.sym.transpose(inputs[1], axes=(3, 2, 0, 1))
+            weight_shp = [weight_shp[ii] for ii in (3, 2, 0, 1)]
+        else:
+            inputs[1] = mx.sym.transpose(inputs[1], axes=(2, 3, 0, 1))
+            weight_shp = [weight_shp[ii] for ii in (2, 3, 0, 1)] 
+        # params[weight_name] = nd.transpose(params[weight_name], axes=(3, 2, 0, 1))
 
-    H_idx, W_idx = data_format.find("H"), data_format.find("W")
-    dilations = attrs.get('dilations', (1, 1))
-    if isinstance(dilations, int):
-        dilations = (dilations, dilations)
-    elif len(dilations) == 4:
-        dilations = (dilations[H_idx], dilations[W_idx])
+        H_idx, W_idx = data_format.find("H"), data_format.find("W")
+        dilations = attrs.get('dilations', (1, 1))
+        if isinstance(dilations, int):
+            dilations = (dilations, dilations)
+        elif len(dilations) == 4:
+            dilations = (dilations[H_idx], dilations[W_idx])
 
-    strides = attrs.get('strides')
-    if isinstance(strides, int):
-        strides = (strides, strides)
-    elif len(strides) == 4:
-        strides = (strides[H_idx], strides[W_idx])
+        strides = attrs.get('strides')
+        if isinstance(strides, int):
+            strides = (strides, strides)
+        elif len(strides) == 4:
+            strides = (strides[H_idx], strides[W_idx])
 
-    padding = attrs['padding'].decode("utf-8")
-    if padding == 'VALID':
-        padding = (0, 0)
-    elif padding == 'SAME':
-        stride_h, stride_w = strides
-        kernel_h, kernel_w = weight_shp[2:]
-        in_h, in_w = data_shp[2], data_shp[3]
-        dilation_h, dilation_w = dilations
-        dilated_kernel_h = (kernel_h - 1) * dilation_h + 1
-        dilated_kernel_w = (kernel_w - 1) * dilation_w + 1
-        pad_v = _get_pad_pair(in_h, dilated_kernel_h, stride_h)
-        pad_h = _get_pad_pair(in_w, dilated_kernel_w, stride_w)
-        assert pad_v[0] == pad_v[1]
-        assert pad_h[0] == pad_h[1]
-        padding = (pad_v[0], pad_h[0])
+        padding = attrs['padding'].decode("utf-8")
+        if padding == 'VALID':
+            padding = (0, 0)
+        elif padding == 'SAME':
+            stride_h, stride_w = strides
+            kernel_h, kernel_w = weight_shp[2:]
+            in_h, in_w = data_shp[2], data_shp[3]
+            dilation_h, dilation_w = dilations
+            dilated_kernel_h = (kernel_h - 1) * dilation_h + 1
+            dilated_kernel_w = (kernel_w - 1) * dilation_w + 1
+            pad_v = _get_pad_pair(in_h, dilated_kernel_h, stride_h)
+            pad_h = _get_pad_pair(in_w, dilated_kernel_w, stride_w)
+            assert pad_v[0] == pad_v[1]
+            assert pad_h[0] == pad_h[1]
+            padding = (pad_v[0], pad_h[0])
 
-    assert data_shp[1] % weight_shp[1] == 0
-    groups = data_shp[1] // weight_shp[1]
-    conv_attr = {
-        'no_bias': (len(inputs) == 2),
-        'dilate': dilations,
-        'kernel': weight_shp[2:],
-        'stride': strides,
-        'pad': padding,
-        'layout': 'NCHW',
-        'num_filter': weight_shp[0],
-        'num_group': groups,
-    }
-    sym = mx.sym.Convolution(*inputs, **conv_attr)
+        assert data_shp[1] % weight_shp[1] == 0
+        groups = data_shp[1] // weight_shp[1]
+        conv_attr = {
+            'no_bias': (len(inputs) == 2),
+            'dilate': dilations,
+            'kernel': weight_shp[2:],
+            'stride': strides,
+            'pad': padding,
+            'layout': 'NCHW',
+            'num_filter': weight_shp[0],
+            'num_group': groups,
+        }
+        sym = mx.sym.Convolution(*inputs, **conv_attr)
 
-    if data_format == "NHWC":
-        sym = mx.sym.transpose(sym, axes=(0, 2, 3, 1))
-    return sym
+        if data_format == "NHWC":
+            sym = mx.sym.transpose(sym, axes=(0, 2, 3, 1))
+        return sym
+
+    return _impl
 
 def _pool2d(pool_type):
     def _impl(inputs, attrs, params):
@@ -1405,9 +1190,9 @@ _convert_map = {
     'CheckNumerics'                     : _check_numerics(),
     'Concat'                            : _concat(),
     'ConcatV2'                          : _concat_v2,
-    'Conv2D'                            : _conv2d,
+    'Conv2D'                            : _conv2d('conv'),
     #'DecodeJpeg'                        : _decode_image(),
-    'DepthwiseConv2dNative'             : _conv('depthwise'),
+    'DepthwiseConv2dNative'             : _conv2d('depthwise'),
     'DepthToSpace'                      : _depth_to_space(),
     'Equal'                             : _broadcast('equal'),
     'Elu'                               : _elu(),
@@ -1455,7 +1240,7 @@ _convert_map = {
     'Rsqrt'                             : _rsqrt(),
     'Select'                            : _where(),
     'Selu'                              : _selu(),
-    'Shape'                             : _shape(),
+    'Shape'                             : _shape,
     'Sigmoid'                           : AttrCvt('sigmoid'),
     'Sign'                              : AttrCvt('sign'),
     'Slice'                             : _slice(),
@@ -1529,14 +1314,15 @@ def _parse_attr(attrs):
             for f in fields:
                 if getattr(v.list, f):
                     if f == "type":
-                        ret += [dtypes.as_dtype(x) for x in list(getattr(v.list, f))]
+                        ret += [tensor_util.tensor_type_to_numpy(x) \
+                               for x in list(getattr(v.list, f))]
                     else:
                         ret += list(getattr(v.list, f))
         else:
             for f in fields:
                 if v.HasField(f):
                     if f == "type":
-                        ret = dtypes.as_dtype(getattr(v, f))
+                        ret = tensor_util.tensor_type_to_numpy(getattr(v, f))
                     else:
                         ret = getattr(v, f)
         new_attrs[k] = ret
@@ -1713,9 +1499,9 @@ def load_fname(suffix=None, with_ext=False):
 
 modelfile = [
             # "/tmp/tf/resnet50_v1/model.pb",
-            "/data/tfmodels/inception_v3/model.pb",
+            # "/data/tfmodels/inception_v3/model.pb",
             # "/data/tfmodels/keras/inception_v3/model.pb",
-            # "/data/tfmodels/mobilenet/model.pb"
+            "/data/tfmodels/mobilenet/model.pb"
             ]
 
 if __name__ == '__main__':

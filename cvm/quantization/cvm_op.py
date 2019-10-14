@@ -123,20 +123,14 @@ class MRTSimQuant(mx.operator.CustomOp):
         Y = X / self.denominator
         self.assign(out_data[0], req[0], Y)
 
-class Pad(mx.operator.NumpyOp):
-    def __init__(self, paddings, cvm_name='pad'):
+class Pad(mx.operator.CustomOp):
+    def __init__(self, padding):
         super(Pad, self).__init__()
-        self.paddings = paddings
-        self.cvm_name = cvm_name
+        self.padding = padding
 
     def forward(self, is_train, req, in_data, out_data):
         assert is_train == False
-        X = in_data[0]
-        Y = out_data[0]
-        # TODO(ryt): determine whether to implement pad or not
-
-    def backward(self, req, out_grad, in_data, out_data, in_grad, aux):
-        assert False
+        self.assign(out_data[0], req[0], in_data[0])
 
 
 @mx.operator.register("cvm_clip")
@@ -287,9 +281,8 @@ class MRTSimQuantProp(mx.operator.CustomOpProp):
 
 @mx.operator.register("cvm_pad")
 class PadProp(mx.operator.CustomOpProp):
-    def __init__(self, paddings, cvm_name='pad'):
-        self.paddings = paddings
-        self.cvm_name = cvm_name
+    def __init__(self, padding):
+        self.padding = padding
         super(PadProp, self).__init__(need_top_grad=False)
     def list_arguments(self):
         return ['data']
@@ -303,7 +296,7 @@ class PadProp(mx.operator.CustomOpProp):
         X_type = in_type[0]
         return [X_type], [X_type], []
     def create_operator(self, ctx, shapes, dtypes):
-        return Pad(self.paddings, self.cvm_name)
+        return Pad(self.padding)
 
 
 
