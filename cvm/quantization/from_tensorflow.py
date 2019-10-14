@@ -1576,11 +1576,9 @@ currSupportedOps = {
                    }
 
 import tensor_util
-ts = set()
 def convert_tfnode(tfnode, graph, params, infer_shapes, logger=logging):
     name, op_name = tfnode.name, tfnode.op
     attr, org_inputs = tfnode.attr, tfnode.input
-    ts.add(op_name)
 
     if op_name not in currSupportedOps:
         logger.critical("Not supported op '%s'", tfnode.op)
@@ -1715,13 +1713,12 @@ def load_fname(suffix=None, with_ext=False):
 
 modelfile = [
             # "/tmp/tf/resnet50_v1/model.pb",
-            # "/data/tfmodels/inception_v3/model.pb",
+            "/data/tfmodels/inception_v3/model.pb",
             # "/data/tfmodels/keras/inception_v3/model.pb",
-            "/data/tfmodels/mobilenet/model.pb"
+            # "/data/tfmodels/mobilenet/model.pb"
             ]
 
 if __name__ == '__main__':
     utils.log_init()
     model_path = modelfile[0]
     convert_model(model_path)
-    print(ts)
