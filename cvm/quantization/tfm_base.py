@@ -109,6 +109,9 @@ def register_pass(pass_t):
         if tfm.op_name not in _op_manager:
             _op_manager[tfm.op_name] = []
         if pass_t in _op_manager[tfm.op_name]:
+            raise NameError( \
+                    "Transformer %s pass:%s has been registered" \
+                    % (tfm.op_name, pass_t))
             return tfm
         _op_manager[tfm.op_name].append(pass_t)
         if pass_t in _pass_manager:
@@ -132,7 +135,7 @@ def apply_pass(pass_t):
         return getattr(tfm, pass_t)(op, **kwargs)
     return wrapper
 
-# === symbol pass ===
+# === symbol helper ===
 
 def fuse_constant(symbol, params):
     def _impl(op, params, graph):
@@ -143,12 +146,10 @@ def fuse_constant(symbol, params):
         elif childs is None:
             params[name] = get_nd_op(op_name)(**attr)
             op = mx.sym.var(name, shape=params[name].shape)
-        else:
-            flag = all([is_params(c, params) for c in childs])
-            if flag:
-                in_params = [params[c.attr('name')] for c in childs]
-                params[name] = get_nd_op(op_name)(*in_params, **attr)
-                op = mx.sym.var(name, shape=params[name].shape)
+        elif all([is_params(c, params) for c in childs]):
+            in_params = [params[c.attr('name')] for c in childs]
+            params[name] = get_nd_op(op_name)(*in_params, **attr)
+            op = mx.sym.var(name, shape=params[name].shape)
         return op
     return topo_visit_transformer(symbol, params, _impl)
 
@@ -193,6 +194,8 @@ def collect_op_names(symbol, params):
     _ = topo_visit_transformer(symbol, params, _collect_attribute,
             attr_name='op_name', func=op_names.add)
     return op_names
+
+# === symbol pass == 
 
 def calculate_ops(symbol, params, normalize=True):
     ops, infer_shapes = [0], infer_shape(symbol, params)
