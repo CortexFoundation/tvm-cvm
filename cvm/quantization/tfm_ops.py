@@ -7,14 +7,11 @@ import nnvm
 import numpy as np
 
 
+@register_pass("validate")
+@register_pass("rewrite")
+@register_pass("fuse_transpose")
 @register_transformer("null")
 class Null(Transformer):
-    def validate(self, op, **kwargs):
-        return op
-
-    def rewrite(self, op, **kwargs):
-        return op
-
     def quantize(self, op, **kwargs):
         op_name, name = op.attr('op_name'), op.attr('name')
         params, th_dict = kwargs['params'], kwargs['th_dict']
@@ -32,14 +29,11 @@ class Null(Transformer):
         return 0
 
 
+@register_pass("validate")
+@register_pass("rewrite")
+@register_pass("calculate_ops")
 @register_transformer("transpose")
 class Transpose(Transformer):
-    def validate(self, op, **kwargs):
-        return op
-
-    def rewrite(self, op, **kwargs):
-        return op
-
     def fuse_transpose(self, op, **kwargs):
         name, attr = op.attr('name'), op.list_attr()
         axes = get_attr(attr, 'axes')
@@ -54,14 +48,11 @@ class Transpose(Transformer):
         return op
 
 
+@register_pass("validate")
+@register_pass("rewrite")
+@register_pass("calculate_ops")
 @register_transformer("relu")
 class Relu(Transformer):
-    def validate(self, op, **kwargs):
-        return op
-
-    def rewrite(self, op, **kwargs):
-        return op
-
     def fuse_transpose(self, op, **kwargs):
         X = op.get_children()[0]
         if X.attr('op_name') == Transpose.op_name:
@@ -72,15 +63,11 @@ class Relu(Transformer):
         return op
 
 
+@register_pass("fuse_transpose")
 @register_transformer("Convolution")
 class Convolution(Transformer):
     def validate(self, op, **kwargs):
         op = self._validate_layout(op)
-        return op
-
-    def rewrite(self, op, **kwargs):
-        #TODO: matrix decomposition
-        # op = self._fuse_bias(op, kwargs["infer_shapes"])
         return op
 
     def _validate_layout(self, op):
@@ -112,6 +99,11 @@ class Convolution(Transformer):
                     NCHW layout vs. %s" % (name, layout)
         return op
 
+    def rewrite(self, op, **kwargs):
+        #TODO: matrix decomposition
+        # op = self._fuse_bias(op, kwargs["infer_shapes"])
+        return op
+
     def _fuse_bias(self, op, infer_shapes):
         childs, attr = sym_iter(op.get_children()), op.list_attr()
         if get_attr(attr, 'no_bias', False):
@@ -133,13 +125,13 @@ class Convolution(Transformer):
         kwargs['base_ops'] = np.product(W_shape[1:]) * 2
         if not get_attr(op.list_attr(), 'no_bias', False):
             kwargs['base_ops'] += 1
-        return super(Convolution, self).calculate_ops(op, **kwargs)
+        return super().calculate_ops(op, **kwargs)
 
+
+@register_pass("validate")
+@register_pass("fuse_transpose")
 @register_transformer("FullyConnected")
 class FullyConnected(Transformer):
-    def validate(self, op, **kwargs):
-        return op
-
     def calculate_ops(self, op, **kwargs):
         W = sym_iter(op.get_children())[1]
         infer_shapes = kwargs['infer_shapes']
@@ -147,16 +139,22 @@ class FullyConnected(Transformer):
         kwargs['base_ops'] = np.product(W_shape[1:]) * 2
         if not get_attr(op.list_attr(), 'no_bias', False):
             kwargs['base_ops'] += 1
-        return super(FullyConnected, self).calculate_ops(op, **kwargs)
+        return super().calculate_ops(op, **kwargs)
 
 
+@register_pass("validate")
+@register_pass("fuse_transpose")
 @register_transformer("softmax")
 class Softmax(Transformer):
-    def validate(self, op, **kwargs):
-        return op
+    def calculate_ops(self, op, **kwargs):
+        infer_shapes = kwargs['infer_shapes']
+        X = sym_iter(op.get_children())[0]
+        xshp = infer_shapes[X.attr('name')][get_entry_id(X)]
+        axis = get_attr(op.list_attr(), 'axis', -1)
+        kwargs['base_ops'] = 2 + 2 * xshp[axis]
+        return super().calculate_ops(op, **kwargs)
 
-    # TODO: need to consider ops calculation.
-
+@register_pass("fuse_transpose")
 @register_transformer("Pooling")
 class Pooling(Transformer):
     def validate(self, op, **kwargs):
@@ -186,26 +184,33 @@ class Pooling(Transformer):
         kwargs['base_ops'] = K1 * K2
         if pool_type == 'avg':
             kwargs['base_ops'] += 1
-        return super(Pooling, self).calculate_ops(op, **kwargs)
+        return super().calculate_ops(op, **kwargs)
 
+@register_pass("validate")
+@register_pass("fuse_transpose")
+@register_pass("calculate_ops")
 @register_transformer("broadcast_mul")
 class BroadcastMul(Transformer):
-    def validate(self, op, **kwargs):
-        return op
+    pass
 
 
+@register_pass("validate")
+@register_pass("fuse_transpose")
+@register_pass("calculate_ops")
 @register_transformer("broadcast_add")
 class BroadcastAdd(Transformer):
-    def validate(self, op, **kwargs):
-        return op
+    pass
 
 
+@register_pass("validate")
+@register_pass("fuse_transpose")
+@register_pass("calculate_ops")
 @register_transformer("Concat")
 class Concat(Transformer):
-    def validate(self, op, **kwargs):
-        return op
+    pass
 
 
+@register_pass("fuse_transpose")
 @register_transformer("sum")
 class Sum(Transformer):
     def validate(self, op, **kwargs):
@@ -221,20 +226,18 @@ class Sum(Transformer):
         op = mx.sym.sum(X, **attr)
         return op
 
-    #TODO: convert exclude attribute
     def calculate_ops(self, op, **kwargs):
         infer_shapes = kwargs['infer_shapes']
         oshp = infer_shapes[op.attr('name')][get_entry_id(op)]
         X = sym_iter(op.get_children())[0]
         ishp = infer_shapes[X.attr('name')][get_entry_id(X)]
         kwargs['base_ops'] = np.product(oshp) / np.product(ishp)
-        return super(Sum, self).calculate_ops(op, **kwargs)
+        return super().calculate_ops(op, **kwargs)
 
+@register_pass("validate")
+@register_pass("fuse_transpose")
 @register_transformer("BatchNorm")
 class BatchNorm(Transformer):
-    def validate(self, op, **kwargs):
-        return op
-
     def rewrite(self, op, **kwargs):
         params, infer_shapes = kwargs["params"], kwargs["infer_shapes"]
         name = op.attr('name')
@@ -288,7 +291,7 @@ class BatchNorm(Transformer):
 
     def calculate_ops(self, op, **kwargs):
         kwargs['base_ops'] = 4
-        return super(BatchNorm, self).calculate_ops(op, **kwargs)
+        return super().calculate_ops(op, **kwargs)
 
 
 
