@@ -101,26 +101,27 @@ def get_transformer(op):
                 "Operator %s has not been registered" % op_name)
     return _tfm_manager[op_name]
 
-_act_manager = {}
+_op_manager = {}
+_pass_manager = {}
 def register_pass(pass_t):
     def wrapper(tfm):
-        if tfm.op_name not in _act_manager:
-            _act_manager[tfm.op_name] = []
-        if pass_t in _act_manager[tfm.op_name]:
+        if tfm.op_name not in _op_manager:
+            _op_manager[tfm.op_name] = []
+        if pass_t in _op_manager[tfm.op_name]:
             return tfm
-        _act_manager[tfm.op_name].append(pass_t)
-        if pass_t not in _act_manager:
-            _act_manager[pass_t] = []
-        _act_manager[pass_t].append(tfm.op_name)
+        _op_manager[tfm.op_name].append(pass_t)
+        if pass_t not in _pass_manager:
+            _pass_manager[pass_t] = []
+        _pass_manager[pass_t].append(tfm.op_name)
         return tfm
     return wrapper
 
 def pass_info(arg=None):
     if arg is None:
-        return _act_manager
+        return _pass_manager
     if isinstance(arg, mx.sym.Symbol):
-        return _act_manager.get(arg.attr('op_name'), [])
-    return _act_manager.get(arg, [])
+        return _op_manager.get(arg.attr('op_name'), [])
+    return _pass_manager.get(arg, [])
 
 def apply_pass(pass_t):
     def wrapper(op, **kwargs):
