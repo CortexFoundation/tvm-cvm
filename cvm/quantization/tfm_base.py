@@ -84,7 +84,7 @@ def register_transformer(op_name):
     def wrapper(tfm):
         tfm.op_name = op_name
         if op_name in _tfm_manager:
-            raise NameError("Operator %s has been registered" % op_name)
+            raise NameError("Transformer %s has been registered" % op_name)
         _tfm_manager[op_name] = tfm()
 
         rpass = [k for k, v in tfm.__dict__.items() \
@@ -98,11 +98,12 @@ def get_transformer(op):
     op_name = op.attr('op_name')
     if op_name not in _tfm_manager:
         raise NotImplementedError( \
-                "Operator %s has not been registered" % op_name)
+                "Transformer %s has not been registered" % op_name)
     return _tfm_manager[op_name]
 
 _op_manager = {}
-_pass_manager = {}
+_pass_manager = {k:[] for k, v in Transformer.__dict__.items() \
+        if not k.startswith("_") and callable(v)}
 def register_pass(pass_t):
     def wrapper(tfm):
         if tfm.op_name not in _op_manager:
@@ -110,9 +111,8 @@ def register_pass(pass_t):
         if pass_t in _op_manager[tfm.op_name]:
             return tfm
         _op_manager[tfm.op_name].append(pass_t)
-        if pass_t not in _pass_manager:
-            _pass_manager[pass_t] = []
-        _pass_manager[pass_t].append(tfm.op_name)
+        if pass_t in _pass_manager:
+            _pass_manager[pass_t].append(tfm.op_name)
         return tfm
     return wrapper
 
@@ -125,10 +125,11 @@ def pass_info(arg=None):
 
 def apply_pass(pass_t):
     def wrapper(op, **kwargs):
+        tfm = get_transformer(op)
         assert pass_t in pass_info(op), \
-                "Operator %s has not been registered pass:%s" \
+                "Transformer %s has not been registered pass:%s" \
                 % (op.attr('op_name'), pass_t)
-        return getattr(get_transformer(op), pass_t)(op, **kwargs)
+        return getattr(tfm, pass_t)(op, **kwargs)
     return wrapper
 
 # === symbol pass ===
