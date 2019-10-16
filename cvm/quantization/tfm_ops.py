@@ -8,7 +8,6 @@ import numpy as np
 
 
 @register_pass("validate")
-@register_pass("rewrite")
 @register_pass("fuse_transpose")
 @register_transformer("null")
 class Null(Transformer):
@@ -30,7 +29,6 @@ class Null(Transformer):
 
 
 @register_pass("validate")
-@register_pass("rewrite")
 @register_pass("calculate_ops")
 @register_transformer("transpose")
 class Transpose(Transformer):
@@ -49,7 +47,6 @@ class Transpose(Transformer):
 
 
 @register_pass("validate")
-@register_pass("rewrite")
 @register_pass("calculate_ops")
 @register_transformer("relu")
 class Relu(Transformer):
@@ -154,11 +151,14 @@ class Softmax(Transformer):
         kwargs['base_ops'] = 2 + 2 * xshp[axis]
         return super().calculate_ops(op, **kwargs)
 
+
 @register_pass("fuse_transpose")
 @register_transformer("Pooling")
 class Pooling(Transformer):
     def validate(self, op, **kwargs):
         name, attr = op.attr('name'), op.list_attr()
+        layout = get_attr(attr, 'layout', 'NCHW')
+        assert layout == 'NCHW'
         pool_type = get_attr(attr, 'pool_type', 'max')
         assert pool_type in ['max', 'avg'], \
             "Pooling(%s) only supported type for max and avg." % name
@@ -173,6 +173,54 @@ class Pooling(Transformer):
 
         return op
 
+    def rewrite(self, op, **kwargs):
+        params, graph = kwargs['params'], kwargs['graph']
+        infer_shapes = kwargs['infer_shapes']
+        name, attr = op.attr('name'), op.list_attr()
+        childs = sym_iter(op.get_children())
+        pool_type = get_attr(attr, 'pool_type', 'max')
+        is_global = get_attr(attr, 'global_pool', False)
+        if pool_type == 'avg' and is_global:
+            X = childs[0]
+            X_name = X.attr('name')
+            X_shape = infer_shapes[X_name][get_entry_id(X)]
+            scale_name = X_name + '_avg_scale'
+            assert scale_name not in graph
+            graph[scale_name] = scale_sym = mx.sym.var(scale_name, shape=(1,))
+            params[scale_name] = nd.array([1. / (X_shape[2] * X_shape[3])])
+            op = mx.sym.sum(childs[0], axis=(2, 3))
+            op = mx.sym.broadcast_mul(op, scale_sym)
+        elif pool_type == 'avg':
+            X = childs[0]
+            X_shape = infer_shapes[X.attr('name')][get_entry_id(X)]
+            in_channel = X_shape[1]
+            kernel = get_attr(attr, 'kernel')
+            if isinstance(kernel, int):
+                kernel = (kernel, kernel)
+            conv_attr = {
+                'no_bias': 'True',
+                'dilate': '(1, 1)',
+                'kernel': kernel,
+                'stride': attr['stride'],
+                'pad': attr['pad'],
+                'layout': 'NCHW',
+                'num_filter': in_channel,
+                'num_group': in_channel,
+            }
+            conv_name = name.replace('pool', 'pool_conv')
+            W_name = conv_name + '_weight'
+            assert W_name not in graph
+            W_shape = (in_channel, 1, *kernel)
+            graph[W_name] = W = mx.sym.var(W_name, shape=W_shape)
+            print(X_shape, W_shape)
+            params[W_name] = nd.full(shape=W_shape, val=(1/np.product(kernel)))
+            op = mx.sym.Convolution(X, W, **conv_attr, name=conv_name)
+        else:
+            assert pool_type == 'max', "Unsupported Pooling \
+                    %s(%s, pool_type=%s)"%(Pooling.op_name, name, pool_type)
+        return op
+
+
     def calculate_ops(self, op, **kwargs):
         X, attr = sym_iter(op.get_children())[0], op.list_attr()
         pool_type = get_attr(attr, 'pool_type', 'max')
@@ -185,6 +233,7 @@ class Pooling(Transformer):
         if pool_type == 'avg':
             kwargs['base_ops'] += 1
         return super().calculate_ops(op, **kwargs)
+
 
 @register_pass("validate")
 @register_pass("fuse_transpose")
@@ -221,6 +270,7 @@ class Concat(Transformer):
             op = mx.sym.transpose(op, axes=axes, name=name+'_fuse_transpose')
         return op
 
+
 @register_transformer("sum")
 class Sum(Transformer):
     def validate(self, op, **kwargs):
@@ -254,6 +304,7 @@ class Sum(Transformer):
         ishp = infer_shapes[X.attr('name')][get_entry_id(X)]
         kwargs['base_ops'] = np.product(oshp) / np.product(ishp)
         return super().calculate_ops(op, **kwargs)
+
 
 @register_pass("validate")
 @register_pass("fuse_transpose")
@@ -313,7 +364,5 @@ class BatchNorm(Transformer):
     def calculate_ops(self, op, **kwargs):
         kwargs['base_ops'] = 4
         return super().calculate_ops(op, **kwargs)
-
-
 
 
