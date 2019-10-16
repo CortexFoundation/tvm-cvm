@@ -3,38 +3,76 @@ from sym_utils import *
 import numpy as np
 
 class Transformer(object):
+    """ Base transformer object
+
+        All subclass inherited from this should be registered maually
+            using helper function `register_transformer`, and then
+            all class function should be well-considered to override
+            or use helper function `register_pass` to annotate using
+            function defined in base class (that is this object),
+            if there's no point to redefine duplicate function.
+
+        Subclass should only implement function defined in base object,
+            and we advise any helper function to be named with underline
+            prefix.
+
+        Please refer to file `tfm_ops.py` for more examples about
+            operator transformers.
+
+    Attributes:
+    ==========
+    op_name: Transformer is associated with operator which is defined
+            in mxnet, and the variable indicates the type name of mxnet
+            symbol.
+            Attention please, the base transformer should not be instantiated
+            since it's just an abstarct aggregation of graph pass, and it's
+            named `none` by default.
+    """
     op_name = "none"
 
     def __init__(self):
         if self.op_name == "none":
             raise RuntimeError("Base transformer should not be instantiated")
 
-    def _error(self, fname):
-        raise NotImplementedError( \
-                "Operator %s not implemented function:%s" \
-                % (self.op_name, fname))
+    def validate(self, op, **kwargs):
+        """ All operators should be validated before another pass,
+                neither correcting the invalid format nor asserting
+                error to announce unsupported graph.
 
-    def _pass(self, op):
+            Do nothing by default.
+        """
         return op
 
-    def validate(self, op, **kwargs):
-        return self._error("validate")
-
     def rewrite(self, op, **kwargs):
-        return self._error("rewrite")
+        """ Operators may need to rewrite to equivalent graph which is
+                easier to quantize for later procedure.
+
+            Do nothing by default.
+        """
+        return op
 
     def quantize(self, op, **kwargs):
-        return self._error("quantize")
+        """ Main procedure for quantization.
+
+            Do nothing by default.
+        """
+        return op
 
     def compile(self, op, **kwargs):
-        return self._error("compile")
+        """ Compile mxnet symbol into nnvm symbol.
+
+            Throw exception by default.
+        """
+        raise NotImplementedError( \
+                "Operator %s not implemented function:compile" % self.op_name)
 
     def fuse_transpose(self, op, **kwargs):
-        return self._pass(op)
+        return op
 
     def calculate_ops(self, op, **kwargs):
-        """ Calculate the compute times of operator
-            and returns the op's ops.
+        """ Calculate the amount of computations for operator.
+
+            Returns the output size by default.
         """
         base_ops = kwargs.get('base_ops', 1)
         infer_shapes = kwargs['infer_shapes']
@@ -46,8 +84,13 @@ def register_transformer(op_name):
     def wrapper(tfm):
         tfm.op_name = op_name
         if op_name in _tfm_manager:
-            raise NameError("Operator %s has been registered" % op_name)
+            raise NameError("Transformer %s has been registered" % op_name)
         _tfm_manager[op_name] = tfm()
+
+        rpass = [k for k, v in tfm.__dict__.items() \
+                if not k.startswith("_") and callable(v)]
+        for p in rpass:
+            tfm = register_pass(p)(tfm)
         return tfm
     return wrapper
 
@@ -55,10 +98,44 @@ def get_transformer(op):
     op_name = op.attr('op_name')
     if op_name not in _tfm_manager:
         raise NotImplementedError( \
-                "Operator %s has not been registered" % op_name)
+                "Transformer %s has not been registered" % op_name)
     return _tfm_manager[op_name]
 
-# symbol pass
+_op_manager = {}
+_pass_manager = {k:[] for k, v in Transformer.__dict__.items() \
+        if not k.startswith("_") and callable(v)}
+def register_pass(pass_t):
+    def wrapper(tfm):
+        if tfm.op_name not in _op_manager:
+            _op_manager[tfm.op_name] = []
+        if pass_t in _op_manager[tfm.op_name]:
+            raise NameError( \
+                    "Transformer %s pass:%s has been registered" \
+                    % (tfm.op_name, pass_t))
+            return tfm
+        _op_manager[tfm.op_name].append(pass_t)
+        if pass_t in _pass_manager:
+            _pass_manager[pass_t].append(tfm.op_name)
+        return tfm
+    return wrapper
+
+def pass_info(arg=None):
+    if arg is None:
+        return _pass_manager
+    if isinstance(arg, mx.sym.Symbol):
+        return _op_manager.get(arg.attr('op_name'), [])
+    return _pass_manager.get(arg, [])
+
+def apply_pass(pass_t):
+    def wrapper(op, **kwargs):
+        tfm = get_transformer(op)
+        assert pass_t in pass_info(op), \
+                "Transformer %s has not been registered pass:%s" \
+                % (op.attr('op_name'), pass_t)
+        return getattr(tfm, pass_t)(op, **kwargs)
+    return wrapper
+
+# === symbol helper ===
 
 def fuse_constant(symbol, params):
     def _impl(op, params, graph):
@@ -69,12 +146,10 @@ def fuse_constant(symbol, params):
         elif childs is None:
             params[name] = get_nd_op(op_name)(**attr)
             op = mx.sym.var(name, shape=params[name].shape)
-        else:
-            flag = all([is_params(c, params) for c in childs])
-            if flag:
-                in_params = [params[c.attr('name')] for c in childs]
-                params[name] = get_nd_op(op_name)(*in_params, **attr)
-                op = mx.sym.var(name, shape=params[name].shape)
+        elif all([is_params(c, params) for c in childs]):
+            in_params = [params[c.attr('name')] for c in childs]
+            params[name] = get_nd_op(op_name)(*in_params, **attr)
+            op = mx.sym.var(name, shape=params[name].shape)
         return op
     return topo_visit_transformer(symbol, params, _impl)
 
@@ -120,10 +195,12 @@ def collect_op_names(symbol, params):
             attr_name='op_name', func=op_names.add)
     return op_names
 
+# === symbol pass == 
+
 def calculate_ops(symbol, params, normalize=True):
     ops, infer_shapes = [0], infer_shape(symbol, params)
     def _impl(op, **kwargs):
-        ops[0] += get_transformer(op).calculate_ops(op, **kwargs)
+        ops[0] += apply_pass("calculate_ops")(op, **kwargs)
     topo_visit_transformer(symbol, params, _impl,
             infer_shapes=infer_shapes)
 
@@ -138,20 +215,15 @@ def calculate_ops(symbol, params, normalize=True):
     return ops
 
 def fuse_transpose(symbol, params):
-    def _impl(op, **kwargs):
-        return get_transformer(op).fuse_transpose(op, **kwargs)
-    return topo_visit_transformer(symbol, params, _impl)
+    return topo_visit_transformer(symbol, params,
+            apply_pass("fuse_transpose"))
 
 def validate(symbol, params):
     infer_shapes = infer_shape(symbol, params)
-    def _impl(op, **kwargs):
-        return get_transformer(op).validate(op, **kwargs)
-    return topo_visit_transformer(symbol, params, _impl,
-            infer_shapes=infer_shapes)
+    return topo_visit_transformer(symbol, params,
+            apply_pass("validate"), infer_shapes=infer_shapes)
 
 def rewrite(symbol, params):
     infer_shapes = infer_shape(symbol, params)
-    def _impl(op, **kwargs):
-        return get_transformer(op).rewrite(op, **kwargs)
-    return topo_visit_transformer(symbol, params, _impl,
-            infer_shapes=infer_shapes)
+    return topo_visit_transformer(symbol, params,
+            apply_pass("rewrite"), infer_shapes=infer_shapes)

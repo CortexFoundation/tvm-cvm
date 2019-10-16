@@ -15,12 +15,15 @@ if __name__ == "__main__":
     params = mx.nd.load("./data/tf_inceptionv3.params")
     sym, params = init(sym, params)
     print (collect_op_names(sym, params))
+    print ("Registered Graph Pass")
+    for k, v in pass_info().items():
+        print ("%20s" % k, v)
     print (calculate_ops(sym, params))
     sym, params = fuse_constant(sym, params)
     print (calculate_ops(sym, params))
     sym, params = fuse_transpose(sym, params)
     print (calculate_ops(sym, params))
-    sym, params = rewrite(sym, params)
-    print (calculate_ops(sym, params))
+    # sym, params = rewrite(sym, params)
+    # print (calculate_ops(sym, params))
     with open("/tmp/tmp_v2.json", "w") as fout:
         fout.write(sym.tojson())
