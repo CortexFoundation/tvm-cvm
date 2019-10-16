@@ -74,7 +74,8 @@ def _relu6(inputs, attrs, params):
 def _shape(inputs, attr, params):
     name = sutils.gen_name('shape')
     infer_shapes, input_eids = attr['_infer_shapes'], attr['_input_eids']
-    params[name] = nd.array(infer_shapes[inputs[0].attr('name')][input_eids[0]])
+    params[name] = nd.array(
+            infer_shapes[inputs[0].attr('name')][input_eids[0]], dtype='int32')
     return mx.sym.var(name=name, shape=params[name].shape)
 
 def _softmax(inputs, attrs, params):
@@ -258,12 +259,10 @@ def _batch_normalization(inputs, attrs, params):
 def _relu(inputs, attrs, params):
     return mx.sym.relu(*inputs)
 
-
 def _concat_v2(inputs, attrs, params):
     axis_sym = inputs.pop(len(inputs) - 1)
     axis = params.pop(axis_sym.attr('name'))
-    assert axis.shape == (1,)
-    sym = mx.sym.concat(*inputs, dim=int(axis.asscalar()))
+    sym = mx.sym.concat(*inputs, dim=int(axis.reshape((1,)).asscalar()))
     return sym
 
 def _strided_slice(inputs, attrs, params):
@@ -363,20 +362,52 @@ def _strided_slice(inputs, attrs, params):
         else:
             final_output.append(out_shape[gather_index])
 
-    print (out_shape, final_output, not final_output)
-    if tuple(final_output) != out_shape:
+    if tuple(final_output) == out_shape:
         return out
     return mx.sym.reshape(out, shape=final_output)
 
 def _pack(inputs, attrs, params):
-    del attrs['_infer_shapes']
     axis = attrs['axis']
-    reshp = [mx.sym.expand_dims(i, axis=axis) for i in inputs]
-    print (attrs)
-    for i, sym in enumerate(reversed(inputs)):
-        param = params[sym.attr('name')]
-        print (i, sym.attr('name'), param.shape, param.asnumpy().tolist())
-    assert False
+    inputs_reshped = [mx.sym.expand_dims(i, axis=axis) for i in inputs]
+    op = mx.sym.concat(*inputs_reshped, dim=axis)
+    return mx.sym.cast(op, attrs['T'])
+
+def _reshape(inputs, attrs, params):
+    X, shape = inputs
+
+    graph = {}
+    for op in sutils.topo_sort(shape):
+        name, op_name = op.attr('name'), op.attr('op_name')
+        childs, attr = sutils.sym_iter(op.get_children()), op.list_attr()
+        if childs is not None:
+            childs = [graph[c.attr('name')] for c in childs]
+
+        if sutils.is_var(op, params):
+            pass
+        elif childs is None:
+            params[name] = sutils.get_nd_op(op_name)(**attr)
+            op = mx.sym.var(name, shape=params[name].shape)
+        else:
+            childs = [graph[c.attr('name')] for c in childs]
+            assert all([sutils.is_params(c, params) for c in childs])
+            in_params = [params[c.attr('name')] for c in childs]
+            if op_name == "expand_dims" and in_params[0].shape == ():
+                params[name] = nd.array([in_params[0].asnumpy()],
+                        dtype=in_params[0].dtype)
+            elif op_name == "Reshape" and sutils.get_attr(attr, 'shape') == []:
+                assert in_params[0].shape == (1,)
+                params[name] = nd.array(in_params[0].asnumpy()[0],
+                        dtype=in_params[0].dtype)
+            else:
+                params[name] = sutils.get_nd_op(op_name)(*in_params, **attr)
+            op = mx.sym.var(name, shape=params[name].shape)
+        graph[name] = op
+
+    assert sutils.is_params(graph[shape.attr('name')], params)
+    shape = params[shape.attr('name')].asnumpy().tolist()
+    shape[0] = -1 # since dim zero is batch, set -1 for flexiblity.
+    return mx.sym.reshape(X, shape)
+
 
 _convert_map = {
     'Add'                               : _elemwise('add'),
@@ -399,6 +430,7 @@ _convert_map = {
     'RealDiv'                           : _elemwise('divide'),
     'Relu'                              : _relu,
     'Relu6'                             : _relu6,
+    'Reshape'                           : _reshape,
     'Shape'                             : _shape,
     'Softmax'                           : _softmax,
     'Sub'                               : _elemwise('subtract'),
@@ -517,7 +549,7 @@ def convert_tfnode(tfnode, graph, params, infer_shapes, logger=logging):
         for k, v in attr.items():
             if k == 'value':
                 np_array = tensor_util.tensor_to_numpy(v.tensor)
-                params[name] = nd.array(np_array)
+                params[name] = nd.array(np_array, dtype=np_array.dtype)
                 graph[name] = [mx.sym.var(name,
                                           shape=params[name].shape,
                                           dtype=params[name].dtype)]
@@ -622,25 +654,19 @@ def convert_model(pbfile, layout="NHWC", outputs=None):
     if layout == "NHWC":
         symbol, params = spass.convert_input_format(symbol, params)
 
-    sym_file, params_file = load_fname()
+    return symbol, params
+
+def dump(model, symbol, params):
+    prefix = "./data/tf_%s" % (model)
+    sym_file, params_file = utils.extend_fname(prefix)
     with open(sym_file, "w") as f:
         f.write(symbol.tojson())
     nd.save(params_file, params)
     logger.info("Model successfully dumped to '%s'", sym_file)
 
-    return symbol, params
-
-dataset = "inceptionv3"
-version = ""
-
-def load_fname(suffix=None, with_ext=False):
-    suffix = "."+suffix if suffix is not None else ""
-    prefix = "./data/tf_%s%s%s" % (dataset, version, suffix)
-    return utils.extend_fname(prefix, with_ext=with_ext)
-
 modelfile = [
             # "/tmp/tf/resnet50_v1/model.pb",
-            # "/data/tfmodels/inception_v3/model.pb",
+            "/data/tfmodels/inception_v3/model.pb",
             # "/data/tfmodels/keras/inception_v3/model.pb",
             "/data/tfmodels/mobilenet/model.pb"
             ]
@@ -648,4 +674,9 @@ modelfile = [
 if __name__ == '__main__':
     utils.log_init()
     model_path = modelfile[0]
+    sym, params = convert_model(model_path)
+    dump("inceptionv3", sym, params)
+
+    model_path = modelfile[1]
     convert_model(model_path)
+    dump("mobilenet", sym, params)
