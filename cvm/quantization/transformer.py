@@ -1,6 +1,7 @@
 from tfm_base import *
 import tfm_ops
 from sym_utils import *
+import os
 
 def init(symbol, params, input_shape=None):
     sym, params = check_graph(symbol, params)
@@ -25,5 +26,5 @@ if __name__ == "__main__":
     print (calculate_ops(sym, params))
     # sym, params = rewrite(sym, params)
     # print (calculate_ops(sym, params))
-    with open("/tmp/tmp_v2.json", "w") as fout:
+    with open(os.path.expanduser("~/tvm-cvm/data/tmp_v2.json"), "w") as fout:
         fout.write(sym.tojson())

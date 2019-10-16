@@ -104,6 +104,7 @@ def get_transformer(op):
 _op_manager = {}
 _pass_manager = {k:[] for k, v in Transformer.__dict__.items() \
         if not k.startswith("_") and callable(v)}
+print(_pass_manager)
 def register_pass(pass_t):
     def wrapper(tfm):
         if tfm.op_name not in _op_manager:
@@ -126,13 +127,16 @@ def pass_info(arg=None):
         return _op_manager.get(arg.attr('op_name'), [])
     return _pass_manager.get(arg, [])
 
-def apply_pass(pass_t):
+def apply_pass(pass_t, updates=[]):
     def wrapper(op, **kwargs):
         tfm = get_transformer(op)
         assert pass_t in pass_info(op), \
                 "Transformer %s has not been registered pass:%s" \
                 % (op.attr('op_name'), pass_t)
-        return getattr(tfm, pass_t)(op, **kwargs)
+        ret = getattr(tfm, pass_t)(op, **kwargs)
+        for n in updates:
+            kwargs[n][ret.attr('name')] = kwargs[n][op.attr('name')]
+        return ret
     return wrapper
 
 # === symbol helper ===
@@ -215,8 +219,10 @@ def calculate_ops(symbol, params, normalize=True):
     return ops
 
 def fuse_transpose(symbol, params):
+    infer_shapes = infer_shape(symbol, params)
     return topo_visit_transformer(symbol, params,
-            apply_pass("fuse_transpose"))
+            apply_pass("fuse_transpose", updates=["infer_shapes"]),
+            infer_shapes=infer_shapes)
 
 def validate(symbol, params):
     infer_shapes = infer_shape(symbol, params)

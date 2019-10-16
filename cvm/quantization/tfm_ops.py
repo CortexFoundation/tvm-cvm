@@ -203,14 +203,25 @@ class BroadcastAdd(Transformer):
 
 
 @register_pass("validate")
-@register_pass("fuse_transpose")
 @register_pass("calculate_ops")
 @register_transformer("Concat")
 class Concat(Transformer):
+    def fuse_transpose(self, op, **kwargs):
+        name, childs = op.attr('name'), sym_iter(op.get_children())
+        same, axeses = True, set()
+        for X in childs:
+            if X.attr('op_name') != Transpose.op_name:
+                same = False
+                break
+            axeses.add(get_attr(X.list_attr(), 'axes'))
+        if same and len(axeses) == 1:
+            dim, axes = get_attr(op.list_attr(), 'dim'), list(axeses)[0]
+            Xs = [X.get_children()[0] for X in childs]
+            op = mx.sym.concat(*Xs, dim=axes[dim])
+            op = mx.sym.transpose(op, axes=axes, name=name+'_fuse_transpose')
+        return op
     pass
 
-
-@register_pass("fuse_transpose")
 @register_transformer("sum")
 class Sum(Transformer):
     def validate(self, op, **kwargs):
@@ -224,6 +235,17 @@ class Sum(Transformer):
             if len(attr['axis']) == 0:
                 return X
         op = mx.sym.sum(X, **attr)
+        return op
+
+    def fuse_transpose(self, op, **kwargs):
+        name, attr, X = op.attr('name'), op.list_attr(), op.get_children()[0]
+        xshp = kwargs['infer_shapes'][X.attr('name')][get_entry_id(X)]
+        axis = get_attr(attr, 'axis', [i for i in range(len(xshp))])
+        keepdims = get_attr(attr, 'keepdims', False)
+        if X.attr('op_name') == Transpose.op_name and not keepdims:
+            axes, op = get_attr(X.list_attr(), 'axes'), X.get_children()[0]
+            axis = [axes[i] for i in axis]
+            op = mx.sym.sum(op, axis=axis, keepdims=keepdims)
         return op
 
     def calculate_ops(self, op, **kwargs):
