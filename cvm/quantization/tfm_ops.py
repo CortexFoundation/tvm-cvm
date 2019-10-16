@@ -220,7 +220,6 @@ class Concat(Transformer):
             op = mx.sym.concat(*Xs, dim=axes[dim])
             op = mx.sym.transpose(op, axes=axes, name=name+'_fuse_transpose')
         return op
-    pass
 
 @register_transformer("sum")
 class Sum(Transformer):

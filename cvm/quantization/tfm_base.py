@@ -104,7 +104,6 @@ def get_transformer(op):
 _op_manager = {}
 _pass_manager = {k:[] for k, v in Transformer.__dict__.items() \
         if not k.startswith("_") and callable(v)}
-print(_pass_manager)
 def register_pass(pass_t):
     def wrapper(tfm):
         if tfm.op_name not in _op_manager:
