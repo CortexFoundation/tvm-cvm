@@ -213,7 +213,7 @@ if __name__ == '__main__':
     # net = tf.keras.applications.InceptionV3(weights='imagenet')
 
     # net = keras.applications.InceptionV3(weights='imagenet')
-    # net = tf.keras.applications.MobileNet(weights='imagenet')
+    net = tf.keras.applications.MobileNet(weights='imagenet')
     # dump_model(net, "/data/tfmodels/resnet50_v1_new")
     # load_imagenet()
 
