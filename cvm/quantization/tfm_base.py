@@ -1,4 +1,5 @@
 from sym_utils import *
+import mrt as _mrt
 
 import numpy as np
 
@@ -192,11 +193,28 @@ def _collect_attribute(op, **kwargs):
     attr_name, func = kwargs['attr_name'], kwargs['func']
     func(op.attr(attr_name))
     return op
+
 def collect_op_names(symbol, params):
     op_names = set()
     _ = topo_visit_transformer(symbol, params, _collect_attribute,
             attr_name='op_name', func=op_names.add)
     return op_names
+
+def requant_operator(X, def_prec, oscale=None, **kwargs):
+    th_dict, precs = kwargs['th_dict'], kwargs['precs']
+    scales, name = kwargs['scales'], kwargs['name']
+    Xopn, xn = X.attr('op_name'), X.attr('name')
+    X_name = _mrt._uniq_name(xn)
+    oprec = precs[xn].get(name, _mrt.PREC(def_prec))
+    exactly = True if oscale else False
+    oscale = oscale if oscale else _mrt.scale(th_dict[xn], oprec.p)
+    iscale = scales[xn]
+    iprec = precs[xn][_mrt.out_key]
+
+
+    print("tested here")
+    exit()
+    pass
 
 # === symbol pass == 
 
@@ -232,3 +250,14 @@ def rewrite(symbol, params):
     infer_shapes = infer_shape(symbol, params)
     return topo_visit_transformer(symbol, params,
             apply_pass("rewrite"), infer_shapes=infer_shapes)
+
+def quantize(symbol, params, inputs_ext, calib_ctx, data):
+    infer_shapes = infer_shape(symbol, params)
+    mrt = _mrt.MRT(symbol, params, inputs_ext)      # initialize
+    mrt.set_data('data', data)                      # set input data
+    mrt.calibrate(ctx=calib_ctx)                    # calibration
+    mrt.set_output_prec(8)                          # set output prec
+    return topo_visit_transformer(symbol, params,
+            apply_pass("quantize"), infer_shapes=infer_shapes,
+            th_dict=mrt.th_dict, precs=mrt.precs, scales=mrt.scales,
+            op_input_precs=mrt._op_input_precs)

@@ -1,5 +1,6 @@
 from tfm_base import *
 from sym_utils import *
+from mrt import *
 
 import mxnet as mx
 import nnvm
@@ -8,6 +9,7 @@ import numpy as np
 
 
 @register_pass("validate")
+@register_pass("rewrite")
 @register_pass("fuse_transpose")
 @register_transformer("null")
 class Null(Transformer):
@@ -16,7 +18,7 @@ class Null(Transformer):
         params, th_dict = kwargs['params'], kwargs['th_dict']
         if is_inputs(op, params):
             precs, scales = kwargs['precs'], kwargs['scales']
-            scales[name] = scale(th_dict[name], precs[name])
+            scales[name] = scale(th_dict[name], precs[name][out_key].p)
             attr = { 'precision': str(precs[name]) }
             return mx.sym.var(name, attr=attr)
         return op
@@ -29,6 +31,7 @@ class Null(Transformer):
 
 
 @register_pass("validate")
+@register_pass("rewrite")
 @register_pass("calculate_ops")
 @register_transformer("transpose")
 class Transpose(Transformer):
@@ -47,6 +50,7 @@ class Transpose(Transformer):
 
 
 @register_pass("validate")
+@register_pass("rewrite")
 @register_pass("calculate_ops")
 @register_transformer("relu")
 class Relu(Transformer):
@@ -101,6 +105,16 @@ class Convolution(Transformer):
         # op = self._fuse_bias(op, kwargs["infer_shapes"])
         return op
 
+    def quantize(self, op, **kwargs):
+        th_dict, precs = kwargs['th_dict'], kwargs['precs']
+        scales, name = kwargs['scales'], op.attr('name')
+        childs = sym_iter(op.get_children())
+        iprec = kwargs['op_input_precs'][Convolution.op_name]
+        X, xprec, xs = requant_operator(childs[0], iprec,
+                th_dict=th_dict, precs=precs, scales=scales,
+                name=name)
+        return op
+
     def _fuse_bias(self, op, infer_shapes):
         childs, attr = sym_iter(op.get_children()), op.list_attr()
         if get_attr(attr, 'no_bias', False):
@@ -129,6 +143,25 @@ class Convolution(Transformer):
 @register_pass("fuse_transpose")
 @register_transformer("FullyConnected")
 class FullyConnected(Transformer):
+    def rewrite(self, op, **kwargs):
+        #TODO: matrix decomposition
+        # op = self._fuse_bias(op, kwargs["infer_shapes"])
+        return op
+
+    def _fuse_bias(self, op, infer_shapes):
+        childs, attr = sym_iter(op.get_children()), op.list_attr()
+        if get_attr(attr, 'no_bias', False):
+            return op
+
+        attr['no_bias'] = True
+        X, W, B = childs
+        oshp = infer_shapes[op.attr('name')][0]
+        op = mx.sym.Convolution(X, W, **attr, name=op.attr('name'))
+        B = mx.sym.reshape(B, (1, oshp[1], 1, 1))
+        print (B.infer_shape())
+        op = mx.sym.broadcast_add(op, B)
+        return op
+
     def calculate_ops(self, op, **kwargs):
         W = sym_iter(op.get_children())[1]
         infer_shapes = kwargs['infer_shapes']
@@ -140,6 +173,7 @@ class FullyConnected(Transformer):
 
 
 @register_pass("validate")
+@register_pass("rewrite")
 @register_pass("fuse_transpose")
 @register_transformer("softmax")
 class Softmax(Transformer):
@@ -212,7 +246,6 @@ class Pooling(Transformer):
             assert W_name not in graph
             W_shape = (in_channel, 1, *kernel)
             graph[W_name] = W = mx.sym.var(W_name, shape=W_shape)
-            print(X_shape, W_shape)
             params[W_name] = nd.full(shape=W_shape, val=(1/np.product(kernel)))
             op = mx.sym.Convolution(X, W, **conv_attr, name=conv_name)
         else:
@@ -236,6 +269,7 @@ class Pooling(Transformer):
 
 
 @register_pass("validate")
+@register_pass("rewrite")
 @register_pass("fuse_transpose")
 @register_pass("calculate_ops")
 @register_transformer("broadcast_mul")
@@ -244,6 +278,7 @@ class BroadcastMul(Transformer):
 
 
 @register_pass("validate")
+@register_pass("rewrite")
 @register_pass("fuse_transpose")
 @register_pass("calculate_ops")
 @register_transformer("broadcast_add")
@@ -252,6 +287,7 @@ class BroadcastAdd(Transformer):
 
 
 @register_pass("validate")
+@register_pass("rewrite")
 @register_pass("calculate_ops")
 @register_transformer("Concat")
 class Concat(Transformer):
@@ -271,6 +307,7 @@ class Concat(Transformer):
         return op
 
 
+@register_pass("rewrite")
 @register_transformer("sum")
 class Sum(Transformer):
     def validate(self, op, **kwargs):
