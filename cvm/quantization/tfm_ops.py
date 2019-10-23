@@ -237,9 +237,6 @@ class Pooling(Transformer):
             graph[W_name] = W = mx.sym.var(W_name, shape=W_shape)
             params[W_name] = nd.full(shape=W_shape, val=(1/np.product(kernel)))
             op = mx.sym.Convolution(X, W, **conv_attr, name=conv_name)
-        else:
-            assert pool_type == 'max', "Unsupported Pooling \
-                    %s(%s, pool_type=%s)"%(Pooling.op_name, name, pool_type)
         return op
 
 
