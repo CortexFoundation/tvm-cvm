@@ -242,6 +242,13 @@ def _matrix_decomposition(sym, params, graph, inputs_ext, infer_shapes):
                     with params dict(%s)",
                     cshape, params[cname].shape)
 
+        # X * W + B
+        # (N, C) * (C, M) -> (N, M)
+        # C multiply and (C - 1) add
+        # (N, 0...K) (N, K...2K) ... (N, pK...C) K = 65526
+        # (0...K, M) (K...2K, M) ... (pK...C, M)
+        # (N, iK...(i+1)K) * (iK...(i+1)K, M) -> (p, N, M)
+        # add
         batch, matrix_len = childs_shape[1]
         if matrix_len > MATRIX_MAXIMUM_SIZE:
             weight_name_prefix = childs[1].attr('name')
@@ -271,6 +278,9 @@ def _matrix_decomposition(sym, params, graph, inputs_ext, infer_shapes):
                         begin=(0, start), end=(batch, stop))
                 start, idx = stop, idx+1
 
+            # N1, N2, ..., Np
+            #  N1.2, N3.4, ..., N(p-1)p
+            #   -> reduce
             while len(nodes) > 1:
                 a, b = nodes.pop(0), nodes.pop(0)
                 tmp = a + b

@@ -133,22 +133,15 @@ class Convolution(Transformer):
 @register_transformer("FullyConnected")
 class FullyConnected(Transformer):
     def rewrite(self, op, **kwargs):
-        #TODO: matrix decomposition
-        # op = self._fuse_bias(op, kwargs["infer_shapes"])
-        return op
-
-    def _fuse_bias(self, op, infer_shapes):
-        childs, attr = sym_iter(op.get_children()), op.list_attr()
-        if get_attr(attr, 'no_bias', False):
-            return op
-
-        attr['no_bias'] = True
-        X, W, B = childs
-        oshp = infer_shapes[op.attr('name')][0]
-        op = mx.sym.Convolution(X, W, **attr, name=op.attr('name'))
-        B = mx.sym.reshape(B, (1, oshp[1], 1, 1))
-        print (B.infer_shape())
-        op = mx.sym.broadcast_add(op, B)
+        infer_shapes, params = kwargs['infer_shapes'], kwargs['params']
+        name, attr = op.attr('name'), op.list_attr()
+        childs = sym_iter(op.get_children())
+        X, W = childs[:2]
+        B = childs[2] if attr['no_bias']=='False' else None
+        if X.attr('op_name') != 'Flatten':
+            X = mx.sym.flatten(X, name=N.n("flatten"))
+            infer_shapes[X.attr('name')] = infer_shapes[X.attr('name')]
+        print(infer_shapes[X.attr('name')], infer_shapes[W.attr('name')])
         return op
 
     def calculate_ops(self, op, **kwargs):

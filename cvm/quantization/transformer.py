@@ -3,7 +3,7 @@ import tfm_ops
 from sym_utils import *
 
 def init(symbol, params, input_shape=None):
-    sym, params = check_graph(symbol, params)
+    sym, params = graph_validate(symbol, params)
     if input_shape is not None:
         sym, params = attach_input_shape(sym, params, input_shape)
     infer_shape(sym, params) # check infer_shape is correct.

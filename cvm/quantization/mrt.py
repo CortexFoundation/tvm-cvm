@@ -553,14 +553,12 @@ class MRT():
         order, deps = topo_sort(self.sym, logger=self._lgr, with_deps=True)
         old_ths = self.th_dict if self.th_dict else {}
         self.th_dict, out_cache = {}, {}
-        ts = set()
         for sym in order:
             name, op_name = sym.attr('name'), sym.attr('op_name')
             attr, childs = sym.list_attr(), sym_iter(sym.get_children())
             if op_name == 'null':
                 out = self._datas[name] if name in self.ins_ext \
                       else self.prm[name]
-                ts.add(len(sym))
             elif childs is None:
                 out = get_nd_op(op_name)(**attr)
             else:
@@ -586,7 +584,6 @@ class MRT():
                         name, [o.shape for o in out], self.th_dict[name])
 
         out_cache.clear()
-        print(ts)
         return self.th_dict
 
     def _get_ext(self):
