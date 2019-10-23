@@ -13,90 +13,134 @@ import sym_utils as sutils
 import sim_quant_helper as sim
 import mrt as _mrt
 
-utils.log_init()
-logger = logging.getLogger("log.main")
+NoneCfg = object()
+class Config(object):
+    def __init__(self, name="", parent=None):
+        self.name = name
+        self.cfg = {}
+        self.parent = parent
 
-Usage = r"""
-Usage: python main.py json.cfg
+    def __getitem__(self, key):
+        return self.cfg[key]
 
-json.cfg    configuration for MRT quantization
-    symbol: the symbol file path.
-    params: the params file path.
+    def default(self, key, default):
+        self.cfg[key] = default
+        return self
 
-    cvm_symbol:     quantized model name dumped.
-    cvm_params:     quantized model name dumped.
-    cvm_ext:        quantized model scale name dumped.
+    def set_default(self, key, opt):
+        assert type(self.cfg[key]) == type(opt), \
+                "%s [%s] is invalid format, Expected %s vs. %s" \
+                % (self, key, type(self.cfg[key]).__name__, type(opt).__name__)
+        self.cfg[key] = opt
 
-    input_shape:    axis stands for batch_size set -1, such as (-1, 3, 224, 224).
-    dataset:        model train and test dataset.
-    quantization:   MRT quantization flags.
-        batch_size  batch size loaded from dataset.
-        pure_int8   whether use int8 for internal input and output.
-        device      device information for MRT contexts, available options is
-                    "cpu" or "gpu", and the second number stands for device id.
-                    eg: ["cpu"], ["gpu", 0].
-        calibrate_num       calibration iterator number.
-        output_precision    set model output precision, by default is non set(-1).
+    def declare(self, key, dtype):
+        assert isinstance(dtype, type)
+        self.cfg[key] = dtype
+        return self
 
-        fixed       set fixed symbol without scale.
-        thresholds  set symbol output range manually instead of calibrate.
+    def set_declare(self, key, opt):
+        assert isinstance(opt, self.cfg[key]), \
+                "%s [%s] is invalid format, Expected %s vs. %s" \
+                % (self, key, self.cfg[key].__name__, type(opt).__name__)
+        self.cfg[key] = opt
 
-        split_names     split model into two part for yolo.
-        name_maps       model output name maps to split_names for scales.
-        valid_thresh    the operator box_nms scale corresponding with split_names.
-    cvm:            transform to cvm supported model flags
-        batch_size      batch size compiled to cvm model,
-                        by default same as quantization batch size.
-        save_ext        whether save quantized information 
-"""
+    def config(self, key):
+        self.cfg[key] = Config(key, self)
+        return self.cfg[key]
 
-def CHECK(cond, err="", lgr=logger):
-    if not cond:
-        lgr.info(Usage)
-        lgr.error(err)
-        exit()
+    def set_config(self, key, cfg):
+        self.cfg[key].parse(cfg)
+
+    def __str__(self):
+        if self.parent:
+            return str(self.parent) + " > " + self.name
+        return self.name
+
+    def parse(self, cfg):
+        for k, v in self.cfg.items():
+            if isinstance(v, type):
+                assert k in cfg, "%s [%s] is not set" % (self, k)
+                self.set_declare(k, cfg[k])
+            elif isinstance(v, Config):
+                assert k in cfg, "%s [%s] is not set" % (self, k)
+                self.set_config(k, cfg[k])
+            elif k in cfg:
+                self.set_default(k, cfg[k])
+
+        for k in cfg:
+            assert k in self.cfg, "%s [%s] is not supported" % (self, k)
+
+config = (Config()
+    .declare("symbol", str)
+    .declare("params", str)
+    .declare("input_shape", tuple)
+    .declare("dataset", str)
+)
+
+(config.config("quantization")
+    .declare("batch_size", int)
+    .default("pure_int8", False)
+    .default("calibrate_num", 1)
+    .default("device", "cpu:0")
+    .declare("output_precision", int)
+
+    .default("fixed", [])
+    .default("thresholds", {})
+
+    .default("split_names", [])
+    .default("name_maps", {})
+    .default("attr_scales", {})
+
+    .default("log", False)
+)
+
+(config.config("cvm")
+    .default("batch_size", -1)
+    .default("save_ext", False)
+
+    .default("dir", "./")
+)
+
+(config.config("accuracy")
+    .default("iter_num", 0)
+)
 
 if __name__ == "__main__":
-    CHECK(len(sys.argv) == 2, "args number must be 2")
-    cfgPath = sys.argv[1]
-    CHECK(path.exists(cfgPath) and path.isfile(cfgPath), "file path error")
+    utils.log_init()
+    logger = logging.getLogger("log.main")
 
+    assert len(sys.argv) == 2
+    cfgPath = sys.argv[1]
     baseDir = path.abspath(path.dirname(cfgPath))
     logger.info("Load config file: %s", cfgPath)
     with open(cfgPath, "r") as fin:
-        cfg = eval(fin.read())
+        lines = [l.strip() for l in fin.readlines()]
+        lines = [l for l in lines if not l.startswith("#")]
+        lines = [l for l in lines if not l == ""]
+        cfg = eval(" ".join(lines))
 
-    CHECK("symbol" in cfg and "params" in cfg, "config error: model path")
-    CHECK("input_shape" in cfg, "config error: input_shape")
-    CHECK("quantization" in cfg, "config error: quantization")
-    CHECK("dataset" in cfg, "config error: dataset")
-    CHECK("cvm" in cfg, "config error: cvm")
-    cvm_sym = cfg.get("cvm_symbol", baseDir + "/symbol")
-    cvm_prm = cfg.get("cvm_params", baseDir + "/params")
-    cvm_ext = cfg.get("cvm_ext", baseDir + "/cvm.ext")
-
-    sym_file, prm_file = cfg["symbol"], cfg["params"]
+    config.parse(cfg)
+    sym_file, prm_file = config["symbol"], config["params"]
     if not path.isabs(sym_file):
         sym_file = path.abspath(path.join(baseDir, sym_file))
     if not path.isabs(prm_file):
         prm_file = path.abspath(path.join(baseDir, prm_file))
 
-    quant_flag = cfg["quantization"]
-    batch_size = int(quant_flag.get("batch_size", 1))
-    pure_int8 = bool(quant_flag.get("pure_int8", False))
-    calibrate_num = int(quant_flag.get("calibrate_num", 1))
-    CHECK(batch_size > 0, "config error: batch_size")
+    qconf = config["quantization"]
+    batch_size = qconf["batch_size"]
+    pure_int8 = qconf["pure_int8"]
+    calibrate_num = qconf["calibrate_num"]
 
-    device = quant_flag.get("device", ["cpu"])
-    ctx = mx.gpu(device[1]) if device[0] == "gpu" else mx.cpu()
+    device = qconf["device"].split(":")
+    ctx = mx.gpu(int(device[1])) if device[0] == "gpu" else mx.cpu()
 
-    input_shape = cfg["input_shape"]
+    input_shape = config["input_shape"]
     shp = tuple(batch_size if s == -1 else s for s in input_shape)
     inputs_ext = { "data": {
         "shape": shp,
     } }
 
-    dataset = cfg["dataset"]
+    dataset = config["dataset"]
     if dataset == "imagenet":
         data_iter = ds.load_imagenet_rec(batch_size, shp[2])
         def data_iter_func():
@@ -104,10 +148,9 @@ if __name__ == "__main__":
             return data.data[0], data.label[0]
     elif dataset == "voc":
         val_data = ds.load_voc(batch_size, shp[2])
-        val_data_iter = iter(val_data)
+        data_iter = iter(val_data)
         def data_iter_func():
-            data, label = next(val_data_iter)
-            return data, label
+            return next(data_iter)
     elif dataset == "trec":
         data_iter = ds.load_trec(batch_size)
         def data_iter_func():
@@ -123,32 +166,30 @@ if __name__ == "__main__":
         def data_iter_func():
             return next(data_iter)
     else:
-         CHECK(False, "config error: dataset")
+        assert False, "dataset:%s is not supported" % (dataset)
 
     inputs = [mx.sym.var("data")]
     sym, params = mx.sym.load(sym_file), nd.load(prm_file)
     sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
 
-    debug = quant_flag.get("debug", False)
+    debug = qconf["log"]
     if debug:
-        with open(baseDir + "/mxnet.prepare.json", "w") as fout:
+        with open(baseDir + "/mrt.prepare.json", "w") as fout:
             fout.write(sym.tojson())
 
-    keys = quant_flag.get("split_names", [])
+    keys = qconf["split_names"]
     if len(keys) > 0:
         sym, params, inputs_ext, sym2, prm2, ins_ext2 \
             = _mrt.split_model(sym, params, inputs_ext, keys)
-
-        CHECK("name_maps" in quant_flag, "config error: name_maps")
-        name_maps = quant_flag.get("name_maps")
+        name_maps = qconf["name_maps"]
 
     if debug:
         with open(baseDir + "/mxnet.split.json", "w") as fout:
             fout.write(sym.tojson())
 
-    thresholds = quant_flag.get("thresholds", {})
-    fixed = quant_flag.get("fixed", [])
-    oprec = quant_flag.get("output_precision", -1)
+    thresholds = qconf["thresholds"]
+    fixed = qconf["fixed"]
+    oprec = qconf["output_precision"]
 
     mrt = _mrt.MRT(sym, params, inputs_ext)     # initialize
     for i in range(calibrate_num):
@@ -168,16 +209,16 @@ if __name__ == "__main__":
     oscales = mrt.get_output_scales()
 
     if debug:
-        sim.save_ext(baseDir + "/mxnet.quantize.ext", inputs_ext, oscales)
-        with open(baseDir + "/mxnet.quantize.json", "w") as fout:
+        sim.save_ext(baseDir + "/mrt.quantize.ext", inputs_ext, oscales)
+        with open(baseDir + "/mrt.quantize.json", "w") as fout:
             fout.write(qsym.tojson())
-        nd.save(baseDir + "/mxnet.quantize.params", qparams)
+        nd.save(baseDir + "/mrt.quantize.params", qparams)
 
     if len(keys) > 0:
         oscales_dict = dict(zip([c.attr('name') for c in sym], oscales))
         oscales = [oscales_dict[name_maps[c.attr('name')]] for c in sym2]
 
-        attr_scales = quant_flag.get("attr_scales", {})
+        attr_scales = qconf["attr_scales"]
         def op_scales(node, params, graph):
             name, op_name = node.attr('name'), node.attr('op_name')
             childs, attr = sutils.sym_iter(node.get_children()), node.list_attr()
@@ -204,9 +245,11 @@ if __name__ == "__main__":
     inputs_ext["data"]["shape"] = shp
     nnvm_sym, nnvm_params = spass.mxnet_to_nnvm(qsym, qparams, inputs_ext)
 
-    spass.cvm_build(nnvm_sym, nnvm_params, inputs_ext, cvm_sym, cvm_prm)
+    cvm_dir = config["cvm"]["dir"]
+    spass.cvm_build(nnvm_sym, nnvm_params, inputs_ext,
+            path.join(cvm_dir, "cvm.symbol"),
+            path.join(cvm_dir, "cvm.params"))
 
-    if cvm_flag.get("save_ext", False):
-        sim.save_ext(cvm_ext, inputs_ext, oscales)
-
+    if config["cvm"]["save_ext"]:
+        sim.save_ext(path.join(cvm_dir, "cvm.ext"), inputs_ext, oscales)
 
