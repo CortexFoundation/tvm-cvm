@@ -63,6 +63,33 @@ class Relu(Transformer):
         return op
 
 
+@register_transformer("Activation")
+class Activation(Transformer):
+    def validate(self, op, **kwargs):
+        attr = op.list_attr()
+        assert attr['act_type'] in [Relu.op_name], \
+            "Only supported relu activation"
+        return op
+
+    def fuse_transpose(self, op, **kwargs):
+        attr = op.list_attr()
+        if attr['act_type'] == Relu.op_name:
+            op = Relu().fuse_transpose(op, **kwargs)
+        return op
+
+    def rewrite(self, op, **kwargs):
+        attr = op.list_attr()
+        if attr['act_type'] == Relu.op_name:
+            op = Relu().rewrite(op, **kwargs)
+        return op
+
+    def calculate_ops(self, op, **kwargs):
+        attr = op.list_attr()
+        if attr['act_type'] == Relu.op_name:
+            op = Relu().calculate_ops(op, **kwargs)
+        return op
+
+
 @register_pass("fuse_transpose")
 @register_transformer("Convolution")
 class Convolution(Transformer):
@@ -134,14 +161,54 @@ class Convolution(Transformer):
 class FullyConnected(Transformer):
     def rewrite(self, op, **kwargs):
         infer_shapes, params = kwargs['infer_shapes'], kwargs['params']
+        op = self._matrix_decomposition(op, params, infer_shapes)
+        return op
+
+    def _matrix_decomposition(self, op, params, infer_shapes):
         name, attr = op.attr('name'), op.list_attr()
         childs = sym_iter(op.get_children())
         X, W = childs[:2]
-        B = childs[2] if attr['no_bias']=='False' else None
-        if X.attr('op_name') != 'Flatten':
-            X = mx.sym.flatten(X, name=N.n("flatten"))
-            infer_shapes[X.attr('name')] = infer_shapes[X.attr('name')]
-        print(infer_shapes[X.attr('name')], infer_shapes[W.attr('name')])
+
+        MATRIX_MAXIMUM_SIZE = 65536
+        C = infer_shapes[W.attr('name')][get_entry_id(W)][1]
+        if C <= MATRIX_MAXIMUM_SIZE:
+            return op
+
+        print("test")
+
+        if X.attr('op_name') != Flatten.op_name:
+            X = mx.sym.flatten(X, name=N.n('flatten'))
+
+        no_bias = get_attr(attr, 'no_bias', False)
+        attr['no_bias'] = True
+
+        # matrix decomposition
+        # Y = B + X*W^T = B + X1*W1^T + X2*W2^T + ...
+        # Wi.shape = (num_hidden, step), W = [W1, W2, ...]
+        # Xi.shape = (batch_size, step), X = [X1, X2, ...]
+        nodes, step, start = [], MATRIX_MAXIMUM_SIZE, 0
+        wgt = params[W.attr('name')]
+        while start < C:
+            stop = min(start+step, C)
+            Xk = mx.sym.slice_axis(X, axis=1,
+                    begin=start, end=stop, name=N.n("slice_axis"))
+            Wk_name = N.n('slice_axis')
+            params[Wk_name] = wgt.slice_axis(axis=1, begin=start, end=stop)
+            Wk = mx.sym.var(Wk_name, shape=params[Wk_name].shape)
+            tmp = mx.sym.FullyConnected(Xk, Wk, name=N.n("dense"), **attr)
+            nodes.append(tmp)
+            start += step
+
+        while len(nodes) > 1:
+            a, b = nodes.pop(0), nodes.pop(0)
+            tmp = mx.sym.elemwise_add(a, b, name=N.n("elemwise_add"))
+            nodes.append(tmp)
+
+        op = nodes[0]
+        if not no_bias:
+            op = mx.sym.broadcast_add(op, childs[2],
+                    name=N.n('broadcast_add'))
+
         return op
 
     def calculate_ops(self, op, **kwargs):
@@ -349,13 +416,13 @@ class BatchNorm(Transformer):
             assert axis == 1, "Channel in input must be axis 1"
             cchilds, cattr = sym_iter(X.get_children()), X.list_attr()
 
-            conv_name = name + "_conv"
-            W_name = conv_name + '_weight'
+            conv_name = N.n('convolution')
+            W_name = N.n('weight')
             weight = params[cchilds[1].attr('name')]
             params[W_name] = weight * scale.reshape(*scale.shape, 1, 1, 1)
             W = mx.sym.var(W_name, shape=params[W_name].shape)
 
-            B_name = conv_name + '_bias'
+            B_name = N.n('bias')
             if not get_attr(cattr, 'no_bias', False):
                bias += params[cchilds[2].attr('name')]
             params[B_name] = bias
@@ -366,19 +433,28 @@ class BatchNorm(Transformer):
                    B, **cattr, name=conv_name)
         else:
             ishp = infer_shapes[X_name][get_entry_id(X)]
-            reshp = [s if i==axis else i for i,s in enumerate(ishp)]
-            w_name = name + "_weight"
+            reshp = [s if i==axis else 1 for i,s in enumerate(ishp)]
+            w_name = N.n('weight')
             params[w_name] = scale.reshape(reshp)
             W = mx.sym.var(w_name, shape=reshp)
-            node = mx.sym.broadcast_mul(X, W, name=name+"_mul")
-            bias_name = name + "_bias"
+            node = mx.sym.broadcast_mul(X, W, name=N.n("broadcast_mul"))
+            bias_name = N.n('bias')
             params[bias_name] = bias.reshape(reshp)
             B = mx.sym.var(bias_name, shape=reshp)
-            op = mx.sym.broadcast_add(op, B, name=name+"_add")
+            op = mx.sym.broadcast_add(op, B, name=N.n("broadcast_add"))
         return op
 
     def calculate_ops(self, op, **kwargs):
         kwargs['base_ops'] = 4
         return super().calculate_ops(op, **kwargs)
+
+
+@register_pass("validate")
+@register_pass("fuse_transpose")
+@register_pass("rewrite")
+@register_pass("calculate_ops")
+@register_transformer("Flatten")
+class Flatten(Transformer):
+    pass
 
 

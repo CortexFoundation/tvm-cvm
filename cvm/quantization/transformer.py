@@ -14,11 +14,13 @@ if __name__ == "__main__":
     import os
     import dataset as ds
 
+    # sym = mx.sym.load("/tmp/densenet/densenet161.json")
+    # params = mx.nd.load("/tmp/densenet/densenet161.params")
     sym = mx.sym.load("./data/tf_inceptionv3.json")
     params = mx.nd.load("./data/tf_inceptionv3.params")
     # sym = mx.sym.load("./data/resnet18_v1.json")
     # params = mx.nd.load("./data/resnet18_v1.params")
-    sym, params = init(sym, params)
+    sym, params = init(sym, params, (1, 3, 299, 299))
     print (collect_op_names(sym, params))
     print ("Registered Graph Pass")
     for k, v in pass_info().items():

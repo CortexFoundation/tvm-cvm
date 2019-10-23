@@ -171,11 +171,11 @@ class N(object):
     @staticmethod
     def register_nm(name):
         def wrapper(pass_f):
-            def run(symbol, params, **kwargs):
+            def run(symbol, params, *args, **kwargs):
                 old_name = N._global_name
                 N._set_global(name)
                 N._count[name] += 1
-                ret = pass_f(symbol, params, **kwargs)
+                ret = pass_f(symbol, params, *args, **kwargs)
                 N._global_name = old_name
                 return ret
             return run
