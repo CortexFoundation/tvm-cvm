@@ -1,6 +1,5 @@
 from tfm_base import *
 from sym_utils import *
-from mrt import *
 
 import mxnet as mx
 import nnvm
@@ -103,16 +102,6 @@ class Convolution(Transformer):
     def rewrite(self, op, **kwargs):
         #TODO: matrix decomposition
         # op = self._fuse_bias(op, kwargs["infer_shapes"])
-        return op
-
-    def quantize(self, op, **kwargs):
-        th_dict, precs = kwargs['th_dict'], kwargs['precs']
-        scales, name = kwargs['scales'], op.attr('name')
-        childs = sym_iter(op.get_children())
-        iprec = kwargs['op_input_precs'][Convolution.op_name]
-        X, xprec, xs = requant_operator(childs[0], iprec,
-                th_dict=th_dict, precs=precs, scales=scales,
-                name=name)
         return op
 
     def _fuse_bias(self, op, infer_shapes):
