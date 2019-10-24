@@ -17,7 +17,7 @@ class Null(Transformer):
         params, th_dict = kwargs['params'], kwargs['th_dict']
         if is_inputs(op, params):
             precs, scales = kwargs['precs'], kwargs['scales']
-            scales[name] = scale(th_dict[name], precs[name])
+            scales[name] = scale(th_dict[name], precs[name][out_key].p)
             attr = { 'precision': str(precs[name]) }
             return mx.sym.var(name, attr=attr)
         return op
@@ -60,6 +60,33 @@ class Relu(Transformer):
             X = X.get_children()[0]
             op = mx.sym.relu(X)
             op = mx.sym.transpose(op, name=t_name, **t_attr)
+        return op
+
+
+@register_transformer("Activation")
+class Activation(Transformer):
+    def validate(self, op, **kwargs):
+        attr = op.list_attr()
+        assert attr['act_type'] in [Relu.op_name], \
+            "Only supported relu activation"
+        return op
+
+    def fuse_transpose(self, op, **kwargs):
+        attr = op.list_attr()
+        if attr['act_type'] == Relu.op_name:
+            op = Relu().fuse_transpose(op, **kwargs)
+        return op
+
+    def rewrite(self, op, **kwargs):
+        attr = op.list_attr()
+        if attr['act_type'] == Relu.op_name:
+            op = Relu().rewrite(op, **kwargs)
+        return op
+
+    def calculate_ops(self, op, **kwargs):
+        attr = op.list_attr()
+        if attr['act_type'] == Relu.op_name:
+            op = Relu().calculate_ops(op, **kwargs)
         return op
 
 
@@ -132,6 +159,58 @@ class Convolution(Transformer):
 @register_pass("fuse_transpose")
 @register_transformer("FullyConnected")
 class FullyConnected(Transformer):
+    def rewrite(self, op, **kwargs):
+        infer_shapes, params = kwargs['infer_shapes'], kwargs['params']
+        op = self._matrix_decomposition(op, params, infer_shapes)
+        return op
+
+    def _matrix_decomposition(self, op, params, infer_shapes):
+        name, attr = op.attr('name'), op.list_attr()
+        childs = sym_iter(op.get_children())
+        X, W = childs[:2]
+
+        MATRIX_MAXIMUM_SIZE = 65536
+        C = infer_shapes[W.attr('name')][get_entry_id(W)][1]
+        if C <= MATRIX_MAXIMUM_SIZE:
+            return op
+
+        print("test")
+
+        if X.attr('op_name') != Flatten.op_name:
+            X = mx.sym.flatten(X, name=N.n('flatten'))
+
+        no_bias = get_attr(attr, 'no_bias', False)
+        attr['no_bias'] = True
+
+        # matrix decomposition
+        # Y = B + X*W^T = B + X1*W1^T + X2*W2^T + ...
+        # Wi.shape = (num_hidden, step), W = [W1, W2, ...]
+        # Xi.shape = (batch_size, step), X = [X1, X2, ...]
+        nodes, step, start = [], MATRIX_MAXIMUM_SIZE, 0
+        wgt = params[W.attr('name')]
+        while start < C:
+            stop = min(start+step, C)
+            Xk = mx.sym.slice_axis(X, axis=1,
+                    begin=start, end=stop, name=N.n("slice_axis"))
+            Wk_name = N.n('slice_axis')
+            params[Wk_name] = wgt.slice_axis(axis=1, begin=start, end=stop)
+            Wk = mx.sym.var(Wk_name, shape=params[Wk_name].shape)
+            tmp = mx.sym.FullyConnected(Xk, Wk, name=N.n("dense"), **attr)
+            nodes.append(tmp)
+            start += step
+
+        while len(nodes) > 1:
+            a, b = nodes.pop(0), nodes.pop(0)
+            tmp = mx.sym.elemwise_add(a, b, name=N.n("elemwise_add"))
+            nodes.append(tmp)
+
+        op = nodes[0]
+        if not no_bias:
+            op = mx.sym.broadcast_add(op, childs[2],
+                    name=N.n('broadcast_add'))
+
+        return op
+
     def calculate_ops(self, op, **kwargs):
         W = sym_iter(op.get_children())[1]
         infer_shapes = kwargs['infer_shapes']
@@ -143,6 +222,7 @@ class FullyConnected(Transformer):
 
 
 @register_pass("validate")
+@register_pass("rewrite")
 @register_pass("fuse_transpose")
 @register_transformer("softmax")
 class Softmax(Transformer):
@@ -154,11 +234,14 @@ class Softmax(Transformer):
         kwargs['base_ops'] = 2 + 2 * xshp[axis]
         return super().calculate_ops(op, **kwargs)
 
+
 @register_pass("fuse_transpose")
 @register_transformer("Pooling")
 class Pooling(Transformer):
     def validate(self, op, **kwargs):
         name, attr = op.attr('name'), op.list_attr()
+        layout = get_attr(attr, 'layout', 'NCHW')
+        assert layout == 'NCHW'
         pool_type = get_attr(attr, 'pool_type', 'max')
         assert pool_type in ['max', 'avg'], \
             "Pooling(%s) only supported type for max and avg." % name
@@ -173,6 +256,50 @@ class Pooling(Transformer):
 
         return op
 
+    def rewrite(self, op, **kwargs):
+        params, graph = kwargs['params'], kwargs['graph']
+        infer_shapes = kwargs['infer_shapes']
+        name, attr = op.attr('name'), op.list_attr()
+        childs = sym_iter(op.get_children())
+        pool_type = get_attr(attr, 'pool_type', 'max')
+        is_global = get_attr(attr, 'global_pool', False)
+        if pool_type == 'avg' and is_global:
+            X = childs[0]
+            X_name = X.attr('name')
+            X_shape = infer_shapes[X_name][get_entry_id(X)]
+            scale_name = X_name + '_avg_scale'
+            assert scale_name not in graph
+            graph[scale_name] = scale_sym = mx.sym.var(scale_name, shape=(1,))
+            params[scale_name] = nd.array([1. / (X_shape[2] * X_shape[3])])
+            op = mx.sym.sum(childs[0], axis=(2, 3))
+            op = mx.sym.broadcast_mul(op, scale_sym)
+        elif pool_type == 'avg':
+            X = childs[0]
+            X_shape = infer_shapes[X.attr('name')][get_entry_id(X)]
+            in_channel = X_shape[1]
+            kernel = get_attr(attr, 'kernel')
+            if isinstance(kernel, int):
+                kernel = (kernel, kernel)
+            conv_attr = {
+                'no_bias': 'True',
+                'dilate': '(1, 1)',
+                'kernel': kernel,
+                'stride': attr['stride'],
+                'pad': attr['pad'],
+                'layout': 'NCHW',
+                'num_filter': in_channel,
+                'num_group': in_channel,
+            }
+            conv_name = name.replace('pool', 'pool_conv')
+            W_name = conv_name + '_weight'
+            assert W_name not in graph
+            W_shape = (in_channel, 1, *kernel)
+            graph[W_name] = W = mx.sym.var(W_name, shape=W_shape)
+            params[W_name] = nd.full(shape=W_shape, val=(1/np.product(kernel)))
+            op = mx.sym.Convolution(X, W, **conv_attr, name=conv_name)
+        return op
+
+
     def calculate_ops(self, op, **kwargs):
         X, attr = sym_iter(op.get_children())[0], op.list_attr()
         pool_type = get_attr(attr, 'pool_type', 'max')
@@ -186,7 +313,9 @@ class Pooling(Transformer):
             kwargs['base_ops'] += 1
         return super().calculate_ops(op, **kwargs)
 
+
 @register_pass("validate")
+@register_pass("rewrite")
 @register_pass("fuse_transpose")
 @register_pass("calculate_ops")
 @register_transformer("broadcast_mul")
@@ -195,6 +324,7 @@ class BroadcastMul(Transformer):
 
 
 @register_pass("validate")
+@register_pass("rewrite")
 @register_pass("fuse_transpose")
 @register_pass("calculate_ops")
 @register_transformer("broadcast_add")
@@ -203,14 +333,27 @@ class BroadcastAdd(Transformer):
 
 
 @register_pass("validate")
-@register_pass("fuse_transpose")
+@register_pass("rewrite")
 @register_pass("calculate_ops")
 @register_transformer("Concat")
 class Concat(Transformer):
-    pass
+    def fuse_transpose(self, op, **kwargs):
+        name, childs = op.attr('name'), sym_iter(op.get_children())
+        same, axeses = True, set()
+        for X in childs:
+            if X.attr('op_name') != Transpose.op_name:
+                same = False
+                break
+            axeses.add(get_attr(X.list_attr(), 'axes'))
+        if same and len(axeses) == 1:
+            dim, axes = get_attr(op.list_attr(), 'dim'), list(axeses)[0]
+            Xs = [X.get_children()[0] for X in childs]
+            op = mx.sym.concat(*Xs, dim=axes[dim])
+            op = mx.sym.transpose(op, axes=axes, name=name+'_fuse_transpose')
+        return op
 
 
-@register_pass("fuse_transpose")
+@register_pass("rewrite")
 @register_transformer("sum")
 class Sum(Transformer):
     def validate(self, op, **kwargs):
@@ -226,6 +369,17 @@ class Sum(Transformer):
         op = mx.sym.sum(X, **attr)
         return op
 
+    def fuse_transpose(self, op, **kwargs):
+        name, attr, X = op.attr('name'), op.list_attr(), op.get_children()[0]
+        xshp = kwargs['infer_shapes'][X.attr('name')][get_entry_id(X)]
+        axis = get_attr(attr, 'axis', [i for i in range(len(xshp))])
+        keepdims = get_attr(attr, 'keepdims', False)
+        if X.attr('op_name') == Transpose.op_name and not keepdims:
+            axes, op = get_attr(X.list_attr(), 'axes'), X.get_children()[0]
+            axis = [axes[i] for i in axis]
+            op = mx.sym.sum(op, axis=axis, keepdims=keepdims)
+        return op
+
     def calculate_ops(self, op, **kwargs):
         infer_shapes = kwargs['infer_shapes']
         oshp = infer_shapes[op.attr('name')][get_entry_id(op)]
@@ -233,6 +387,7 @@ class Sum(Transformer):
         ishp = infer_shapes[X.attr('name')][get_entry_id(X)]
         kwargs['base_ops'] = np.product(oshp) / np.product(ishp)
         return super().calculate_ops(op, **kwargs)
+
 
 @register_pass("validate")
 @register_pass("fuse_transpose")
@@ -261,13 +416,13 @@ class BatchNorm(Transformer):
             assert axis == 1, "Channel in input must be axis 1"
             cchilds, cattr = sym_iter(X.get_children()), X.list_attr()
 
-            conv_name = name + "_conv"
-            W_name = conv_name + '_weight'
+            conv_name = N.n('convolution')
+            W_name = N.n('weight')
             weight = params[cchilds[1].attr('name')]
             params[W_name] = weight * scale.reshape(*scale.shape, 1, 1, 1)
             W = mx.sym.var(W_name, shape=params[W_name].shape)
 
-            B_name = conv_name + '_bias'
+            B_name = N.n('bias')
             if not get_attr(cattr, 'no_bias', False):
                bias += params[cchilds[2].attr('name')]
             params[B_name] = bias
@@ -278,15 +433,15 @@ class BatchNorm(Transformer):
                    B, **cattr, name=conv_name)
         else:
             ishp = infer_shapes[X_name][get_entry_id(X)]
-            reshp = [s if i==axis else i for i,s in enumerate(ishp)]
-            w_name = name + "_weight"
+            reshp = [s if i==axis else 1 for i,s in enumerate(ishp)]
+            w_name = N.n('weight')
             params[w_name] = scale.reshape(reshp)
             W = mx.sym.var(w_name, shape=reshp)
-            node = mx.sym.broadcast_mul(X, W, name=name+"_mul")
-            bias_name = name + "_bias"
+            node = mx.sym.broadcast_mul(X, W, name=N.n("broadcast_mul"))
+            bias_name = N.n('bias')
             params[bias_name] = bias.reshape(reshp)
             B = mx.sym.var(bias_name, shape=reshp)
-            op = mx.sym.broadcast_add(op, B, name=name+"_add")
+            op = mx.sym.broadcast_add(op, B, name=N.n("broadcast_add"))
         return op
 
     def calculate_ops(self, op, **kwargs):
@@ -294,5 +449,12 @@ class BatchNorm(Transformer):
         return super().calculate_ops(op, **kwargs)
 
 
+@register_pass("validate")
+@register_pass("fuse_transpose")
+@register_pass("rewrite")
+@register_pass("calculate_ops")
+@register_transformer("Flatten")
+class Flatten(Transformer):
+    pass
 
 

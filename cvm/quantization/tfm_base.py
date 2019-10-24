@@ -126,17 +126,87 @@ def pass_info(arg=None):
         return _op_manager.get(arg.attr('op_name'), [])
     return _pass_manager.get(arg, [])
 
-def apply_pass(pass_t):
+def apply_pass(pass_t, **updates):
     def wrapper(op, **kwargs):
         tfm = get_transformer(op)
         assert pass_t in pass_info(op), \
                 "Transformer %s has not been registered pass:%s" \
                 % (op.attr('op_name'), pass_t)
-        return getattr(tfm, pass_t)(op, **kwargs)
+        kwargs.update(updates)
+        ret = getattr(tfm, pass_t)(op, **kwargs)
+        for n in updates:
+            kwargs[n][ret.attr('name')] = kwargs[n][op.attr('name')]
+        return ret
     return wrapper
+
+_NoneName = object()
+class N(object):
+    _global_name = _NoneName
+    _count = {}
+    _name_manager = {}
+
+    @staticmethod
+    def n(name=""):
+        assert N._global_name != _NoneName, \
+                "register name manager first please"
+        if name not in N._name_manager:
+            N._name_manager[name] = 0
+        _n = "mrt"
+        if N._global_name:
+            _n += "_" + N._global_name
+        if name != "":
+            _n += "_" + name
+        _n += "_%d" % N._name_manager[name]
+        N._name_manager[name] += 1
+        return _n
+
+    @staticmethod
+    def _set_global(name):
+        if name not in N._count:
+            N._count[name] = 0
+        else:
+            name += str(N._count[name])
+        N._global_name = name
+
+    @staticmethod
+    def register_nm(name):
+        def wrapper(pass_f):
+            def run(symbol, params, *args, **kwargs):
+                old_name = N._global_name
+                N._set_global(name)
+                N._count[name] += 1
+                ret = pass_f(symbol, params, *args, **kwargs)
+                N._global_name = old_name
+                return ret
+            return run
+        return wrapper
 
 # === symbol helper ===
 
+@N.register_nm("gv")
+def graph_validate(symbol, params):
+    def _name_replace(op, params, graph):
+        name, op_name = op.attr('name'), op.attr('op_name')
+        childs, attr = sym_iter(op.get_children()), op.list_attr()
+        if is_inputs(op, params):
+            assert "data" not in graph, "multiple inputs"
+            op = mx.sym.var("data", **attr)
+        elif is_params(op, params):
+            op = mx.sym.var(N.n("params"), **attr)
+            params[op.attr('name')] = params[name]
+        elif childs is None:
+            op = get_mxnet_op(op_name)(name=N.n(op_name), **attr)
+        else:
+            op = get_mxnet_op(op_name)(*childs, name=N.n(op_name), **attr)
+        return op
+    sym, params = topo_visit_transformer(symbol, params, _name_replace)
+
+    new_params = {s.attr('name'):params[s.attr('name')] \
+            for s in topo_sort(sym) if is_params(s, params)}
+
+    return sym, new_params
+
+@N.register_nm("fc")
 def fuse_constant(symbol, params):
     def _impl(op, params, graph):
         name, op_name = op.attr('name'), op.attr('op_name')
@@ -153,6 +223,7 @@ def fuse_constant(symbol, params):
         return op
     return topo_visit_transformer(symbol, params, _impl)
 
+@N.register_nm("ais")
 def attach_input_shape(symbol, params, input_shape):
     def _impl(op, params, graph):
         if is_inputs(op, params):
@@ -189,6 +260,7 @@ def _collect_attribute(op, **kwargs):
     attr_name, func = kwargs['attr_name'], kwargs['func']
     func(op.attr(attr_name))
     return op
+
 def collect_op_names(symbol, params):
     op_names = set()
     _ = topo_visit_transformer(symbol, params, _collect_attribute,
@@ -215,15 +287,18 @@ def calculate_ops(symbol, params, normalize=True):
     return ops
 
 def fuse_transpose(symbol, params):
+    infer_shapes = infer_shape(symbol, params)
     return topo_visit_transformer(symbol, params,
-            apply_pass("fuse_transpose"))
+            apply_pass("fuse_transpose", infer_shapes=infer_shapes))
 
 def validate(symbol, params):
     infer_shapes = infer_shape(symbol, params)
     return topo_visit_transformer(symbol, params,
-            apply_pass("validate"), infer_shapes=infer_shapes)
+            apply_pass("validate", infer_shapes=infer_shapes))
 
+@N.register_nm("rewrite")
 def rewrite(symbol, params):
     infer_shapes = infer_shape(symbol, params)
     return topo_visit_transformer(symbol, params,
-            apply_pass("rewrite"), infer_shapes=infer_shapes)
+            apply_pass("rewrite", infer_shapes=infer_shapes))
+
