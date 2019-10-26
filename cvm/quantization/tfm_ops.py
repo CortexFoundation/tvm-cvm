@@ -95,8 +95,9 @@ class Activation(Transformer):
         return op
 
     def compile(self, op, **kwargs):
+        attrs = kwargs['attr']
         act_type = attrs['act_type']
-        if act_type in ['relu']:
+        if act_type == Relu.op_name:
             sym = Relu().compile(op, **kwargs)
         return sym
 
