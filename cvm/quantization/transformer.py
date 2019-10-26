@@ -1,5 +1,6 @@
 from tfm_base import *
 import tfm_ops
+import cvm_op
 from sym_utils import *
 
 def init(symbol, params, input_shape=None):
