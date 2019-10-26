@@ -44,7 +44,7 @@ class Transpose(Transformer):
             axes = [caxes[ii] for ii in axes]
             op = X.get_children()[0]
             if axes != sorted(axes):
-                op = mx.sym.transpose(op, axes=axes, name=name+"_fuse_tranpose")
+                op = mx.sym.transpose(op, axes=axes, name=N.n("transpose"))
         return op
 
 
@@ -58,7 +58,7 @@ class Relu(Transformer):
         if X.attr('op_name') == Transpose.op_name:
             t_name, t_attr = X.attr('name'), X.list_attr()
             X = X.get_children()[0]
-            op = mx.sym.relu(X)
+            op = mx.sym.relu(X, name=N.n("relu"))
             op = mx.sym.transpose(op, name=t_name, **t_attr)
         return op
 
@@ -152,9 +152,9 @@ class Convolution(Transformer):
         X, W, B = childs
         oshp = infer_shapes[op.attr('name')][0]
         op = mx.sym.Convolution(X, W, **attr, name=op.attr('name'))
-        B = mx.sym.reshape(B, (1, oshp[1], 1, 1))
+        B = mx.sym.reshape(B, (1, oshp[1], 1, 1), name=N.n('reshape'))
         print (B.infer_shape())
-        op = mx.sym.broadcast_add(op, B)
+        op = mx.sym.broadcast_add(op, B, name=N.n('broadcast_add'))
         return op
 
     def calculate_ops(self, op, **kwargs):
@@ -215,8 +215,6 @@ class FullyConnected(Transformer):
         C = infer_shapes[W.attr('name')][get_entry_id(W)][1]
         if C <= MATRIX_MAXIMUM_SIZE:
             return op
-
-        print("test")
 
         if X.attr('op_name') != Flatten.op_name:
             X = mx.sym.flatten(X, name=N.n('flatten'))
@@ -329,12 +327,12 @@ class Pooling(Transformer):
             X = childs[0]
             X_name = X.attr('name')
             X_shape = infer_shapes[X_name][get_entry_id(X)]
-            scale_name = X_name + '_avg_scale'
+            scale_name = N.n('avg_scale')
             assert scale_name not in graph
             graph[scale_name] = scale_sym = mx.sym.var(scale_name, shape=(1,))
             params[scale_name] = nd.array([1. / (X_shape[2] * X_shape[3])])
-            op = mx.sym.sum(childs[0], axis=(2, 3))
-            op = mx.sym.broadcast_mul(op, scale_sym)
+            op = mx.sym.sum(childs[0], axis=(2, 3), name=N.n('sum'))
+            op = mx.sym.broadcast_mul(op, scale_sym, name=N.n('braodcast_mul'))
         elif pool_type == 'avg':
             X = childs[0]
             X_shape = infer_shapes[X.attr('name')][get_entry_id(X)]
@@ -352,8 +350,8 @@ class Pooling(Transformer):
                 'num_filter': in_channel,
                 'num_group': in_channel,
             }
-            conv_name = name.replace('pool', 'pool_conv')
-            W_name = conv_name + '_weight'
+            conv_name = N.n('pool_conv')
+            W_name = N.n('weight')
             assert W_name not in graph
             W_shape = (in_channel, 1, *kernel)
             graph[W_name] = W = mx.sym.var(W_name, shape=W_shape)
@@ -409,8 +407,8 @@ class Concat(Transformer):
         if same and len(axeses) == 1:
             dim, axes = get_attr(op.list_attr(), 'dim'), list(axeses)[0]
             Xs = [X.get_children()[0] for X in childs]
-            op = mx.sym.concat(*Xs, dim=axes[dim])
-            op = mx.sym.transpose(op, axes=axes, name=name+'_fuse_transpose')
+            op = mx.sym.concat(*Xs, dim=axes[dim], name=N.n('Concat'))
+            op = mx.sym.transpose(op, axes=axes, name=N.n('fuse_transpose'))
         return op
 
 
@@ -428,7 +426,7 @@ class Sum(Transformer):
             attr['exclude'] = False
             if len(attr['axis']) == 0:
                 return X
-        op = mx.sym.sum(X, **attr)
+        op = mx.sym.sum(X, **attr, name=N.n('sum'))
         return op
 
     def fuse_transpose(self, op, **kwargs):
@@ -439,7 +437,7 @@ class Sum(Transformer):
         if X.attr('op_name') == Transpose.op_name and not keepdims:
             axes, op = get_attr(X.list_attr(), 'axes'), X.get_children()[0]
             axis = [axes[i] for i in axis]
-            op = mx.sym.sum(op, axis=axis, keepdims=keepdims)
+            op = mx.sym.sum(op, axis=axis, keepdims=keepdims, name=N.n('sum'))
         return op
 
     def calculate_ops(self, op, **kwargs):
