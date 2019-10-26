@@ -39,6 +39,5 @@ if __name__ == "__main__":
     sym, params = tfm.init(sym, params, (1, 3, 224, 224))
     nnvm_sym, nnvm_params = tfm.compile(sym, params)
 
-    print (sym.debug_str)
-
-    nnvm.sym.Symbol
+    with open('/tmp/debug_byr.txt', 'w') as fout:
+        fout.write(nnvm_sym.debug_str())

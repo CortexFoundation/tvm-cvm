@@ -328,6 +328,6 @@ def compile(symbol, params):
         assert node is not None
         nodes.append(node)
     if len(nodes) > 1:
-        return nnvm.sym.Group(nodes)
+        return nnvm.sym.Group(nodes), params
     return nodes[0], params
 

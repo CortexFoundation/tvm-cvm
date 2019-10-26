@@ -199,12 +199,22 @@ class FullyConnected(Transformer):
         return op
 
 
-    # def compile(self, op, **kwargs):
-    #     childs = kwargs['childs']
-    #     attrs = kwargs['attr']
-    #     op_name, new_attrs = 'dense', {}
-    #     new_attrs['units'] = get_attr(attrs, 'num_hidden')
-    #     new_attrs['use_bias'] = not parse_bool
+    def compile(self, op, **kwargs):
+        childs = kwargs['childs']
+        attrs = kwargs['attr']
+        op_name, new_attrs = 'dense', {}
+        new_attrs['units'] = get_attr(attrs, 'num_hidden')
+        new_attrs['use_bias'] = not get_attr(attrs, 'no_bias', False)
+        try:
+            mx.sym.FullyConnected(mx.sym.var('x'), num_hidden=1, flatten=True)
+            has_flatten = True
+        except mx.base.MXNetError:
+            has_flatten = False
+        use_flatten = get_attr(attrs, 'flatten', True)
+        if has_flatten and use_flatten:
+            childs[0] = nnvm.sym.flatten(childs[0], name=N.n('flatten'))
+        return get_nnvm_op(op_name)(*childs, name=N.n('fullyconnected'),
+                                    **new_attrs)
 
     def _matrix_decomposition(self, op, params, infer_shapes):
         name, attr = op.attr('name'), op.list_attr()
