@@ -12,12 +12,50 @@ INT8_MIN, INT8_MAX = -127, 127
 
 INT8_TYPE, INT32_TYPE= ('int8', 'int32')
 
-class OpExt():
-    def __init__(self, op_name='null',
-            in_types=[], out_types=[]):
-        self.op_name = op_name
-        self.in_types = in_types
-        self.out_types = out_types
+def is_op(sym, params):
+    return (sym.attr('op_name') != 'null')
+def is_var(sym, params):
+    return (sym.attr('op_name') == 'null')
+def is_params(sym, params):
+    return is_var(sym, params) and \
+        (sym.attr('name') in params)
+def is_inputs(sym, params):
+    return is_var(sym, params) and \
+        (sym.attr('name') not in params)
+
+DATA_NAME = "data"
+_name_dict = {}
+def gen_name(name):
+    if name not in _name_dict:
+        _name_dict[name] = 0
+    _name_dict[name] += 1
+    return name + '_' + str(_name_dict[name] - 1)
+
+def check_graph(symbol, params, logger=logging):
+    # check duplicate name
+    graph_str = json.loads(symbol.tojson())
+    nodes = graph_str['nodes']
+    name_set = []
+    for node in nodes:
+        assert node['name'] not in name_set, \
+            "NameError, duplicate name '%s'" % node['name']
+        name_set.append(node['name'])
+
+    # check input name and params name, remove unused params name
+    new_params = {}
+    for sym in topo_sort(symbol, logger==logger):
+        name, op_name = sym.attr('name'), sym.attr('op_name')
+        childs, attr = sym_iter(sym.get_children()), sym.list_attr()
+        if is_params(sym, params):
+            assert name != DATA_NAME, \
+                "NameError, param should not be named by 'data'"
+            new_params[name] = params[name]
+        elif is_inputs(sym, params):
+            assert name == DATA_NAME, \
+                "NameError, input '%s' should be named by 'data'" % name
+    logger.info("Model Checked Passed.")
+
+    return symbol, new_params
 
 def combile_name(n1, n2):
     t1, t2 = n1.split("_"), n2.split("_")
@@ -48,12 +86,13 @@ def check_ext_deps(ext, deps=[], logger=logging):
                         dep, ext)
                 assert False
 
-def get_attr(attr, name, default=None):
+NoneAttr = object()
+def get_attr(attr, name, default=NoneAttr):
     if name in attr:
         if isinstance(default, str):
             return attr[name]
         return eval(attr[name])
-    if default is None:
+    if default == NoneAttr:
         assert False, "attr %s is not exists in %s" % (name, attr)
     return default
 
@@ -98,6 +137,7 @@ def sym_iter(sym):
         size = len(sym.list_output_names())
         sym = [sym[i] for i in range(size)]
     return sym
+
 
 def examine_parameters(symbol, params, inputs_ext, allows=[], callback=None):
     args, new_params = symbol.list_inputs(), {}
@@ -198,19 +238,27 @@ def topo_sort(symbol, logger=logging, with_deps=False):
 def sym_collect_attr(symbol, attr_name='op_name'):
     return {sym.attr(attr_name) for sym in topo_sort(symbol)}
 
+MULTIPYE_OUTS_NODE = [
+    'get_valid_counts', 'SliceChannel'
+]
 def get_entry_id(sym):
     oindex = 0
-    if isinstance(sym, _sym.Symbol) and len(sym) > 1:
-        oindex = json.loads(sym.tojson())['heads'][0][1]
-    elif isinstance(sym, nnvm.sym.Symbol) and len(sym.list_output_names()) > 1:
-        graph = nnvm.graph.create(sym)
-        oindex = json.loads(graph.json())['heads'][0][1]
+    if sym.attr('op_name') in MULTIPYE_OUTS_NODE:
+        if isinstance(sym, _sym.Symbol):
+            oindex = json.loads(sym.tojson())['heads'][0][1]
+        elif isinstance(sym, nnvm.sym.Symbol):
+            graph = nnvm.graph.create(sym)
+            oindex = json.loads(graph.json())['heads'][0][1]
     return oindex
 
 def get_node(sym, graph):
+    """ Assume all graph node have single output.
+        Multiple output node will be fused
+        by `fuse_multiple_outputs` sym_pass.
+    """
     name = sym.attr('name')
     if name not in graph:
-        assert False, "Unrecognized layer:%s in graph keys:5s" \
+        assert False, "Unrecognized layer:%s in graph keys:%s" \
             % (name, graph.keys())
     return graph[name][get_entry_id(sym)]
 
@@ -236,6 +284,24 @@ def topo_visit(symbol, params, inputs_ext, callback,
         return ret, params, maps
     else:
         return ret, params
+
+def topo_visit_transformer(symbol, params, callback,
+        get_op=get_mxnet_op, logger=logging, **kwargs):
+    graph = {}
+    params = {k:v[:] for k, v in params.items()}
+    for op in topo_sort(symbol, logger=logger):
+        name, op_name = op.attr('name'), op.attr('op_name')
+        childs, attr = sym_iter(op.get_children()), op.list_attr()
+        if childs is not None:
+            childs = [get_node(c, graph) for c in childs]
+            op = get_op(op_name)(*childs, **attr, name=name)
+
+        graph[name] = callback(op, params=params, graph=graph, **kwargs)
+        if graph[name] is None:
+            graph[name] = op
+    nodes = [get_node(op, graph) for op in symbol]
+    ret = get_op("Group")(nodes) if len(nodes) > 1 else nodes[0]
+    return ret, params
 
 
 """Deterministic Op Description
@@ -296,58 +362,27 @@ cvm_left_shift:
     In[Int8|Int32|Int64] << P_shift_bits[Int8] -> Out[Int8]
 
 """
-nnvm_identity_ext = {
-    'null': OpExt(out_types=[INT8_TYPE, INT32_TYPE]),
+nnvm_identity_ext = [
+    'null',
+    'relu', 'upsampling', 'max_pool2d',
+    'conv2d', 'dense', 'sum', 'elemwise_add', 'elemwise_sub',
+    'reshape', 'flatten', 'strided_slice', 'slice_like',
 
-    'relu': OpExt('relu', [INT8_TYPE], [INT8_TYPE]),
-    'upsampling': {},
-    'max_pool2d': OpExt('max_pool2d', [INT8_TYPE], [INT8_TYPE]),
+    'broadcast_left_shift', 'broadcast_right_shift',
+    'broadcast_div', 'broadcast_mul', 'broadcast_add', 'broadcast_sub',
+    'broadcast_max',
 
-    'conv2d': OpExt('conv2d', [INT8_TYPE], [INT32_TYPE]),
-    'dense': OpExt('dense', [INT8_TYPE], [INT32_TYPE]),
-    'sum': OpExt('sum', [INT8_TYPE], [INT32_TYPE]),
-    'elemwise_add': OpExt('elemwise_add', [INT8_TYPE], [INT32_TYPE]),
-    'elemwise_sub': {},
+    '__add_scalar__',
 
-    'reshape': OpExt('reshape', [INT8_TYPE, INT32_TYPE], [INT8_TYPE, INT32_TYPE]),
-    'flatten': OpExt('flatten', [INT8_TYPE, INT32_TYPE], [INT8_TYPE, INT32_TYPE]),
-    'strided_slice': OpExt('strided_slice', [INT8_TYPE], [INT8_TYPE]),
-    'slice_like': {},
+    'max', 'abs', 'log2',
+    'clip', 'concatenate', 'negative',
+    'cvm_clip', 'cvm_left_shift', 'cvm_right_shift',
+    'cvm_lut',
 
-    'broadcast_right_shift': OpExt('broadcast_right_shift', [INT32_TYPE], [INT8_TYPE]),
-    'broadcast_left_shift': OpExt('broadcast_left_shift', [INT32_TYPE], [INT8_TYPE]),
-    'broadcast_div': OpExt('broadcast_div', [INT32_TYPE], [INT32_TYPE]),
-    'broadcast_mul': OpExt('broadcast_mul', [INT32_TYPE], [INT32_TYPE]),
-    'broadcast_add': OpExt('broadcast_add', [INT32_TYPE], [INT32_TYPE]),
-    'broadcast_sub': OpExt('broadcast_sub', [INT32_TYPE], [INT32_TYPE]),
-    'broadcast_max': OpExt('broadcast_max', [INT32_TYPE], [INT32_TYPE]),
-
-    '__add_scalar__': {},
-
-    'max': {},
-    'abs': {},
-    'log2': {},
-
-    'clip': OpExt('clip', [INT32_TYPE], [INT8_TYPE]),
-    'concatenate': {},
-    'negative': {},
-
-    'cvm_clip': {},
-    'cvm_left_shift': {},
-    'cvm_right_shift': {},
-    'cvm_lut': {},
-
-    'take': {},
-    'repeat': {},
-    'tile': {},
-    'transpose': {},
-    'expand_dims': {},
-    'squeeze': {},
-    'squeeze': {},
-
-    'get_valid_counts': {},
-    'non_max_suppression': {},
-}
+    'take', 'repeat', 'tile', 'transpose',
+    'expand_dims', 'squeeze',
+    'get_valid_counts', 'non_max_supression',
+]
 
 """Mxnet Symbol Operator Extension
 Attribute Options:
@@ -367,6 +402,8 @@ mx_identity_ext = {
     'Activation': {
         'act_type': [False, 'relu'], # Only supported relu
     },
+    'relu': {},
+    'sum': {},
     'Dropout': {
         'mode': [True, 'training'],
     },
@@ -394,8 +431,21 @@ mx_identity_ext = {
 
     '_mul_scalar': {},
     '_div_scalar': {},
+    '_plus_scalar': {},
 
     'max': {},
     'Embedding': {},
     'squeeze': {},
+    'SwapAxis': {},
+
+    'sigmoid': {},
+    'exp': {},
+
+    'SliceChannel': {},
+    'zeros_like': {},
+    '_greater_scalar': {},
+    'where': {},
+    'ones_like': {},
+    '_contrib_box_nms': {},
+    'softmax': {},
 }

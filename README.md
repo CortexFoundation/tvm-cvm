@@ -1,49 +1,138 @@
-<!--- Licensed to the Apache Software Foundation (ASF) under one -->
-<!--- or more contributor license agreements.  See the NOTICE file -->
-<!--- distributed with this work for additional information -->
-<!--- regarding copyright ownership.  The ASF licenses this file -->
-<!--- to you under the Apache License, Version 2.0 (the -->
-<!--- "License"); you may not use this file except in compliance -->
-<!--- with the License.  You may obtain a copy of the License at -->
+## MRT Installation
 
-<!---   http://www.apache.org/licenses/LICENSE-2.0 -->
 
-<!--- Unless required by applicable law or agreed to in writing, -->
-<!--- software distributed under the License is distributed on an -->
-<!--- "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY -->
-<!--- KIND, either express or implied.  See the License for the -->
-<!--- specific language governing permissions and limitations -->
-<!--- under the License. -->
 
-<img src=https://raw.githubusercontent.com/tqchen/tvm.ai/master/images/logo/tvm-logo-small.png width=128/> Open Deep Learning Compiler Stack
-==============================================
+#### 1. Conda Environment Configuration
 
-[![GitHub license](https://dmlc.github.io/img/apache2.svg)](./LICENSE)
-[![Build Status](http://ci.tvm.ai:8080/buildStatus/icon?job=tvm/master)](http://ci.tvm.ai:8080/job/tvm/job/master/)
+1.1. Install conda if there is no previous installation
 
-[Documentation](https://docs.tvm.ai) |
-[Contributors](CONTRIBUTORS.md) |
-[Community](https://tvm.ai/community.html) |
-[Release Notes](NEWS.md)
+```
+pip install conda
+```
 
-TVM is a compiler stack for deep learning systems. It is designed to close the gap between the
-productivity-focused deep learning frameworks, and the performance- and efficiency-focused hardware backends.
-TVM works with deep learning frameworks to provide end to end compilation to different backends.
-Checkout the [tvm stack homepage](https://tvm.ai/)  for more information.
+1.2. Set up local python `3.7` environment for conda
 
-License
--------
-© Contributors Licensed under an [Apache-2.0](https://github.com/dmlc/tvm/blob/master/LICENSE) license.
+​	First, check out whether the enviroment exists or not:
 
-Contribute to TVM
------------------
-TVM adopts apache committer model, we aim to create an open source project that is maintained and owned by the community.
-Checkout the [Contributor Guide](https://docs.tvm.ai/contribute/)
+```
+conda info --envs
+```
 
-Acknowledgement
----------------
-We learnt a lot from the following projects when building TVM.
-- [Halide](https://github.com/halide/Halide): TVM uses [HalideIR](https://github.com/dmlc/HalideIR) as data structure for
-  arithmetic simplification and low level lowering. We also learnt and adapted some part of lowering pipeline from Halide.
-- [Loopy](https://github.com/inducer/loopy): use of integer set analysis and its loop transformation primitives.
-- [Theano](https://github.com/Theano/Theano): the design inspiration of symbolic scan operator for recurrence.
+<200b>  If not, add source channels into `~/.condarc`, eg.
+
+>channels:
+>
+>  - https://mirrors.ustc.edu.cn/anaconda/pkgs/main/
+>
+>  - https://mirrors.ustc.edu.cn/anaconda/pkgs/free/
+>
+>  - https://mirrors.ustc.edu.cn/anaconda/cloud/conda-forge/
+>
+>  - https://mirrors.ustc.edu.cn/anaconda/cloud/msys2/
+>
+>  - https://mirrors.ustc.edu.cn/anaconda/cloud/bioconda/
+>
+>  - https://mirrors.ustc.edu.cn/anaconda/cloud/menpo/
+>
+>  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/msys2/
+>
+>  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge/
+>
+>  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/free/
+>
+>show_channel_urls: true
+
+​	Then, create the environment named `py3`:
+
+```
+conda create -n py3 python=3.7
+```
+
+​	Then, switch to the environment.
+
+```
+conda activate py3
+```
+
+1.3. Check up whether the environment is configured successfully
+
+```
+which pip
+```
+
+```
+which python
+```
+
+
+
+#### 2. MRT Preparation
+
+2.1. Clone the project
+
+```
+cd ~
+git clone --recursive https://github.com/CortexFoundation/tvm-cvm.git
+```
+
+2.2. Build the Shared Library
+
+```
+make -j8
+```
+
+2.3. Install other dependancies
+
+​	First, open the file `requirements.txt` to see which dependancies are to be installed. 
+
+​	The default file looks like this:
+
+>Mxnet-cu92mkl
+>
+>gluoncv
+>
+>decorator
+
+​	If other packages are also needed while testing, append the package name at a newline.
+
+​	Use the following command to install all the dependancies.
+
+```
+pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+```
+
+<200b>  An alternative command is available.
+
+```
+pip install -r requirements.txt -i https://mirrors.ustc.edu.cn/pypi/web/simple
+```
+
+2.4. Create a Data Folder
+
+```
+mkdir data
+```
+
+
+
+#### 3. Test Model
+
+```
+python cvm/quantization/test_cifar10_resnetv1_20.py
+```
+
+```bash
+python cvm/quantization/test_resnet.py
+```
+
+
+
+## Reference
+
+https://pypi.org/project/conda/#files
+
+https://mxnet.apache.org/versions/master/install/index.html?platform=Linux&language=Python&processor=GPU
+
+https://blog.csdn.net/qq_28193895/article/details/80705809
+
+https://anaconda.org/conda-forge/xz

@@ -73,17 +73,14 @@ def prepare_for_cvm(symbol, params, inputs_ext):
             begin = [0 if s is None else s for s in begin]
             end = [cshape[i] if s is None else s for i,s in enumerate(end)]
             node = get_mxnet_op('slice')(X, begin=begin, end=end, name=name)
-        elif op_name in ['floor', 'ceil', 'round', 'fix']:
+        elif op_name in ['floor', 'ceil', 'round', 'fix', 'Cast']:
             node = childs[0]
-        elif op_name == '__div_scalar__':
-            scalar = int(attr['scalar'])
-            sb = math.log2(scalar)
-            assert int(sb) == sb, "op(%s name=%s) scalar (%s vs. %s)" \
-                % (op_name, name, scalar, sb)
+        elif op_name == '_greater_scalar':
             X = childs[0]
-            sb_sym, sb_name = op_const(int(sb), graph, var=mx.sym.var)
-            params[sb_name] = nd.array([int(sb)])
-            node = nnvm.sym.broadcast_right_shift(X, sb_sym)
+            scalar = int(attr['scalar'])
+            assert int(scalar) == scalar
+            var = mx_const(scalar, graph, params)
+            node = mx.sym.broadcast_greater(X, var, name=name)
         infer_shapes[node.attr('name')] = infer_shapes[name]
         return node, params
     psym, pparams = topo_visit(symbol, params, inputs_ext,
@@ -245,6 +242,13 @@ def _matrix_decomposition(sym, params, graph, inputs_ext, infer_shapes):
                     with params dict(%s)",
                     cshape, params[cname].shape)
 
+        # X * W + B
+        # (N, C) * (C, M) -> (N, M)
+        # C multiply and (C - 1) add
+        # (N, 0...K) (N, K...2K) ... (N, pK...C) K = 65526
+        # (0...K, M) (K...2K, M) ... (pK...C, M)
+        # (N, iK...(i+1)K) * (iK...(i+1)K, M) -> (p, N, M)
+        # add
         batch, matrix_len = childs_shape[1]
         if matrix_len > MATRIX_MAXIMUM_SIZE:
             weight_name_prefix = childs[1].attr('name')
@@ -274,6 +278,9 @@ def _matrix_decomposition(sym, params, graph, inputs_ext, infer_shapes):
                         begin=(0, start), end=(batch, stop))
                 start, idx = stop, idx+1
 
+            # N1, N2, ..., Np
+            #  N1.2, N3.4, ..., N(p-1)p
+            #   -> reduce
             while len(nodes) > 1:
                 a, b = nodes.pop(0), nodes.pop(0)
                 tmp = a + b
@@ -303,6 +310,7 @@ def sym_infer_shape(symbol, params, inputs_ext):
         args = sym.list_inputs()
         inputs_shape = {k:tuple(v['shape']) for k,v in inputs_ext.items() if k in args}
         _, out_shapes, _ = sym.infer_shape(**inputs_shape)
+
         assert len(out_shapes) == 1, 'Infer shape %s'%(name)
         if name in infer_shapes:
             logger.warn("Symbol:%s has been infered shape in graph", out_shapes)
@@ -316,6 +324,102 @@ def sym_infer_shape(symbol, params, inputs_ext):
     inputs = symbol.list_inputs()
     args, auxs = symbol.list_arguments(), symbol.list_auxiliary_states()
     inputs_shape = {k:tuple(v['shape']) for k, v in inputs_ext.items() if k in inputs}
+    arg_shapes, _, aux_shapes = symbol.infer_shape(**inputs_shape)
+    infer_shapes = {args[i]:arg_shapes[i] for i in range(len(args))}
+    infer_shapes.update({auxs[i]:aux_shapes[i] for i in range(len(auxs))})
+
+    _, _ = topo_visit(symbol, params, get_op=get_mxnet_op,
+            logger=logger, inputs_ext=inputs_ext,
+            callback=_infer_shape, infer_shapes=infer_shapes)
+
+    return infer_shapes
+
+def convert_input_format(symbol, params, logger=logging,
+        src_format="NHWC", des_format="NCHW"):
+    assert sorted(src_format) == sorted(des_format)
+    assert len(set(src_format)) == len(src_format)
+
+    if src_format == des_format:
+        return symbol, params
+
+    axes = [des_format.find(c) for c in src_format]
+    axes = tuple(axes)
+    def _data_convert(sym, params, graph, inputs_ext):
+        name, attr = sym.attr("name"), sym.list_attr()
+        if name == "data":
+            shp = None
+            if "__shape__" in attr:
+                shp_axes = [src_format.find(c) for c in des_format]
+                src_shp = eval(attr["__shape__"])
+                shp = [src_shp[ax] for ax in shp_axes]
+            sym = mx.sym.var("data", shape=shp)
+            sym = mx.sym.transpose(sym, axes=axes, name="data_transpose")
+        return sym, params
+
+    return topo_visit(symbol, params, {},
+            callback=_data_convert, logger=logger)
+
+    # assert src_format in ["NCHW", "NHWC"]
+    # assert des_format in ["NCHW", "NHWC"]
+    # axes = tuple()
+    # if src_format == "NCHW" and des_format == "NHWC":
+    #     axes = (0, 2, 3, 1)
+    # elif src_format == "NHWC" and des_format == "NCHW":
+    #     axes = (0, 3, 1, 2)
+    # graph, inp = {}, {}
+    # for sym in topo_sort(symbol, logger=logger):
+    #     name, op_name = sym.attr('name'), sym.attr('op_name')
+    #     childs, attr = sym_iter(sym.get_children()), sym.list_attr()
+    #     if childs is not None:
+    #         nchilds = []
+    #         for c in childs:
+    #             if c.attr('name') == 'data':
+    #                 tname = 'data_transpose'
+    #                 csym = mx.sym.transpose(data=graph['data'], axes=axes, name=tname)
+    #                 nchilds.append(csym)
+    #                 graph[tname] = csym
+    #             else:
+    #                 nchilds.append(graph[c.attr('name')])
+    #         sym = get_mxnet_op(op_name)(*nchilds, **attr, name=name)
+    #     graph[name] = sym
+
+    # nodes = [get_node(sym, graph) for sym in symbol]
+    # ret = mx.sym.Group(nodes) if len(nodes) > 1 else nodes[0]
+    # return ret, params
+
+def sym_robust_infer_shape(symbol, params, inputs_ext):
+    logger = logging.getLogger('log.symbol.infer_shape')
+    check_ext_deps(inputs_ext, 'shape')
+
+    def _infer_shape(sym, params, graph, inputs_ext, infer_shapes):
+        logger = logging.getLogger('log.symbol.infer_shape')
+        name, op_name = sym.attr('name'), sym.attr('op_name')
+
+        if op_name == 'null':
+            if name in params:
+                assert params[name].shape == infer_shapes[name], \
+                        "parameter %s shape %s is inconsistent with \
+                        params dict %s"%(name, infer_shapes[name], params[name].shape)
+            return sym, params
+
+        args = sym.list_inputs()
+        inputs_shape = {k:tuple(v['shape']) for k,v in inputs_ext.items() if k in args}
+        _, out_shapes, _ = sym.infer_shape(**inputs_shape)
+        
+        # assert len(out_shapes) == 1, 'Infer shape %s'%(name)
+        if name in infer_shapes:
+            logger.warn("Symbol:%s has been infered shape in graph", out_shapes)
+            assert infer_shapes[name] == out_shapes[0], "%s shape %s vs. %s" \
+                    % (name, infer_shapes[name], out_shapes)
+
+        infer_shapes[name] = out_shapes
+
+        return sym, params
+
+    inputs = symbol.list_inputs()
+    args, auxs = symbol.list_arguments(), symbol.list_auxiliary_states()
+    inputs_shape = {k:tuple(v['shape']) for k, v in inputs_ext.items() if k in inputs}
+    print (symbol.attr('name'), inputs_shape)
     arg_shapes, _, aux_shapes = symbol.infer_shape(**inputs_shape)
     infer_shapes = {args[i]:arg_shapes[i] for i in range(len(args))}
     infer_shapes.update({auxs[i]:aux_shapes[i] for i in range(len(auxs))})
@@ -394,10 +498,6 @@ def _sym_rewrite(sym, params, graph, inputs_ext, infer_shapes):
     elif op_name == 'Pooling':
         pool_type = attr['pool_type']
         is_global = get_attr(attr, "global_pool", False)
-        # if get_attr(attr, 'pooling_convention', 'valid') != 'valid':
-        #     logger.warn("operator %-20s name=%-40s pooling_convention set to be valid",
-        #             op_name, name)
-        #     attr['pooling_convention'] = 'valid'
         node = get_mxnet_op(op_name)(*childs, **attr, name=name)
         if pool_type == 'avg' and is_global:
             input_name = childs[0].attr('name')
@@ -499,29 +599,16 @@ def _sym_rewrite(sym, params, graph, inputs_ext, infer_shapes):
             logger.info("fuse Convolution=%-40s and batchnorm=%-40s",
                    X.attr('name'), name)
         else:
-            # TODO: use multiply and add
-            conv_attr = {
-                'no_bias': 'False',
-                'dilate': '(1, 1)',
-                'kernel': (1, 1),
-                'stride': (1, 1),
-                'pad': (0, 0),
-                'layout': 'NCHW',
-                'num_filter': in_channel,
-                'num_group': in_channel,
-            }
-            conv_name = name.replace('batchnorm', 'bn_conv')
-            W_name = conv_name + '_weight'
-            assert W_name not in graph
-            W_shape = (in_channel, 1, 1, 1)
-            graph[W_name] = W = mx.sym.var(W_name, shape=W_shape)
-            params[W_name] = scale.reshape(W_shape)
-            B_name = conv_name + '_bias'
-            assert B_name not in graph
-            params[B_name] = bias
-            graph[B_name] = B = mx.sym.var(B_name, shape=bias.shape)
-            node = mx.sym.Convolution(X, W, B, **conv_attr, name=conv_name)
-            logger.info("fuse BatchNorm=%-40s into depth-wise conv2d", name)
+            w_name = name + "_weight"
+            params[w_name] = scale.reshape((1, in_channel, 1, 1))
+            graph[w_name] = W = mx.sym.var(w_name, shape=(1, in_channel, 1, 1))
+            node = mx.sym.broadcast_mul(X, W, name=name+"_mul")
+            bias_name = name + "_bias"
+            params[bias_name] = bias.reshape((1, in_channel, 1, 1))
+            graph[bias_name] = B = mx.sym.var(bias_name,
+                    shape=(1, in_channel, 1, 1))
+            node = mx.sym.broadcast_add(node, B, name=name+"_add")
+            logger.info("rewrite BatchNorm=%-40s into alpha * X + beta", name)
     elif op_name == 'Dropout':
         # dropout is identity during testing
         node = childs[0]
@@ -543,6 +630,33 @@ def _sym_rewrite(sym, params, graph, inputs_ext, infer_shapes):
         params[sname] = nd.array([1 / scalar])
         graph[sname] = scale = mx.sym.var(sname, shape=(1,))
         node = mx.sym.broadcast_mul(X, scale, name=name)
+    elif op_name == '_plus_scalar':
+        X = childs[0]
+        scalar = get_attr(attr, 'scalar')
+        if scalar == 0:
+            node = X
+        else:
+            sname = name + '_scalar'
+            params[sname] = nd.array([scalar])
+            graph[sname] = offset = mx.sym.var(sname, shape=(1,))
+            node = mx.sym.broadcast_add(X, offset, name=name)
+    elif op_name == 'zeros_like':
+        X = childs[0]
+        params[name] = nd.zeros(infer_shapes[name])
+        node = mx.sym.var(name, shape=infer_shapes[name])
+    elif op_name == 'ones_like':
+        X = childs[0]
+        params[name] = nd.zeros(infer_shapes[name])
+        node = mx.sym.var(name, shape=infer_shapes[name])
+    elif op_name == 'SwapAxis':
+        dim1 = get_attr(attr, 'dim1', 0)
+        dim2 = get_attr(attr, 'dim2', 0)
+        ndim = len(infer_shapes[name])
+        new_axes = [None] * ndim
+        for i in range(ndim):
+            new_axes[i] = dim2 if i==dim1 else i
+            new_axes[i] = dim1 if i==dim2 else new_axes[i]
+        node = mx.sym.transpose(childs[0], tuple(new_axes), name=name)
     infer_shapes[node.attr('name')] = infer_shapes[name]
     return node, params
 
@@ -606,10 +720,6 @@ def _reduce_graph(sym, params, graph, inputs_ext):
     #        \   /                    operator
     #       operator
     node = sym
-    struct = [
-        ['broadcast_mul'],
-        ['broadcast_add', 'broadcast_sub'],
-    ]
     if op_name in ['broadcast_mul']:
         A, B = childs[0], childs[1]
         if A.attr('op_name') not in ['broadcast_mul']:
@@ -630,12 +740,150 @@ def _reduce_graph(sym, params, graph, inputs_ext):
         node = get_mxnet_op(op_name)(A_A, fuse_sym, **attr, name=name)
     return node, params
 
+def fuse_transpose(symbol, params, logger=logging):
+    def _fuse_transpose(sym, params, graph, inputs_ext):
+        name, op = sym.attr('name'), sym.attr('op_name')
+        childs = sym_iter(sym.get_children())
+
+        #   node                                 node              node
+        #     |                reduce              |
+        # transpose1         =========>        transpose3     or
+        #     |
+        # transpose2
+        if op == 'transpose':
+            axes = get_attr(sym.list_attr(), 'axes')
+            if childs[0].attr('op_name') == 'transpose':
+                caxes = get_attr(childs[0].list_attr(), 'axes')
+                axes = [caxes[ii] for ii in axes]
+                sym = sym_iter(childs[0].get_children())[0]
+                if axes != sorted(axes):
+                    sym = mx.sym.transpose(sym, axes=axes, name=name)
+
+        #   node                                 node
+        #     |                switch              |
+        # transpose1         =========>          relu
+        #     |                                    |
+        #   relu                               transpose1
+        elif op == 'relu':
+            if childs[0].attr('op_name') == 'transpose':
+                name, attr = childs[0].attr('name'), childs[0].list_attr()
+                axes = get_attr(attr, 'axes')
+                sym = mx.sym.relu(sym_iter(childs[0].get_children())[0])
+                sym = mx.sym.transpose(sym, axes=axes, name=name)
+
+        #     node     ...    node
+        #       |               |
+        #   transpose1 ...  transpose1                     node    node
+        #       \               /              reduce        \       /
+        #             concat                 =========>        concat
+        #                                                        |
+        #                                                    transpose1
+        elif op == 'Concat':
+            same, axeses = True, set()
+            for child in childs:
+                if child.attr('op_name') != 'transpose':
+                    same = False
+                    break
+                attr = child.list_attr()
+                axeses.add(get_attr(attr, 'axes'))
+            if same and len(axeses) == 1:
+                clist, attr = [], sym.list_attr()
+                dim = get_attr(attr, 'dim')
+                axes = list(axeses)[0]
+                for child in childs:
+                    cchild = sym_iter(child.get_children())[0]
+                    clist.append(cchild)
+                sym = mx.sym.concat(*clist, dim=axes[dim])
+                name = 'fusetranspose_' + name
+                sym = mx.sym.transpose(sym, axes=axes, name=name)
+
+        #    node                           node             
+        #      |              reduce          |
+        #  transpose1       =========>       sum
+        #      |
+        #     sum
+        # 
+        # only when 'keepdims' == False
+        # if not specified, defalt: 'exclude' == False, 'keepdims' == False
+        elif op == 'sum':
+            attr = sym.list_attr()
+            axis, keepdims = get_attr(attr, 'axis', None), get_attr(attr, 'keepdims', False)
+            if childs[0].attr('op_name') == 'transpose' and not keepdims:
+                attr = childs[0].list_attr()
+                axes = get_attr(attr, 'axes')
+                sym = sym_iter(childs[0].get_children())[0]
+                axis = [axes[i] for i in axis]
+                sym = mx.sym.sum(sym, axis=axis, keepdims=keepdims)
+            #  TODO(ryt): if an op 'sum' has attr 'exclude=True'
+            #  change it to 'False'
+
+        return sym, params
+
+    logger.info("redundant transposes fused.")
+
+    return topo_visit(symbol, params, {},
+            callback=_fuse_transpose, logger=logger)
+
+def fuse_multiple_outputs(symbol, params, inputs_ext, logger):
+    infer_shapes = sym_robust_infer_shape(symbol, params, inputs_ext)
+    print ("Robust infer shape")
+    channel, graph = {}, {}
+    for sym in topo_sort(symbol, logger=logger):
+        name, op_name = sym.attr('name'), sym.attr('op_name')
+        childs, attr = sym_iter(sym.get_children()), sym.list_attr()
+        if childs is not None:
+            childs = [get_node(c, graph) for c in childs]
+            sym = get_mxnet_op(op_name)(*childs, **attr, name=name)
+        if op_name == 'SliceChannel':
+            # Only designed for special usei, thus
+            # check of "SliceChannel" has not been added to _sym_check
+            assert childs is not None and len(childs) == 1, \
+                "Invalid Layer: %s, the 'SliceChannel' \
+                operator must have exactly one input" % name
+            axis = get_attr(attr, 'axis', 1)
+            num_outputs = get_attr(attr, 'num_outputs')
+            chchild_shape = infer_shapes[childs[0].attr('name')]
+            eid = get_entry_id(childs[0])
+            dim = chchild_shape[eid][axis]
+            assert num_outputs > 0 and dim % num_outputs == 0, \
+                "Invalid Layer: %s, the 'SliceChannel' operator \
+                has a wrong attribute, 'num_outputs': %d" \
+                % (name, num_outputs)
+            stride = int(dim / num_outputs)
+            interval = [(i * stride, (i + 1) * stride) \
+                       for i in range(num_outputs)]
+            channel[name] = [childs, axis, interval]
+        elif childs is not None:
+            is_split = False
+            for i in range(len(childs)):
+                cname = childs[i].attr('name')
+                if cname in channel:
+                    is_split = True
+                    eid = get_entry_id(childs[i])
+                    chchilds, axis, interval = channel[cname]
+                    begin, end = interval[eid]
+                    chattr = {'axis': axis, 'begin': begin, 'end': end}
+                    slp_name = "%s_slice_axis%d" % (cname, eid)
+                    if slp_name not in graph:
+                        graph[slp_name] = mx.sym.slice_axis(*chchilds,
+                                **chattr, name=slp_name)
+                    childs[i] = graph[slp_name]
+            if is_split:
+                sym = get_mxnet_op(op_name)(*childs, **attr, name=name)
+        graph[name] = sym
+
+    nodes = [get_node(sym, graph) for sym in symbol]
+    ret = mx.sym.Group(nodes) if len(nodes) > 1 else nodes[0]
+    return ret, params
+
 def sym_quant_prepare(symbol, params, inputs_ext, graph_ext={}):
     logger = logging.getLogger('log.sym.pass.prepare')
 
     topo_visit(symbol, params, get_op=get_mxnet_op,
             logger=logger, inputs_ext=inputs_ext,
             callback=_sym_check)
+
+    symbol, params = fuse_multiple_outputs(symbol, params, inputs_ext, logger)
 
     infer_shapes = sym_infer_shape(symbol, params, inputs_ext)
     sym, params = topo_visit(symbol, params, get_op=get_mxnet_op,
@@ -660,7 +908,7 @@ def sym_quant_prepare(symbol, params, inputs_ext, graph_ext={}):
            logger=logger, inputs_ext=inputs_ext,
            callback=_reduce_graph)
 
-    params = examine_parameters(sym, params, inputs_ext)
+    sym, params = check_graph(sym, params)
     return sym, params
 
 def sym_attach_attrs(symbol, params, inputs_ext, **kwargs):
@@ -685,9 +933,19 @@ def sym_attach_attrs(symbol, params, inputs_ext, **kwargs):
 
 import hashlib
 import shutil
+NAME_MAPS = {
+    'Convolution': 'conv2d',
+    'stride': 'strides',
+    'kernel': 'kernel_size',
+    'pad': 'padding',
+    'num_filter': 'channels',
+    'num_group': 'groups',
+    'dilate': 'dilation',
+    'no_bias': 'use_bias',
+}
 def sym_dump_ops(symbol, params, inputs_ext, datadir="/data/op_std_out",
         dtype="float64", out_dtype="int32",
-        ctx=mx.gpu(), cleanDir=False):
+        ctx=mx.gpu(), cleanDir=False, ops=None):
     logger = logging.getLogger('log.sym.dump.ops')
     check_ext_deps(inputs_ext, 'data')
 
@@ -698,50 +956,67 @@ def sym_dump_ops(symbol, params, inputs_ext, datadir="/data/op_std_out",
     npdir = "%s/%s" % (datadir, ".hidden.out")
     os.makedirs(npdir, exist_ok=True)
 
-    def sha256(data):
-        hsh = hashlib.sha256(data).hexdigest()
-        return hashlib.sha256("{}{}{}{}{}{}{}{}{}".format(
-                hsh, data.shape, data.dtype,
-                data.min(), data.max(),
-                data.argmax(), data.argmin(),
-                data.mean(), data.var(),
-        ).encode()).hexdigest()
-    def dump_nd(hsh, in_file, data):
-        hsh_file = "%s/%s.npy" % (npdir, hsh)
+    def npy_txt(data):
+        data = data.astype("int32")
+        shp = data.shape
+        txt = "{}\n{}\n{}\n".format(
+            len(shp),
+            " ".join([str(s) for s in shp]),
+            " ".join([str(s) for s in data.flatten()]),
+        )
+        return txt
+    def txt_sha256(data):
+        return hashlib.sha256(data.encode()).hexdigest()
+    def dump_txt(hsh_file, ln_file, data):
+        logger = logging.getLogger('log.ops.txt.dump')
+
         if os.path.exists(hsh_file):
-            loaded = np.load(hsh_file)
-            if not np.equal(loaded, data).all():
+            loaded = open(hsh_file, "r").read()
+            if data != loaded:
                 logger.error(
-                    "Failed dump op:%-20s hash=%s, link to file=%s",
-                        op_name, hsh, in_file)
+                    "Dump op failed: hash file=%s, link file=%s",
+                        hsh_file, ln_file)
                 return False
-        np.save(hsh_file, data)
-        os.symlink(hsh_file, in_file)
+        open(hsh_file, "w").write(data)
+        os.symlink(hsh_file, ln_file)
         return True
     def dump_op(op_name, attr, ins, outs):
+        op_name = NAME_MAPS.get(op_name, op_name)
         ins = [_in.asnumpy().astype(out_dtype) for _in in ins]
-        hshes = [sha256(_in) for _in in ins]
-        hsh = hashlib.sha256("{}{}".format(hshes, attr)
+        ins = [npy_txt(_in) for _in in ins]
+        hshes = [txt_sha256(_in) for _in in ins]
+        hsh = hashlib.sha1("{}{}".format(hshes, attr)
                     .encode()).hexdigest()
         hsh_dir = "%s/%s/%s" % (datadir, op_name, hsh)
         if os.path.exists(hsh_dir):
             logger.info("Skip op:%-20s hashdir=%s",
                 op_name, hsh)
             return
+
         os.makedirs(hsh_dir, exist_ok=True)
-        attr_file = "%s/%s" % (hsh_dir, "attribute")
+        attr_file = "%s/%s" % (hsh_dir, "attr.txt")
+        for k, v in NAME_MAPS.items():
+            if k in attr:
+                attr[v] = eval(attr[k])
+                del attr[k]
+        if 'use_bias' in attr:
+            attr['use_bias'] = not attr['use_bias']
         attr_str = str(attr).replace("'", "\"")
-        open(attr_file, "w").write(attr_str + "\n")
+        with open(attr_file, "w") as fout:
+            fout.write(attr_str + "\n")
         for i, _in in enumerate(ins):
-            in_file = "%s/in_%d" % (hsh_dir, i)
-            if not dump_nd(hshes[i], in_file, _in):
+            in_file = "%s/in_%d.txt" % (hsh_dir, i)
+            hsh_file = "%s/%s.txt" % (npdir, hshes[i])
+            if not dump_txt(hsh_file, in_file, _in):
                 shutil.rmtree(hsh_dir)
                 return
         for i, _out in enumerate(outs):
-            out_file = "%s/out_%d" % (hsh_dir, i)
+            out_file = "%s/out_%d.txt" % (hsh_dir, i)
             _out = _out.asnumpy().astype(out_dtype)
-            out_hsh = sha256(_out)
-            if not dump_nd(out_hsh, out_file, _out):
+            _out = npy_txt(_out)
+            out_hsh = txt_sha256(_out)
+            hsh_file = "%s/%s.txt" % (npdir, out_hsh)
+            if not dump_txt(hsh_file, out_file, _out):
                 shutil.rmtree(hsh_dir)
                 return
 
@@ -756,7 +1031,7 @@ def sym_dump_ops(symbol, params, inputs_ext, datadir="/data/op_std_out",
         if op_name == 'null':
             out = inputs_ext[name]['data'] if name in inputs_ext \
                   else params[name]
-            out_cache[name] = [out.astype(dtype).as_in_context(ctx)]
+            out_cache[name] = [out.round().astype(dtype).as_in_context(ctx)]
             continue
 
         assert childs is not None
@@ -772,12 +1047,17 @@ def sym_dump_ops(symbol, params, inputs_ext, datadir="/data/op_std_out",
             out = nd.array(np_out, dtype=dtype)
         else:
             out = get_nd_op(op_name)(*nd_inputs, **attr)
+            if op_name == 'broadcast_div':
+                out = out.astype('int32').astype(dtype)
         out = [out] if len(sym) == 1 else out
-        out_cache[name] = [o.astype(dtype).as_in_context(ctx) for o in out]
+        out_cache[name] = [o.round().astype(dtype).as_in_context(ctx) for o in out]
+        out = out_cache[name]
 
         op_name = attr['op_type'] if op_name=='Custom' else op_name
-        logger.debug("Dump op:%s attr=%s", op_name, attr)
-        dump_op(op_name, attr, nd_inputs, out)
+
+        if ops is None or name in ops:
+            logger.debug("Dump op:%s attr=%s", op_name, attr)
+            dump_op(op_name, attr, nd_inputs, out)
         for n, _ in cinfos:
             assert n in deps
             deps[n].remove(name)
@@ -824,7 +1104,7 @@ def sym_dump_layer_outputs(symbol, params, inputs_ext,
             cs = [] if childs is None else childs
             for i, c in enumerate(cs):
                 dump_in = "%s/%s_%d.%s.in" % (datadir, name, i, DUMP_SUFFIX)
-                out = out_cache[c.attr('name')][get_entry_id(c)].asnumpy().astype(out_dtype)
+                out = out_cache[c.attr('name')][get_entry_id(c)].asnumpy().round().astype(out_dtype)
                 np.save(dump_in, out)
             dump_attr = "%s/%s.%s" % (datadir, name, ATTR_SUFFIX)
             open(dump_attr, "w").write(str(attr))
@@ -848,13 +1128,16 @@ def sym_dump_layer_outputs(symbol, params, inputs_ext,
             cinfos = [(c.attr('name'), get_entry_id(c)) for c in childs]
             nd_inputs = [out_cache[n[0]][n[1]] for n in cinfos]
             out = get_nd_op(op_name)(*nd_inputs, **attr)
+            if op_name == 'broadcast_div':
+                out = out.astype('int32').astype(dtype)
             for n, _ in cinfos:
                 assert n in deps
                 deps[n].remove(name)
                 if len(deps[n]) == 0:
                     del out_cache[n]
         out = [out] if len(sym) == 1 else out
-        out_cache[name] = [o.astype(dtype).as_in_context(ctx) for o in out]
+        out_cache[name] = [o.round().astype(dtype).as_in_context(ctx) for o in out]
+        out = out_cache[name]
 
         if name in dump_ops or op_name in dump_ops:
             cs = [] if childs is None else childs

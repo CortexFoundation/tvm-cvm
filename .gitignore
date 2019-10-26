@@ -69,6 +69,7 @@ target/
 
 # IPython Notebook
 .ipynb_checkpoints
+*.ipynb
 
 # pyenv
 .python-version
@@ -220,3 +221,5 @@ patched.txt
 # pipenv file
 Pipfile
 Pipfile.lock
+
+.ycm_extra_conf.py
