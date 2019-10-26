@@ -29,11 +29,19 @@ class Null(Transformer):
         return 0
 
 
-@register_pass("validate")
 @register_pass("rewrite")
 @register_pass("calculate_ops")
 @register_transformer("transpose")
 class Transpose(Transformer):
+    def validate(self, op, **kwargs):
+        infer_shapes = kwargs['infer_shapes']
+        shp = infer_shapes[op.attr('name')][get_entry_id(op)]
+        childs, attr = sym_iter(op.get_children()), op.list_attr()
+        if not get_attr(attr, 'axes', []):
+            attr['axes'] = list(reversed(range(len(shp))))
+            op = mx.sym.transpose(*childs, **attr)
+        return op
+
     def fuse_transpose(self, op, **kwargs):
         name, attr = op.attr('name'), op.list_attr()
         axes = get_attr(attr, 'axes')
@@ -155,7 +163,7 @@ class Convolution(Transformer):
         attr['no_bias'] = True
         X, W, B = childs
         oshp = infer_shapes[op.attr('name')][0]
-        op = mx.sym.Convolution(X, W, **attr, name=op.attr('name'))
+        op = mx.sym.Convolution(X, W, **attr, name=N.n('Convolution'))
         B = mx.sym.reshape(B, (1, oshp[1], 1, 1), name=N.n('reshape'))
         print (B.infer_shape())
         op = mx.sym.broadcast_add(op, B, name=N.n('broadcast_add'))
@@ -332,7 +340,6 @@ class Pooling(Transformer):
             X_name = X.attr('name')
             X_shape = infer_shapes[X_name][get_entry_id(X)]
             scale_name = N.n('avg_scale')
-            assert scale_name not in graph
             graph[scale_name] = scale_sym = mx.sym.var(scale_name, shape=(1,))
             params[scale_name] = nd.array([1. / (X_shape[2] * X_shape[3])])
             op = mx.sym.sum(childs[0], axis=(2, 3), name=N.n('sum'))
@@ -401,14 +408,13 @@ class BroadcastAdd(Transformer):
 class Concat(Transformer):
     def fuse_transpose(self, op, **kwargs):
         name, childs = op.attr('name'), sym_iter(op.get_children())
-        same, axeses = True, set()
-        for X in childs:
-            if X.attr('op_name') != Transpose.op_name:
-                same = False
-                break
-            axeses.add(get_attr(X.list_attr(), 'axes'))
-        if same and len(axeses) == 1:
-            dim, axes = get_attr(op.list_attr(), 'dim'), list(axeses)[0]
+        if any([c.attr('op_name') != Transpose.op_name for c in childs]):
+            return op
+        axeses = [tuple(get_attr(c.list_attr(), 'axes')) for c in childs]
+        axeses = set([axes for axes in axeses])
+        if len(axeses) == 1:
+            dim = get_attr(op.list_attr(), 'dim')
+            axes = get_attr(childs[0].list_attr(), 'axes')
             Xs = [X.get_children()[0] for X in childs]
             op = mx.sym.concat(*Xs, dim=axes[dim], name=N.n('Concat'))
             op = mx.sym.transpose(op, axes=axes, name=N.n('fuse_transpose'))
@@ -553,8 +559,27 @@ class Custom(Transformer):
 
 @register_pass("compile")
 @register_pass("validate")
+@register_pass("calculate_ops")
+@register_pass("rewrite")
 @register_transformer("elemwise_add")
 class ElemwiseAdd(Transformer):
-    pass
+    def fuse_transpose(self, op, **kwargs):
+        return _ft_multi_input(op)
 
 
+def _ft_multi_input(op):
+    name, childs = op.attr('name'), sym_iter(op.get_children())
+    # Assert all the inputs are transpose
+    if any([c.attr('op_name') != Transpose.op_name for c in childs]):
+        return op
+    # Check all the inputs shapes are consistent
+    axeses = [tuple(get_attr(c.list_attr(), 'axes')) for c in childs]
+    axeses = set([axes for axes in axeses])
+    # Fuse transpose
+    if len(axeses) == 1:
+        axes = get_attr(childs[0].list_attr(), 'axes')
+        Xs = [X.get_children()[0] for X in childs]
+        opname = op.attr('op_name')
+        op = get_mxnet_op(opname)(*Xs, name=N.n(opname))
+        op = mx.sym.transpose(op, axes=axes, name=N.n('fuse_transpose'))
+    return op
