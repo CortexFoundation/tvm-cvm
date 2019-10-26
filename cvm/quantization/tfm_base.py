@@ -65,7 +65,8 @@ class Transformer(object):
         """
         childs = kwargs['childs']
         attrs = kwargs['attr']
-        sym = get_nnvm_op(self.op_name)(*childs, **attrs)
+        sym = get_nnvm_op(self.op_name)(*childs, name=N.n(),
+                                        **attrs)
         return sym
 
     def fuse_transpose(self, op, **kwargs):
