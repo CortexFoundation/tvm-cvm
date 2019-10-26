@@ -23,7 +23,7 @@ class Null(Transformer):
         return op
 
     def compile(self, op, **kwargs):
-        return nnvm.sym.Variable(op.attr('name'), op.list_attr())
+        return nnvm.sym.Variable(op.attr('name'), **kwargs['attr'])
 
     def calculate_ops(self, op, **kwargs):
         return 0
@@ -62,6 +62,11 @@ class Relu(Transformer):
             op = mx.sym.transpose(op, name=t_name, **t_attr)
         return op
 
+    def compile(self, op, **kwargs):
+        childs = kwargs['childs']
+        sym = get_nnvm_op(self.op_name)(*childs, name=N.n('relu'))
+        return sym
+
 
 @register_transformer("Activation")
 class Activation(Transformer):
@@ -88,6 +93,13 @@ class Activation(Transformer):
         if attr['act_type'] == Relu.op_name:
             op = Relu().calculate_ops(op, **kwargs)
         return op
+
+    def compile(self, op, **kwargs):
+        attrs = kwargs['attr']
+        act_type = attrs['act_type']
+        if act_type == Relu.op_name:
+            sym = Relu().compile(op, **kwargs)
+        return sym
 
 
 @register_pass("fuse_transpose")
@@ -155,6 +167,28 @@ class Convolution(Transformer):
         return super().calculate_ops(op, **kwargs)
 
 
+    def compile(self, op, **kwargs):
+        op.attr('name'), op.attr('op_name')
+        op.get_children(), op.list_attr()
+        childs = kwargs['childs']
+        attrs = kwargs['attr']
+        kernel = get_attr(attrs, 'kernel')
+        layout = get_attr(attrs, 'layout', 'NCHW')
+        kernel_layout = get_attr(attrs, 'kernel_layout', 'OIHW')
+        op_name, new_attrs = 'conv2d', {}
+        new_attrs['channels'] = get_attr(attrs, 'num_filter')
+        new_attrs['kernel_size'] = kernel
+        new_attrs['strides'] = get_attr(attrs, 'stride', (1, 1))
+        new_attrs['padding'] = get_attr(attrs, 'pad', (0, 0))
+        new_attrs['dilation'] = get_attr(attrs, 'dilate', (1, 1))
+        new_attrs['groups'] = get_attr(attrs, 'num_group', 1)
+        new_attrs['layout'] = layout
+        new_attrs['kernel_layout'] = kernel_layout
+        new_attrs['use_bias'] = not get_attr(attrs, 'no_bias', False)
+        return get_nnvm_op(op_name)(*childs, name=N.n('convolution'),
+                                    **new_attrs)
+
+
 @register_pass("validate")
 @register_pass("fuse_transpose")
 @register_transformer("FullyConnected")
@@ -163,6 +197,14 @@ class FullyConnected(Transformer):
         infer_shapes, params = kwargs['infer_shapes'], kwargs['params']
         op = self._matrix_decomposition(op, params, infer_shapes)
         return op
+
+
+    # def compile(self, op, **kwargs):
+    #     childs = kwargs['childs']
+    #     attrs = kwargs['attr']
+    #     op_name, new_attrs = 'dense', {}
+    #     new_attrs['units'] = get_attr(attrs, 'num_hidden')
+    #     new_attrs['use_bias'] = not parse_bool
 
     def _matrix_decomposition(self, op, params, infer_shapes):
         name, attr = op.attr('name'), op.list_attr()
@@ -256,6 +298,26 @@ class Pooling(Transformer):
 
         return op
 
+    def compile(self, op, **kwargs):
+        childs = kwargs['childs']
+        attrs = kwargs['attr']
+        kernel = get_attr(attrs, 'kernel')
+        global_pool = 'global' if get_attr(attrs, 'global_pool', False) else ''
+        pool_type = attrs['pool_type']
+        op_name = '_'.join([global_pool, pool_type, 'pool2d']).strip('_')
+        new_attrs = {}
+        if not global_pool:
+            new_attrs['pool_size'] = kernel
+            new_attrs['strides'] = get_attr(attrs, 'stride', (1, 1))
+            new_attrs['padding'] = get_attr(attrs, 'pad', (0, 0))
+            new_attrs['ceil_mode'] = (get_attr(attrs, 'pooling_convention',
+                        'valid') == 'full')
+            if pool_type == 'avg':
+                new_attrs['count_include_pad'] = \
+                        get_attr(attrs, 'count_include_pad', True)
+        return get_nnvm_op(op_name)(*childs, name=N.n('pooling'),
+                                    **new_attrs)
+
     def rewrite(self, op, **kwargs):
         params, graph = kwargs['params'], kwargs['graph']
         infer_shapes = kwargs['infer_shapes']
@@ -313,7 +375,7 @@ class Pooling(Transformer):
             kwargs['base_ops'] += 1
         return super().calculate_ops(op, **kwargs)
 
-
+@register_pass("compile")
 @register_pass("validate")
 @register_pass("rewrite")
 @register_pass("fuse_transpose")
@@ -321,7 +383,6 @@ class Pooling(Transformer):
 @register_transformer("broadcast_mul")
 class BroadcastMul(Transformer):
     pass
-
 
 @register_pass("validate")
 @register_pass("rewrite")
@@ -353,6 +414,7 @@ class Concat(Transformer):
         return op
 
 
+@register_pass('compile')
 @register_pass("rewrite")
 @register_transformer("sum")
 class Sum(Transformer):
@@ -455,6 +517,43 @@ class BatchNorm(Transformer):
 @register_pass("calculate_ops")
 @register_transformer("Flatten")
 class Flatten(Transformer):
+    pass
+
+
+@register_transformer("Custom")
+class Custom(Transformer):
+    def validate(self, op, **kwargs):
+        attr = op.list_attr()
+        op_type = attr['op_type']
+        assert op_type in ['cvm_clip', 'cvm_left_shift',
+                        'cvm_right_shift', 'cvm_lut']
+        return op
+
+    def compile(self, op, **kwargs):
+        childs = kwargs['childs']
+        attr = kwargs['attr']
+        op_type = attr['op_type']
+        new_attrs = {}
+        if op_type == 'cvm_clip':
+            new_attrs['precision'] = attr['precision']
+            sym = get_nnvm_op(op_type)(*childs, name=N.n('cvm_clip'),
+                                        **new_attrs)
+        elif op_type == 'cvm_lut':
+            new_attrs['in_dim'] = attr.get['in_dim']
+            sym = get_nnvm_op(op_type)(*childs, name=N.n('cvm_lut'),
+                                        **new_attrs)
+        else:
+            new_attrs['precision'] = attr['precision']
+            new_attrs['shift_bit'] = attr['shift_bit']
+            sym = get_nnvm_op(op_type)(*childs, name=N.n('cvm_shift'),
+                                         **new_attrs)
+        return sym
+
+
+@register_pass("compile")
+@register_pass("validate")
+@register_transformer("elemwise_add")
+class ElemwiseAdd(Transformer):
     pass
 
 

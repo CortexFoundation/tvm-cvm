@@ -63,8 +63,11 @@ class Transformer(object):
 
             Throw exception by default.
         """
-        raise NotImplementedError( \
-                "Operator %s not implemented function:compile" % self.op_name)
+        childs = kwargs['childs']
+        attrs = kwargs['attr']
+        sym = get_nnvm_op(self.op_name)(*childs, name=N.n(),
+                                        **attrs)
+        return sym
 
     def fuse_transpose(self, op, **kwargs):
         return op
@@ -190,9 +193,9 @@ def graph_validate(symbol, params):
         childs, attr = sym_iter(op.get_children()), op.list_attr()
         if is_inputs(op, params):
             assert "data" not in graph, "multiple inputs"
-            op = mx.sym.var("data", **attr)
+            op = mx.sym.var("data", attr=attr)
         elif is_params(op, params):
-            op = mx.sym.var(N.n("params"), **attr)
+            op = mx.sym.var(N.n("params"), attr=attr)
             params[op.attr('name')] = params[name]
         elif childs is None:
             op = get_mxnet_op(op_name)(name=N.n(op_name), **attr)
@@ -301,4 +304,30 @@ def rewrite(symbol, params):
     infer_shapes = infer_shape(symbol, params)
     return topo_visit_transformer(symbol, params,
             apply_pass("rewrite", infer_shapes=infer_shapes))
+
+@N.register_nm("cvm")
+def compile(symbol, params):
+    def _as_list(arr):
+        return arr if isinstance(arr, list) else [arr]
+
+    infer_shapes = infer_shape(symbol, params)
+    graph = {}
+    for op in topo_sort(symbol):
+        name, op_name = op.attr('name'), op.attr('op_name')
+        childs, attr = sym_iter(op.get_children()), op.list_attr()
+        childs = [] if childs is None else childs
+        childs = [get_node(c, graph) for c in childs]
+        childs = [x for y in childs for x in _as_list(y)]
+        op = apply_pass("compile", infer_shapes=infer_shapes)(
+                op, childs=childs, attr=attr)
+        graph[name] = op
+
+    nodes = []
+    for sym in symbol:
+        node = get_node(sym, graph)
+        assert node is not None
+        nodes.append(node)
+    if len(nodes) > 1:
+        return nnvm.sym.Group(nodes)
+    return nodes[0], params
 
