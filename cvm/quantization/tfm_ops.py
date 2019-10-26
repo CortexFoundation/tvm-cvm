@@ -107,6 +107,10 @@ class Activation(Transformer):
 class Convolution(Transformer):
     def validate(self, op, **kwargs):
         op = self._validate_layout(op)
+        W = sym_iter(op.get_children())[1]
+        W_shp = kwargs['infer_shapes'][W.attr('name')][get_entry_id(W)]
+        I, KH, KW = W_shp[1:]
+        assert I*KH*KW < 65536, "convolution ops overflow"
         return op
 
     def _validate_layout(self, op):
@@ -352,7 +356,6 @@ class Pooling(Transformer):
             }
             conv_name = N.n('pool_conv')
             W_name = N.n('weight')
-            assert W_name not in graph
             W_shape = (in_channel, 1, *kernel)
             graph[W_name] = W = mx.sym.var(W_name, shape=W_shape)
             params[W_name] = nd.full(shape=W_shape, val=(1/np.product(kernel)))
