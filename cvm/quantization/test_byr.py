@@ -5,33 +5,15 @@ import sym_utils as sutils
 import mxnet as mx
 import nnvm
 
-def model():
-   # d = mx.sym.var('d', shape=(20,))
-   # d1 = mx.sym.slice(d, begin=(0,), end=(6,))
-   # d1 = mx.sym.reshape(d1, shape=(1, 2, 3))
-   # d2 = mx.sym.slice(d, begin=(6,), end=(14))
-   # d2 = mx.sym.reshape(d2, shape=(2, 4))
-   # d3 = mx.sym.slice(d, begin=(14,), end=(20,))
-   # d3 = mx.sym.reshape(d, shape=(3, 2))
-   # out = mx.sym.Group([d1, d2, d3])
 
-
-    d1 = mx.sym.var('d1', shape=(1,2,3))
-    d2 = mx.sym.var('d2', shape=(2,4))
-    d3 = mx.sym.var('d3', shape=(3,2))
-    sym = mx.sym.Group([d1, d2, d3])
+def change(sym):
     data_input = {}
     params = {}
     infer_shapes = tfm.infer_shape(sym, params)
-    print(infer_shapes)
     for node in sutils.topo_sort(sym):
         name, op_name = node.attr('name'), node.attr('op_name')
         if sutils.is_inputs(node, params):
             data_input[name] = node
-            print('data', name, op_name, node, infer_shapes[name])
-        else:
-            print('other', name, op_name, node, infer_shapes[name])
-    print('here', data_input)
     dim_sum = 0
     dim_per = []
     dims = []
@@ -43,7 +25,6 @@ def model():
             dot *= it
         dim_per.append(dot)
         dim_sum += dot
-        print(dim_sum)
 
     data = mx.sym.var('data', shape=(dim_sum,))
     create_var = locals()
@@ -52,7 +33,6 @@ def model():
     indata = []
     for i in range(len(dim_per)):
         last = first + dim_per[i]
-        print(first, last, type(first), type(last), 'gen')
         create_var['data'+str(i)] = mx.sym.slice(data, begin=(first,),
                             end=(last,))
         create_var['data'+str(i)] = mx.sym.reshape(create_var['data'+str(i)],
@@ -60,8 +40,58 @@ def model():
         indata.append(create_var['data'+str(i)])
         first = last
     out = mx.sym.Group(indata)
-    sym, params = tfm.init(out, {})
-    print (sym.tojson())
+    return out
+
+
+def model():
+    d1 = mx.sym.var('d1', shape=(1,2,3))
+    d2 = mx.sym.var('d2', shape=(2,4))
+    d3 = mx.sym.var('d3', shape=(3,2))
+    sym = mx.sym.Group([d1, d2, d3])
+    sym = change(sym)
+    print(sym.tojson())
+    # data_input = {}
+    # params = {}
+    # infer_shapes = tfm.infer_shape(sym, params)
+    # print(infer_shapes)
+    # for node in sutils.topo_sort(sym):
+    #     name, op_name = node.attr('name'), node.attr('op_name')
+    #     if sutils.is_inputs(node, params):
+    #         data_input[name] = node
+    #         print('data', name, op_name, node, infer_shapes[name])
+    #     else:
+    #         print('other', name, op_name, node, infer_shapes[name])
+    # print('here', data_input)
+    # dim_sum = 0
+    # dim_per = []
+    # dims = []
+    # for key, val in data_input.items():
+    #     assert len(infer_shapes[key]) == 1
+    #     dims.append(infer_shapes[key][0])
+    #     dot = 1
+    #     for it in dims[-1]:
+    #         dot *= it
+    #     dim_per.append(dot)
+    #     dim_sum += dot
+    #     print(dim_sum)
+
+    # data = mx.sym.var('data', shape=(dim_sum,))
+    # create_var = locals()
+    # first = 0
+    # last = 0
+    # indata = []
+    # for i in range(len(dim_per)):
+    #     last = first + dim_per[i]
+    #     print(first, last, type(first), type(last), 'gen')
+    #     create_var['data'+str(i)] = mx.sym.slice(data, begin=(first,),
+    #                         end=(last,))
+    #     create_var['data'+str(i)] = mx.sym.reshape(create_var['data'+str(i)],
+    #                 shape=dims[i])
+    #     indata.append(create_var['data'+str(i)])
+    #     first = last
+    # out = mx.sym.Group(indata)
+    # sym, params = tfm.init(out, {})
+    # print (sym.tojson())
 
 
 if __name__ == "__main__":
