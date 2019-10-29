@@ -289,11 +289,13 @@ def calculate_ops(symbol, params, normalize=True):
         ops = "{:5.2f}{}".format(ops, LEVELS[idx])
     return ops
 
+@N.register_nm("fuse_transpose")
 def fuse_transpose(symbol, params):
     infer_shapes = infer_shape(symbol, params)
     return topo_visit_transformer(symbol, params,
             apply_pass("fuse_transpose", infer_shapes=infer_shapes))
 
+@N.register_nm("validate")
 def validate(symbol, params):
     infer_shapes = infer_shape(symbol, params)
     return topo_visit_transformer(symbol, params,
@@ -325,7 +327,6 @@ def compile(symbol, params):
     nodes = []
     for sym in symbol:
         node = get_node(sym, graph)
-        assert node is not None
         nodes.append(node)
     if len(nodes) > 1:
         return nnvm.sym.Group(nodes), params
