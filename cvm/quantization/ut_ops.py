@@ -1,6 +1,8 @@
 import unittest
 import mxnet as mx
 
+import nnvm
+
 from ut_base import *
 
 class TestNull(TfmTest):
@@ -35,7 +37,7 @@ class TestTranspose(TfmTest):
 
     def test_fuse_transpose(self):
         des = mx.sym.transpose(TestNull.op, axes=[1, 3, 2, 0])
-        self._assert(self.op, "fuse_transpose", des)
+        self._assert_equal(self.op, des, "fuse_transpose")
 
 
 class TestElemwiseAdd(TfmTest):
