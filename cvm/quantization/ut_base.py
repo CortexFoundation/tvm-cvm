@@ -6,6 +6,14 @@ import transformer as tfm
 import sym_utils as sutils
 
 def graph_equal(src, des):
+    if len(src) > 1:
+        for i, op in enumerate(src):
+            if i >= len(des):
+                return op, des[-1]
+            r1, r2 = graph_equal(op, des[i])
+            if r1 is not None:
+                return r1, r2
+        return None, None
     if src.attr('op_name') != des.attr('op_name'):
         return src, des
     if sutils.get_entry_id(src) != sutils.get_entry_id(des):
@@ -29,6 +37,7 @@ def graph_equal(src, des):
 
 def summary(sym, err_op=None):
     _s = ""
+    print (err_op)
     for op in sutils.topo_sort(sym):
         name, op_name = op.attr('name'), op.attr('op_name')
         childs, attr = sutils.sym_iter(op.get_children()), op.list_attr()
