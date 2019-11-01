@@ -37,7 +37,6 @@ def graph_equal(src, des):
 
 def summary(sym, err_op=None):
     _s = ""
-    print (err_op)
     for op in sutils.topo_sort(sym):
         name, op_name = op.attr('name'), op.attr('op_name')
         childs, attr = sutils.sym_iter(op.get_children()), op.list_attr()
