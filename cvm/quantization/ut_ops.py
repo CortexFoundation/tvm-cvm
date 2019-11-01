@@ -102,12 +102,10 @@ class TestSlice(TfmTest):
 class TestReshape(TfmTest):
     def test_compile(self):
         data = mx.sym.var('data', shape=(24,))
-        op = mx.sym.slice(data, begin=(0,), end=(24,))
-        op = mx.sym.reshape(op, shape=(1, 2, 3, 4))
+        op = mx.sym.reshape(data, shape=(1, 2, 3, 4))
 
         datan = nnvm.sym.Variable('data', __shape__=(24,))
-        des = nnvm.sym.strided_slice(datan, begin=(0,), end=(24,))
-        des = nnvm.sym.reshape(des, shape=(1, 2, 3, 4))
+        des = nnvm.sym.reshape(datan, shape=(1, 2, 3, 4))
 
         self._assert_equal(op, des, 'compile')
 
