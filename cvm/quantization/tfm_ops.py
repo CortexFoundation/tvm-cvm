@@ -550,7 +550,7 @@ class Slice(Transformer):
         if stride is not None:
             new_attrs['stride'] = stride
         return get_nnvm_op('strided_slice')(childs[0],
-                name=N.n('slice') **new_attrs)
+                name=N.n('slice'), **new_attrs)
 
 
 @register_pass("validate")
@@ -559,11 +559,11 @@ class Reshape(Transformer):
     def compile(self, op, **kwargs):
         childs = kwargs['childs']
         attrs = kwargs['attr']
-        op_name = get_attr(attrs, 'op_name')
+        op_name = 'reshape'
         new_attrs = {}
         new_attrs['shape'] = get_attr(attrs, 'shape', 'reshape')
         return get_nnvm_op(op_name)(*childs,
-                name=N.n('reshape') **new_attrs)
+                name=N.n('reshape'), **new_attrs)
 
 
 @register_transformer("Custom")

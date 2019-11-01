@@ -17,6 +17,10 @@ class TestNull(TfmTest):
     def test_fuse_transpose(self):
         self._assert_equal(self.op, self.op, "fuse_transpose")
 
+    def test_compile(self):
+        des = nnvm.sym.Variable('data', __shape__=[1, 3, 2, 1])
+        self._assert_equal(self.op, des, "compile")
+
 class TestTranspose(TfmTest):
     op = mx.sym.transpose(
             mx.sym.transpose(TestNull.op, axes=[0, 2, 3, 1]),
@@ -85,6 +89,27 @@ class TestFuseMultiplyInputs(TfmTest):
 
         self._assert_equal(op, des)
 
+class TestSlice(TfmTest):
+    def test_compile(self):
+        data = mx.sym.var('data', shape=(20,))
+        op = mx.sym.slice(data, begin=(0,), end=(6,))
+
+        datan = nnvm.sym.Variable('data', __shape__=(20,))
+        des = nnvm.sym.strided_slice(datan, begin=(0,), end=(6,))
+
+        self._assert_equal(op, des, 'compile')
+
+class TestReshape(TfmTest):
+    def test_compile(self):
+        data = mx.sym.var('data', shape=(24,))
+        op = mx.sym.slice(data, begin=(0,), end=(24,))
+        op = mx.sym.reshape(op, shape=(1, 2, 3, 4))
+
+        datan = nnvm.sym.Variable('data', __shape__=(24,))
+        des = nnvm.sym.strided_slice(datan, begin=(0,), end=(24,))
+        des = nnvm.sym.reshape(des, shape=(1, 2, 3, 4))
+
+        self._assert_equal(op, des, 'compile')
 
 
 if __name__ == "__main__":
