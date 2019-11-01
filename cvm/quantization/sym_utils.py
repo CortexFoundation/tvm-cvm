@@ -173,15 +173,6 @@ def op_const(number, graph, var=mx.sym.var):
 
 def topo_sort(symbol, logger=logging, with_deps=False):
     """Sort all symbols in the mxnet graph in topological order.
-
-    Parameters
-    ----------
-    symbol : mxnet.sym.Symbol
-
-    Returns:
-    -------
-    list
-        List of mxnet symbol
     """
     queue = []
     symbol_map = {}
@@ -239,7 +230,9 @@ def sym_collect_attr(symbol, attr_name='op_name'):
     return {sym.attr(attr_name) for sym in topo_sort(symbol)}
 
 MULTIPYE_OUTS_NODE = [
-    'get_valid_counts', 'SliceChannel'
+    'get_valid_counts', 'SliceChannel',
+    # group's op_name is None
+    'None',
 ]
 def get_entry_id(sym):
     oindex = 0
@@ -260,6 +253,7 @@ def get_node(sym, graph):
     if name not in graph:
         assert False, "Unrecognized layer:%s in graph keys:%s" \
             % (name, graph.keys())
+    mx.sym.Symbol
     return graph[name][get_entry_id(sym)]
 
 def topo_visit(symbol, params, inputs_ext, callback,
