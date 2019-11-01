@@ -17,7 +17,7 @@ class TestFuseMultiplyInputs(TfmTest):
         # d3 = mx.sym.var('d3', shape=(2, 3))
         # op = mx.sym.Group([d1, d2, d3])
         op = mx.sym.concat(d1, d2, d3)
-        sym = newnewchange(op, {})
+        sym = transfer_multipleinputs_singleinput(op, {})
 
         data = mx.sym.var('data', shape=(20,))
         # s1 = mx.sym.slice(data, begin=(0,), end=(6,))
@@ -37,7 +37,7 @@ class TestFuseMultiplyInputs(TfmTest):
 
         self._assert_equal(sym, des)
 
-def newnewchange(sym, params):
+def transfer_multipleinputs_singleinput(sym, params):
     infer_shapes = tfm.infer_shape(sym, params)
     dim_sum, dim_per, dims = 0, {}, {}
     def _sum_input(node, params, **kwargs):
