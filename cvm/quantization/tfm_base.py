@@ -1,6 +1,4 @@
 from sym_utils import *
-from tfm_pass import * 
-
 import numpy as np
 
 class Transformer(object):
@@ -143,65 +141,46 @@ def apply_pass(pass_t, **updates):
         return ret
     return wrapper
 
-# === symbol pass == 
+# === name manager 
 
-def calculate_ops(symbol, params, normalize=True):
-    ops, infer_shapes = [0], infer_shape(symbol, params)
-    def _impl(op, **kwargs):
-        ops[0] += apply_pass("calculate_ops")(op, **kwargs)
-    topo_visit_transformer(symbol, params, _impl,
-            infer_shapes=infer_shapes)
+_NoneName = object()
+class N(object):
+    _global_name = _NoneName
+    _count = {}
+    _name_manager = {}
 
-    ops = ops[0]
-    if normalize:
-        LEVELS = ['', 'K', 'M', 'G', 'T', 'P']
-        idx = 0
-        while ops > 1000:
-            ops /= 1000
-            idx += 1
-        ops = "{:5.2f}{}".format(ops, LEVELS[idx])
-    return ops
+    @staticmethod
+    def n(name=""):
+        assert N._global_name != _NoneName, \
+                "register name manager first please"
+        if name not in N._name_manager:
+            N._name_manager[name] = 0
+        _n = "mrt"
+        if N._global_name:
+            _n += "_" + N._global_name
+        if name != "":
+            _n += "_" + name
+        _n += "_%d" % N._name_manager[name]
+        N._name_manager[name] += 1
+        return _n
 
-@N.register_nm("fuse_transpose")
-def fuse_transpose(symbol, params):
-    infer_shapes = infer_shape(symbol, params)
-    return topo_visit_transformer(symbol, params,
-            apply_pass("fuse_transpose", infer_shapes=infer_shapes))
+    @staticmethod
+    def _set_global(name):
+        if name not in N._count:
+            N._count[name] = 0
+        else:
+            name += str(N._count[name])
+        N._global_name = name
 
-@N.register_nm("validate")
-def validate(symbol, params):
-    infer_shapes = infer_shape(symbol, params)
-    return topo_visit_transformer(symbol, params,
-            apply_pass("validate", infer_shapes=infer_shapes))
-
-@N.register_nm("rewrite")
-def rewrite(symbol, params):
-    infer_shapes = infer_shape(symbol, params)
-    return topo_visit_transformer(symbol, params,
-            apply_pass("rewrite", infer_shapes=infer_shapes))
-
-@N.register_nm("cvm")
-def compile(symbol, params):
-    def _as_list(arr):
-        return arr if isinstance(arr, list) else [arr]
-
-    infer_shapes = infer_shape(symbol, params)
-    graph = {}
-    for op in topo_sort(symbol):
-        name, op_name = op.attr('name'), op.attr('op_name')
-        childs, attr = sym_iter(op.get_children()), op.list_attr()
-        childs = [] if childs is None else childs
-        childs = [get_node(c, graph) for c in childs]
-        childs = [x for y in childs for x in _as_list(y)]
-        op = apply_pass("compile", infer_shapes=infer_shapes)(
-                op, childs=childs, attr=attr)
-        graph[name] = op
-
-    nodes = []
-    for sym in symbol:
-        node = get_node(sym, graph)
-        nodes.append(node)
-    if len(nodes) > 1:
-        return nnvm.sym.Group(nodes), params
-    return nodes[0], params
-
+    @staticmethod
+    def register_nm(name):
+        def wrapper(pass_f):
+            def run(symbol, params, *args, **kwargs):
+                old_name = N._global_name
+                N._set_global(name)
+                N._count[name] += 1
+                ret = pass_f(symbol, params, *args, **kwargs)
+                N._global_name = old_name
+                return ret
+            return run
+        return wrapper

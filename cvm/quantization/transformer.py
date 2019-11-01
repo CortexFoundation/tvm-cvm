@@ -2,9 +2,11 @@ from tfm_base import *
 import tfm_ops
 import cvm_op
 from sym_utils import *
+import utils
 from tfm_pass import *
 
 def init(symbol, params, input_shape=None):
+    utils.log_init()
     sym, params = graph_validate(symbol, params)
     if input_shape is not None:
         sym, params = attach_input_shape(sym, params, input_shape)
