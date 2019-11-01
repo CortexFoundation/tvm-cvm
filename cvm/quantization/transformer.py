@@ -41,5 +41,8 @@ if __name__ == "__main__":
         fout.write(sym.tojson())
     data_iter_func = ds.data_iter('imagenet', 1, input_size=224)
     data, _ = data_iter_func()
-    th_dict = sym_calibrate(sym, params, data, old_ths=None, lambd=None)
+    th_dict = sym_calibrate(sym, params, data, \
+            ctx=mx.cpu(), old_ths=None, lambd=None)
+    sym, params = quantize(sym, params, th_dict)
+    print (calculate_ops(sym, params))
 

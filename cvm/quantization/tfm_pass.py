@@ -41,6 +41,15 @@ def rewrite(symbol, params):
     return topo_visit_transformer(symbol, params,
             apply_pass("rewrite", infer_shapes=infer_shapes))
 
+@N.register_nm("quantize")
+def quantize(symbol, params, th_dict, precs, scales, **kwargs):
+    th_dict = check_fixed()
+    assert th_dict is not None, "Please calibrate thresholds first."
+    infer_shapes = infer_shape(symbol, params)
+    return topo_visit_transformer(symbol, params,
+            apply_pass("quantize", infer_shapes=infer_shapes,
+            th_dict=th_dict, precs=precs, scales=scales))
+
 @N.register_nm("cvm")
 def compile(symbol, params):
     def _as_list(arr):
@@ -152,7 +161,7 @@ def collect_op_names(symbol, params):
             attr_name='op_name', func=op_names.add)
     return op_names
 
-# === model calibration ===
+# === MRT ===
 
 def _get_opt(out, lambd):
     absmax = out.abs().max().asscalar()
@@ -209,3 +218,16 @@ def sym_calibrate(symbol, params, data, **kwargs):
     out_cache.clear()
     return th_dict
 
+def check_fixed(symbol, params, th_dict):
+    for sym in topo_sort(symbol):
+        name, op_name = sym.attr('name'), sym.attr('op_name')
+    return th_dict
+
+def requant_operator():
+    pass
+
+def requant_operator():
+    pass
+
+def requant():
+    pass
