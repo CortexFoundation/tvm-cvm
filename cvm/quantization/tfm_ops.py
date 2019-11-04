@@ -537,6 +537,35 @@ class Flatten(Transformer):
     pass
 
 
+@register_pass("validate")
+@register_transformer("slice")
+class Slice(Transformer):
+    def compile(self, op, **kwargs):
+        childs = kwargs['childs']
+        attrs = kwargs['attr']
+        begin = get_attr(attrs, 'begin', None)
+        end = get_attr(attrs, 'end', None)
+        stride = get_attr(attrs, 'step', None)
+        new_attrs = {'begin': begin, 'end': end}
+        if stride is not None:
+            new_attrs['stride'] = stride
+        return get_nnvm_op('strided_slice')(childs[0],
+                name=N.n('slice'), **new_attrs)
+
+
+@register_pass("validate")
+@register_transformer("Reshape")
+class Reshape(Transformer):
+    def compile(self, op, **kwargs):
+        childs = kwargs['childs']
+        attrs = kwargs['attr']
+        op_name = 'reshape'
+        new_attrs = {}
+        new_attrs['shape'] = get_attr(attrs, 'shape', 'reshape')
+        return get_nnvm_op(op_name)(*childs,
+                name=N.n('reshape'), **new_attrs)
+
+
 @register_transformer("Custom")
 class Custom(Transformer):
     def validate(self, op, **kwargs):
