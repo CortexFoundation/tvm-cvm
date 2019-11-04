@@ -193,7 +193,7 @@ def graph_validate(symbol, params):
         childs, attr = sym_iter(op.get_children()), op.list_attr()
         if is_inputs(op, params):
             assert "data" not in graph, "multiple inputs"
-            op = mx.sym.var("data", attr=attr)
+            graph["data"] = op = mx.sym.var("data", attr=attr)
         elif is_params(op, params):
             op = mx.sym.var(N.n("params"), attr=attr)
             params[op.attr('name')] = params[name]
