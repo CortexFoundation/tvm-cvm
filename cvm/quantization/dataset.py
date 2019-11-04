@@ -128,7 +128,7 @@ def load_quickdraw10(batch_size, num_workers=4, is_train=False, **kwargs):
             num_workers=num_workers)
     return val_data
 
-def load_trec(batch_size, is_train = False, **kwargs):
+def load_trec(batch_size, is_train=False, **kwargs):
     files = ["TREC.train.pk", "TREC.test.pk"]
     root_dir = download_files("trec", files, **kwargs)
     fname = os.path.join(root_dir, files[0] if is_train else files[1])
@@ -156,6 +156,35 @@ def load_mnist(batch_size, **kwargs):
 def data_xform(data):
     """Move channel axis to the beginning, cast to float32, and normalize to [0, 1]."""
     return nd.moveaxis(data, 2, 0).astype('float32') / 255
+
+def data_iter(dataset, batch_size, **kwargs):
+    if dataset == "imagenet":
+        data_iter = load_imagenet_rec(batch_size, **kwargs)
+        def data_iter_func():
+            data = data_iter.next()
+            return data.data[0], data.label[0]
+    elif dataset == "voc":
+        val_data = load_voc(batch_size, **kwargs)
+        data_iter = iter(val_data)
+        def data_iter_func():
+            return next(data_iter)
+    elif dataset == "trec":
+        data_iter = load_trec(batch_size, **kwargs)
+        def data_iter_func():
+            return next(data_iter)
+    elif dataset == "mnist":
+        val_loader = load_mnist(batch_size, **kwargs)
+        data_iter = iter(val_loader)
+        def data_iter_func():
+            return next(data_iter)
+    elif dataset == "quickdraw":
+        val_data = load_quickdraw10(batch_size, **kwargs)
+        data_iter = iter(val_data)
+        def data_iter_func():
+            return next(data_iter)
+    else:
+        assert False, "dataset:%s is not supported" % (dataset)
+    return data_iter_func
 
 
 

@@ -2,8 +2,11 @@ from tfm_base import *
 import tfm_ops
 import cvm_op
 from sym_utils import *
+import utils
+from tfm_pass import *
 
 def init(symbol, params, input_shape=None):
+    utils.log_init()
     sym, params = graph_validate(symbol, params)
     if input_shape is not None:
         sym, params = attach_input_shape(sym, params, input_shape)
@@ -36,3 +39,10 @@ if __name__ == "__main__":
     print (calculate_ops(sym, params))
     with open(os.path.expanduser("~/tvm-cvm/data/tmp_v2.json"), "w") as fout:
         fout.write(sym.tojson())
+    data_iter_func = ds.data_iter('imagenet', 1, input_size=224)
+    data, _ = data_iter_func()
+    th_dict = sym_calibrate(sym, params, data, \
+            ctx=mx.cpu(), old_ths=None, lambd=None)
+    sym, params = quantize(sym, params, th_dict)
+    print (calculate_ops(sym, params))
+
