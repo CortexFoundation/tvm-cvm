@@ -41,8 +41,14 @@ if __name__ == "__main__":
         fout.write(sym.tojson())
     data_iter_func = ds.data_iter('imagenet', 1, input_size=224)
     data, _ = data_iter_func()
-    th_dict = sym_calibrate(sym, params, data, \
-            ctx=mx.cpu(), old_ths=None, lambd=None)
-    sym, params = quantize(sym, params, th_dict)
-    print (calculate_ops(sym, params))
+    mrt = _mrt.MRT(sym, params)
+    mrt.set_data('data', data)
+    mrt.calibrate(ctx=ctx)
+    mrt.set_input_prec('data', 16)
+    mrt.set_fixed('data')
+    mrt.set_output_prec(8)
+    mrt = MRT()
+    mrt.calibrate(sym, params, data, ctx=mx.cpu(), old_ths=None, lambd=None)
+    #sym, params = quantize(sym, params, th_dict, precs, scales)
+    #print (calculate_ops(sym, params))
 

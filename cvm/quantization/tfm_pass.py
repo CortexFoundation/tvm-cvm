@@ -4,6 +4,10 @@ import numpy as np
 from sym_utils import *
 from tfm_base import *
 
+
+out_key = 'out_key'
+target_key = 'target_key'
+
 # === symbol pass == 
 
 def calculate_ops(symbol, params, normalize=True):
@@ -79,6 +83,14 @@ def compile(symbol, params):
 
 @N.register_nm("gv")
 def graph_validate(symbol, params):
+    # Check no duplicate name
+    names = set()
+    for sym in topo_sort(symbol):
+        name = sym.attr('name')
+        assert name not in names, "duplicated name in graph: %s" % name
+        names.add(name)
+
+    # Repalce names
     def _name_replace(op, params, graph):
         name, op_name = op.attr('name'), op.attr('op_name')
         childs, attr = sym_iter(op.get_children()), op.list_attr()
@@ -86,12 +98,11 @@ def graph_validate(symbol, params):
             assert "data" not in graph, "multiple inputs"
             op = mx.sym.var("data", attr=attr)
         elif is_params(op, params):
-            op = mx.sym.var(N.n("params"), attr=attr)
-            params[op.attr('name')] = params[name]
+            pass
         elif childs is None:
-            op = get_mxnet_op(op_name)(name=N.n(op_name), **attr)
+            op = get_mxnet_op(op_name)(name=name, **attr)
         else:
-            op = get_mxnet_op(op_name)(*childs, name=N.n(op_name), **attr)
+            op = get_mxnet_op(op_name)(*childs, name=name, **attr)
         return op
     sym, params = topo_visit_transformer(symbol, params, _name_replace)
 
@@ -216,7 +227,25 @@ def sym_calibrate(symbol, params, data, **kwargs):
     topo_visit_transformer(symbol, params, _impl, logger=logger,
             deps=deps, data=data, **kwargs)
     out_cache.clear()
+
     return th_dict
+
+class MRT:
+
+    def __init__(self, sym, params):
+        self.precs = {}
+        for sym in topo_sort(symbol):
+            name = sym.attr('name')
+            precs[name] = {}
+            precs[name][name] = 1
+
+    def set_data(self, name, data):
+        self._datas[name] = data
+
+    def calibrate(self, ctx=mx.cpu(), lambd=None):
+        self._lgr.info("calibrate model outputs")
+        self.th_dict = self._sym_calibrate(ctx=ctx, lambd=lambd)
+        return self.th_dict
 
 def check_fixed(symbol, params, th_dict):
     for sym in topo_sort(symbol):
@@ -231,3 +260,4 @@ def requant_operator():
 
 def requant():
     pass
+
