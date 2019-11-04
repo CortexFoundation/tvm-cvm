@@ -191,7 +191,6 @@ def sym_calibrate(symbol, params, data, **kwargs):
     _, deps = topo_sort(symbol, logger=logger, with_deps=True)
     th_dict, out_cache = {}, {}
     ctx = kwargs.get('ctx', mx.cpu())
-    data = {'data': data}
     logger.info("calibrate model outputs")
 
     def _impl(op, params, graph, **kwargs):
@@ -200,8 +199,7 @@ def sym_calibrate(symbol, params, data, **kwargs):
         name, op_name = op.attr('name'), op.attr('op_name')
         childs, attr = sym_iter(op.get_children()), op.list_attr()
         if op_name == 'null':
-            out = kwargs['data'][name] if is_inputs(op, params) \
-                  else params[name]
+            out = data if is_inputs(op, params) else params[name]
         elif childs is None:
             out = get_nd_op(op_name)(**attr)
         else:
@@ -230,22 +228,6 @@ def sym_calibrate(symbol, params, data, **kwargs):
 
     return th_dict
 
-class MRT:
-
-    def __init__(self, sym, params):
-        self.precs = {}
-        for sym in topo_sort(symbol):
-            name = sym.attr('name')
-            precs[name] = {}
-            precs[name][name] = 1
-
-    def set_data(self, name, data):
-        self._datas[name] = data
-
-    def calibrate(self, ctx=mx.cpu(), lambd=None):
-        self._lgr.info("calibrate model outputs")
-        self.th_dict = self._sym_calibrate(ctx=ctx, lambd=lambd)
-        return self.th_dict
 
 def check_fixed(symbol, params, th_dict):
     for sym in topo_sort(symbol):
