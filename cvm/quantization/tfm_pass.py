@@ -36,6 +36,11 @@ def transfer_multiple_inputs(sym, params):
             dim_per[name] = dot
             dim_sum += dot
     topo_visit_transformer(sym, params, _sum_input)
+
+    assert len(dim_per) > 0, "Graph has no input"
+    if len(dim_per) == 1:
+        return sym, params
+
     data_sum = mx.sym.var('data', shape=(dim_sum,))
     first, last = 0, 0
     def _change_node(op, params, graph, **kwargs):
@@ -50,7 +55,7 @@ def transfer_multiple_inputs(sym, params):
             first = last
         return op
     sym, params = topo_visit_transformer(sym, params, _change_node)
-    return sym
+    return sym, params
 
 @N.register_nm("fuse_transpose")
 def fuse_transpose(symbol, params):

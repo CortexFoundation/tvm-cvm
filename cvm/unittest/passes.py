@@ -7,7 +7,7 @@ class TestFuseMultiplyInputs(TfmTest):
         d2 = mx.sym.var('d2', shape=(2, 4))
         d3 = mx.sym.var('d3', shape=(2, 3))
         op = mx.sym.concat(d1, d2, d3)
-        sym = transfer_multiple_inputs(op, {})
+        sym, _ = transfer_multiple_inputs(op, {})
 
         data = mx.sym.var('data', shape=(20,))
         s1 = mx.sym.slice(data, begin=(0,), end=(6,))
