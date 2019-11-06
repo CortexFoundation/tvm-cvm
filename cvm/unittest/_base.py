@@ -6,7 +6,7 @@ import transformer as tfm
 import sym_utils as sutils
 
 def graph_equal(src, des):
-    if len(src) > 1:
+    if isinstance(src, mx.sym.Symbol) and len(src) > 1:
         for i, op in enumerate(src):
             if i >= len(des):
                 return op, des[-1]

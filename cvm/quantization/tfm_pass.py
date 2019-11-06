@@ -27,6 +27,40 @@ def calculate_ops(symbol, params, normalize=True):
         ops = "{:5.2f}{}".format(ops, LEVELS[idx])
     return ops
 
+@N.register_nm("fmi")
+def transfer_multiple_inputs(sym, params):
+    infer_shapes = infer_shape(sym, params)
+    dim_sum, dim_per, dims = 0, {}, {}
+    def _sum_input(node, params, **kwargs):
+        name = node.attr('name')
+        nonlocal dim_sum, dim_per, dims
+        if is_inputs(node, params):
+            dims[name] = infer_shapes[name][0]
+            dot = np.product(dims[name])
+            dim_per[name] = dot
+            dim_sum += dot
+    topo_visit_transformer(sym, params, _sum_input)
+
+    assert len(dim_per) > 0, "Graph has no input"
+    if len(dim_per) == 1:
+        return sym, params
+
+    data_sum = mx.sym.var('data', shape=(dim_sum,))
+    first, last = 0, 0
+    def _change_node(op, params, graph, **kwargs):
+        name = op.attr('name')
+        if is_inputs(op, params):
+            nonlocal first, last
+            last = first + dim_per[name]
+            op = mx.sym.slice(data_sum, name=N.n('slice'),
+                    begin=(first,), end=(last,))
+            op = mx.sym.reshape(op, name=N.n('reshape'),
+                    shape=dims[name])
+            first = last
+        return op
+    sym, params = topo_visit_transformer(sym, params, _change_node)
+    return sym, params
+
 @N.register_nm("fuse_transpose")
 def fuse_transpose(symbol, params):
     infer_shapes = infer_shape(symbol, params)

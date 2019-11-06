@@ -3,7 +3,7 @@ import mxnet as mx
 
 import nnvm
 
-from ut_base import *
+from _base import *
 
 class TestNull(TfmTest):
     op = mx.sym.var("data", shape=[1, 3, 2, 1])
@@ -69,25 +69,6 @@ class TestConcat(TfmTest):
 
         self._assert_equal(op, des,
                 ["validate", "fuse_transpose"])
-
-
-class TestFuseMultiplyInputs(TfmTest):
-    def test_fmi(self):
-        d1 = mx.sym.var('d1', shape=(1, 2, 3))
-        d2 = mx.sym.var('d2', shape=(4, 2))
-        d3 = mx.sym.var('d3', shape=(2, 3))
-        op = mx.sym.Group([d1, d2, d3])
-
-        data = mx.sym.var('data', shape=(20,))
-        s1 = mx.sym.slice(data, begin=(0,), end=(6,))
-        r1 = mx.sym.reshape(s1, shape=(1, 2, 3))
-        s2 = mx.sym.slice(data, begin=(6,), end=(14,))
-        r2 = mx.sym.reshape(s2, shape=(4, 2))
-        s3 = mx.sym.slice(data, begin=(14,), end=(20,))
-        r3 = mx.sym.reshape(s3, shape=(2, 3))
-        des = mx.sym.Group([r1, r2, r3])
-
-        self._assert_equal(op, des)
 
 class TestSlice(TfmTest):
     def test_compile(self):
