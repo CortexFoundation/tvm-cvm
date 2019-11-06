@@ -20,28 +20,27 @@ def init(symbol, params, input_shape=None):
 
 
 class MRT(object):
-    _out_key = 'out_key'
-    _tartget_key = 'target_key'
-
     def __init__(self, symbol, params,
             input_shape=None, data=None, input_prec=8):
         self._lgr = logging.getLogger('mrt')
 
-        _sym, _prm = init(symbol, params, input_shape)
-        _sym, _prm = fuse_constant(_sym, _prm)
-        _sym, _prm = fuse_transpose(_sym, _prm)
-        self._sym, self._prm = rewrite(_sym, _prm)
+        sym, prm = init(symbol, params, input_shape)
+        sym, prm = fuse_constant(sym, prm)
+        sym, prm = fuse_transpose(sym, prm)
+        self._sym, self._prm = rewrite(sym, prm)
         self._lgr.info("ops=%s", calculate_ops(self._sym, self._prm))
 
         self._data = data
         self._fixed = set()
 
-        self.precs = {}
-        for sym in topo_sort(self._sym):
-            self.precs[sym.attr('name')] = {}
-        self.precs['data'][MRT._out_key] = input_prec
-
+        self.precs = self._init_precs(input_prec)
         self.th_dict = None
+        self.scales = {}
+
+        self._qsym = None
+        self._qprm = None
+
+        self.op_input_precs = self._op_default_input_precs()
 
     def set_data(self, data):
         self._data = data
@@ -51,45 +50,45 @@ class MRT(object):
                 ctx=ctx, lambd=lambd, old_ths=old_ths)
 
     def set_input_prec(self, prec):
-        self.precs['data'][MRT._out_key] = prec
+        self.precs['data'][OUT_KEY] = prec
 
     def set_output_prec(self, prec):
         for sym in self._sym:
             name = sym.attr('name')
             self.precs[name][name] = prec
 
-    def set_fixed(self, fixes):
-        if isinstance(fixes, list):
-            self._fixed.update(fixes)
-        else:
-            self._fixed.add(fixes)
+    def quantize(self, no_realize=False):
         if self.th_dict is None:
             self._lgr.error("Please calibrate thresholds first.")
             assert False
-        # Check Fixed
-        for sym in topo_sort(self._sym):
-            name, op_name = sym.attr('name'), sym.attr('op_name')
-            if name not in self._fixed:
-                continue
-            assert op_name == 'null'
-            if is_params(sym, self.prm):
-                bit = _get_bit(self.prm[name])
-                if MRT._out_key in self.precs[name]:
-                    prec = self.precs[name][MRT._out_key]
-                    assert prec >= bit
-                    self.precs[name][out_key] = PREC(bit, LFIX)
-            else:
-                bit = self.precs[name][out_key].p
-            self.th_dict[name] = _get_range(bit)
 
-    def quantize(self, no_realize=False):
-        qsym, qparams = self._simulate()
+        qsym, qparams = quantize(self._sym, self._prm,
+                self.th_dict, self.precs, self.scales, self.op_input_precs)
         '''
         if not no_realize:
             qsym, qparams = self._realize()
         qext = self._get_ext()
         '''
-        return qsym, qparams, qext
+        return qsym, qparams
+
+    def _op_default_input_precs(self):
+        op_precs = {}
+        for n in ['Convolution', 'FullyConnected', 'sigmoid', 'exp', 'softmax']:
+            op_precs[n] = 8
+        op_precs['sum'] = 8
+        for n in ['broadcast_add', 'broadcast_sub', 'elemwise_add', 'elemwise_sub']:
+            op_precs[n] = 16
+        op_precs['broadcast_mul'] = 16
+        op_precs['Concat'] = 16
+        op_precs['Embedding'] = 16
+        return op_precs
+
+    def _init_precs(self, input_prec):
+        precs = {}
+        for sym in topo_sort(self._sym):
+            precs[sym.attr('name')] = {}
+        precs['data'][OUT_KEY] = input_prec
+        return precs
 
 if __name__ == "__main__":
     import os
@@ -109,7 +108,6 @@ if __name__ == "__main__":
     mrt.set_data(data)
     mrt.calibrate()
     mrt.set_input_prec(8)
-    mrt.set_fixed('data')
     mrt.set_output_prec(8)
     mrt.quantize()
     #sym, params = quantize(sym, params, th_dict, precs, scales)
