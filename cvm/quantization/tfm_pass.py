@@ -4,10 +4,6 @@ import numpy as np
 from sym_utils import *
 from tfm_base import *
 
-
-out_key = 'out_key'
-target_key = 'target_key'
-
 # === symbol pass == 
 
 def calculate_ops(symbol, params, normalize=True):
@@ -26,40 +22,6 @@ def calculate_ops(symbol, params, normalize=True):
             idx += 1
         ops = "{:5.2f}{}".format(ops, LEVELS[idx])
     return ops
-
-@N.register_nm("fmi")
-def transfer_multiple_inputs(sym, params):
-    infer_shapes = infer_shape(sym, params)
-    dim_sum, dim_per, dims = 0, {}, {}
-    def _sum_input(node, params, **kwargs):
-        name = node.attr('name')
-        nonlocal dim_sum, dim_per, dims
-        if is_inputs(node, params):
-            dims[name] = infer_shapes[name][0]
-            dot = np.product(dims[name])
-            dim_per[name] = dot
-            dim_sum += dot
-    topo_visit_transformer(sym, params, _sum_input)
-
-    assert len(dim_per) > 0, "Graph has no input"
-    if len(dim_per) == 1:
-        return sym, params
-
-    data_sum = mx.sym.var('data', shape=(dim_sum,))
-    first, last = 0, 0
-    def _change_node(op, params, graph, **kwargs):
-        name = op.attr('name')
-        if is_inputs(op, params):
-            nonlocal first, last
-            last = first + dim_per[name]
-            op = mx.sym.slice(data_sum, name=N.n('slice'),
-                    begin=(first,), end=(last,))
-            op = mx.sym.reshape(op, name=N.n('reshape'),
-                    shape=dims[name])
-            first = last
-        return op
-    sym, params = topo_visit_transformer(sym, params, _change_node)
-    return sym, params
 
 @N.register_nm("fuse_transpose")
 def fuse_transpose(symbol, params):
@@ -115,34 +77,65 @@ def compile(symbol, params):
 
 # === symbol helper ===
 
+@N.register_nm("fmi")
+def transfer_multiple_inputs(sym, params):
+    infer_shapes = infer_shape(sym, params)
+    dim_sum, dim_per, dims = 0, {}, {}
+    def _sum_input(node, params, **kwargs):
+        name = node.attr('name')
+        nonlocal dim_sum, dim_per, dims
+        if is_inputs(node, params):
+            dims[name] = infer_shapes[name][0]
+            dot = np.product(dims[name])
+            dim_per[name] = dot
+            dim_sum += dot
+    topo_visit_transformer(sym, params, _sum_input)
+
+    assert len(dim_per) > 0, "no input in graph"
+    if len(dim_per) == 1:
+        return sym, params
+
+    data_sum = mx.sym.var('data', shape=(dim_sum,))
+    first, last = 0, 0
+    def _change_node(op, params, graph, **kwargs):
+        name = op.attr('name')
+        if is_inputs(op, params):
+            nonlocal first, last
+            last = first + dim_per[name]
+            op = mx.sym.slice(data_sum, name=N.n('slice'),
+                    begin=(first,), end=(last,))
+            op = mx.sym.reshape(op, name=N.n('reshape'),
+                    shape=dims[name])
+            first = last
+        return op
+    sym, params = topo_visit_transformer(sym, params, _change_node)
+    return sym, params
+
 @N.register_nm("gv")
 def graph_validate(symbol, params):
-    # Check no duplicate name
+    """ Graph Validate pass do some checks:
+            1. examine unique names in model
+            2. fuse multiple inputs into single one
+            3. named the single input node `data`
+            4. remove unused params
+    """
     names = set()
     for sym in topo_sort(symbol):
         name = sym.attr('name')
         assert name not in names, "duplicated name in graph: %s" % name
         names.add(name)
 
-    # Repalce names
+    sym, params = transfer_multiple_inputs(symbol, params)
+
     def _name_replace(op, params, graph):
-        name, op_name = op.attr('name'), op.attr('op_name')
-        childs, attr = sym_iter(op.get_children()), op.list_attr()
+        name, attr = op.attr('name'), op.list_attr()
         if is_inputs(op, params):
-            assert "data" not in graph, "multiple inputs"
-            graph["data"] = op = mx.sym.var("data", attr=attr)
-        elif is_params(op, params):
-            pass
-        elif childs is None:
-            op = get_mxnet_op(op_name)(name=name, **attr)
-        else:
-            op = get_mxnet_op(op_name)(*childs, name=name, **attr)
+            op = mx.sym.var("data", attr=attr)
         return op
-    sym, params = topo_visit_transformer(symbol, params, _name_replace)
+    sym, params = topo_visit_transformer(sym, params, _name_replace)
 
     new_params = {s.attr('name'):params[s.attr('name')] \
             for s in topo_sort(sym) if is_params(s, params)}
-
     return sym, new_params
 
 @N.register_nm("fc")
@@ -163,10 +156,11 @@ def fuse_constant(symbol, params):
     return topo_visit_transformer(symbol, params, _impl)
 
 @N.register_nm("ais")
-def attach_input_shape(symbol, params, input_shape):
+def attach_input_shape(symbol, params, input_shapes):
     def _impl(op, params, graph):
-        if is_inputs(op, params):
-            op = mx.sym.var(op.attr('name'), shape=input_shape)
+        name, attr = op.attr('name'), op.list_attr()
+        if is_inputs(op, params) and name in input_shapes:
+            op = mx.sym.var(name, shape=input_shapes[name], attr=attr)
         return op
     return topo_visit_transformer(symbol, params, _impl)
 

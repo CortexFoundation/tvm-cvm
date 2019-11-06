@@ -1,19 +1,18 @@
-from tfm_base import *
 import tfm_ops
-import cvm_op
-from sym_utils import *
 from tfm_pass import *
+
 import utils
+import sym_utils as sutils
+import cvm_op
 
 import logging
 
-# set python-logging color format
-utils.log_init()
+#TODO(wlt): control available api for MRT
 
 def init(symbol, params, input_shape=None):
     sym, params = graph_validate(symbol, params)
     if input_shape is not None:
-        sym, params = attach_input_shape(sym, params, input_shape)
+        sym, params = attach_input_shape(sym, params, {'data': input_shape})
     infer_shape(sym, params) # check infer_shape is correct.
     sym, params = validate(sym, params)
     return sym, params
@@ -27,21 +26,23 @@ class MRT(object):
             input_shape=None, data=None, input_prec=8):
         self._lgr = logging.getLogger('mrt')
 
+        self._lgr.info("Graph initialize and reduce...")
         _sym, _prm = init(symbol, params, input_shape)
-        _sym, _prm = fuse_constant(_sym, _prm)
+        orig_ops = calculate_ops(_sym, _prm)
         _sym, _prm = fuse_transpose(_sym, _prm)
-        self._sym, self._prm = rewrite(_sym, _prm)
-        self._lgr.info("ops=%s", calculate_ops(self._sym, self._prm))
+        _sym, _prm = rewrite(_sym, _prm)
+        _sym, _prm = fuse_constant(_sym, _prm)
+        self._lgr.info("Original ops[%s] reduced into %s",
+                orig_ops, calculate_ops(_sym, _prm))
 
         self._data = data
         self._fixed = set()
 
-        self.precs = {}
-        for sym in topo_sort(self._sym):
-            self.precs[sym.attr('name')] = {}
+        self.precs = {s.attr('name'): {} for s in topo_sort(_sym)}
         self.precs['data'][MRT._out_key] = input_prec
 
         self.th_dict = None
+        self._sym, self._prm = _sym, _prm
 
     def set_data(self, data):
         self._data = data
@@ -95,6 +96,9 @@ if __name__ == "__main__":
     import os
     import dataset as ds
 
+    # set python-logging color format
+    utils.log_init()
+
     # sym = mx.sym.load("/tmp/densenet/densenet161.json")
     # params = mx.nd.load("/tmp/densenet/densenet161.params")
     sym = mx.sym.load("./data/tf_inceptionv3.json")
@@ -107,11 +111,11 @@ if __name__ == "__main__":
     data, _ = data_iter_func()
     mrt = MRT(sym, params, input_shape=(1, 3, 299, 299))
     mrt.set_data(data)
-    mrt.calibrate()
-    mrt.set_input_prec(8)
-    mrt.set_fixed('data')
-    mrt.set_output_prec(8)
-    mrt.quantize()
+    # mrt.calibrate()
+    # mrt.set_input_prec(8)
+    # mrt.set_fixed('data')
+    # mrt.set_output_prec(8)
+    # mrt.quantize()
     #sym, params = quantize(sym, params, th_dict, precs, scales)
     #print (calculate_ops(sym, params))
 
