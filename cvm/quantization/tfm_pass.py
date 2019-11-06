@@ -220,6 +220,13 @@ def _get_opt(out, lambd):
         return alpha
     return absmax
 
+def _get_bit(opt):
+    if isinstance(opt, nd.NDArray):
+        opt = opt.abs().max().asscalar()
+    if opt == 0:
+        return 1
+    return math.ceil(math.log2(opt)) + 1
+
 def sym_calibrate(symbol, params, data, **kwargs):
     logger = logging.getLogger('log.mrt')
     _, deps = topo_sort(symbol, logger=logger, with_deps=True)

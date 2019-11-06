@@ -13,15 +13,15 @@ utils.log_init()
 def init(symbol, params, input_shape=None):
     sym, params = graph_validate(symbol, params)
     if input_shape is not None:
-        sym, params = attach_var_shape(sym, params, input_shape)
+        sym, params = attach_input_shape(sym, params, input_shape)
     infer_shape(sym, params) # check infer_shape is correct.
     sym, params = validate(sym, params)
     return sym, params
 
 
 class MRT(object):
-    OUT_KEY = 'out_key'
-    TARGET_KEY = 'target_key'
+    _out_key = 'out_key'
+    _tartget_key = 'target_key'
 
     def __init__(self, symbol, params,
             input_shape=None, data=None, input_prec=8):
@@ -39,7 +39,7 @@ class MRT(object):
         self.precs = {}
         for sym in topo_sort(self._sym):
             self.precs[sym.attr('name')] = {}
-        self.precs['data'][MRT.OUT_KEY] = input_prec
+        self.precs['data'][MRT._out_key] = input_prec
 
         self.th_dict = None
 
@@ -51,7 +51,7 @@ class MRT(object):
                 ctx=ctx, lambd=lambd, old_ths=old_ths)
 
     def set_input_prec(self, prec):
-        self.precs['data'][MRT.OUT_KEY] = prec
+        self.precs['data'][MRT._out_key] = prec
 
     def set_output_prec(self, prec):
         for sym in self._sym:
@@ -63,6 +63,33 @@ class MRT(object):
             self._fixed.update(fixes)
         else:
             self._fixed.add(fixes)
+        if self.th_dict is None:
+            self._lgr.error("Please calibrate thresholds first.")
+            assert False
+        # Check Fixed
+        for sym in topo_sort(self._sym):
+            name, op_name = sym.attr('name'), sym.attr('op_name')
+            if name not in self._fixed:
+                continue
+            assert op_name == 'null'
+            if is_params(sym, self.prm):
+                bit = _get_bit(self.prm[name])
+                if MRT._out_key in self.precs[name]:
+                    prec = self.precs[name][MRT._out_key]
+                    assert prec >= bit
+                    self.precs[name][out_key] = PREC(bit, LFIX)
+            else:
+                bit = self.precs[name][out_key].p
+            self.th_dict[name] = _get_range(bit)
+
+    def quantize(self, no_realize=False):
+        qsym, qparams = self._simulate()
+        '''
+        if not no_realize:
+            qsym, qparams = self._realize()
+        qext = self._get_ext()
+        '''
+        return qsym, qparams, qext
 
 if __name__ == "__main__":
     import os
@@ -84,6 +111,7 @@ if __name__ == "__main__":
     mrt.set_input_prec(8)
     mrt.set_fixed('data')
     mrt.set_output_prec(8)
+    mrt.quantize()
     #sym, params = quantize(sym, params, th_dict, precs, scales)
     #print (calculate_ops(sym, params))
 
