@@ -52,7 +52,7 @@ class Transpose(Transformer):
             axes = [caxes[ii] for ii in axes]
             op = X.get_children()[0]
             if axes != sorted(axes):
-                op = mx.sym.transpose(op, axes=axes, name=N.n("transpose"))
+                op = mx.sym.transpose(op, axes=axes, name=name)
         return op
 
 
@@ -62,11 +62,11 @@ class Transpose(Transformer):
 @register_transformer("relu")
 class Relu(Transformer):
     def fuse_transpose(self, op, **kwargs):
-        X = op.get_children()[0]
+        X, name = op.get_children()[0], op.attr('name')
         if X.attr('op_name') == Transpose.op_name:
             t_name, t_attr = X.attr('name'), X.list_attr()
             X = X.get_children()[0]
-            op = mx.sym.relu(X, name=N.n("relu"))
+            op = mx.sym.relu(X, name=name)
             op = mx.sym.transpose(op, name=t_name, **t_attr)
         return op
 
@@ -163,7 +163,7 @@ class Convolution(Transformer):
         attr['no_bias'] = True
         X, W, B = childs
         oshp = infer_shapes[op.attr('name')][0]
-        op = mx.sym.Convolution(X, W, **attr, name=N.n('Convolution'))
+        op = mx.sym.Convolution(X, W, **attr, name=name)
         B = mx.sym.reshape(B, (1, oshp[1], 1, 1), name=N.n('reshape'))
         print (B.infer_shape())
         op = mx.sym.broadcast_add(op, B, name=N.n('broadcast_add'))
@@ -426,7 +426,7 @@ class Concat(Transformer):
             dim = get_attr(op.list_attr(), 'dim')
             axes = get_attr(childs[0].list_attr(), 'axes')
             Xs = [X.get_children()[0] for X in childs]
-            op = mx.sym.concat(*Xs, dim=axes[dim], name=N.n('Concat'))
+            op = mx.sym.concat(*Xs, dim=axes[dim], name=name)
             op = mx.sym.transpose(op, axes=axes, name=N.n('fuse_transpose'))
         return op
 
@@ -437,6 +437,7 @@ class Concat(Transformer):
 class Sum(Transformer):
     def validate(self, op, **kwargs):
         X, attr = sym_iter(op.get_children())[0], op.list_attr()
+        name = op.attr('name')
         xshp = kwargs['infer_shapes'][X.attr('name')][get_entry_id(X)]
         axis = get_attr(attr, 'axis', [])
         # convert exclude into False
@@ -445,7 +446,7 @@ class Sum(Transformer):
             attr['exclude'] = False
             if len(attr['axis']) == 0:
                 return X
-        op = mx.sym.sum(X, **attr, name=N.n('sum'))
+        op = mx.sym.sum(X, **attr, name=name)
         return op
 
     def fuse_transpose(self, op, **kwargs):
@@ -456,7 +457,7 @@ class Sum(Transformer):
         if X.attr('op_name') == Transpose.op_name and not keepdims:
             axes, op = get_attr(X.list_attr(), 'axes'), X.get_children()[0]
             axis = [axes[i] for i in axis]
-            op = mx.sym.sum(op, axis=axis, keepdims=keepdims, name=N.n('sum'))
+            op = mx.sym.sum(op, axis=axis, keepdims=keepdims, name=name)
         return op
 
     def calculate_ops(self, op, **kwargs):
@@ -495,15 +496,16 @@ class BatchNorm(Transformer):
             assert axis == 1, "Channel in input must be axis 1"
             cchilds, cattr = sym_iter(X.get_children()), X.list_attr()
 
-            conv_name = N.n('convolution')
-            W_name = N.n('weight')
-            weight = params[cchilds[1].attr('name')]
+            conv_name = X.attr('name')
+            W_name = cchilds[1].attr('name')
+            weight = params[W_name]
             params[W_name] = weight * scale.reshape(*scale.shape, 1, 1, 1)
             W = mx.sym.var(W_name, shape=params[W_name].shape)
 
             B_name = N.n('bias')
             if not get_attr(cattr, 'no_bias', False):
-               bias += params[cchilds[2].attr('name')]
+               B_name = cchilds[2].attr('name')
+               bias += params[B_name]
             params[B_name] = bias
             B = mx.sym.var(B_name, shape=bias.shape)
 
@@ -605,7 +607,6 @@ class ElemwiseAdd(Transformer):
     def fuse_transpose(self, op, **kwargs):
         return _ft_multi_input(op)
 
-
 def _ft_multi_input(op):
     name, childs = op.attr('name'), sym_iter(op.get_children())
     # Assert all the inputs are transpose
@@ -619,6 +620,6 @@ def _ft_multi_input(op):
         axes = get_attr(childs[0].list_attr(), 'axes')
         Xs = [X.get_children()[0] for X in childs]
         opname = op.attr('op_name')
-        op = get_mxnet_op(opname)(*Xs, name=N.n(opname))
+        op = get_mxnet_op(opname)(*Xs, name=name)
         op = mx.sym.transpose(op, axes=axes, name=N.n('fuse_transpose'))
     return op
