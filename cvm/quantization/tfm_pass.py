@@ -220,7 +220,23 @@ def _get_opt(out, lambd):
         return alpha
     return absmax
 
-def _get_bit(opt):
+def _mrt_sim_quantize(sym, sb, params, graph, prec):
+    name = N.n("%s_%d_%d"%(sym.attr('name'), sb, prec))
+    if name not in graph:
+        graph[name] = mx.sym.Custom(sym, sb=sb, prec=prec,
+                name=name, op_type='mrt_sim_quant')
+    return graph[name]
+
+def _mx_const(number, graph, params):
+    name = N.n('const_var')
+    prec = math.ceil(math.log2(number)) + 1
+    if name not in graph:
+        attr = { 'precision': str(prec) }
+        graph[name] = mx.sym.var(name, shape=(1,), attr=attr)
+        params[name] = nd.array([number])
+    return graph[name]
+
+def get_bit(opt):
     if isinstance(opt, nd.NDArray):
         opt = opt.abs().max().asscalar()
     if opt == 0:
@@ -233,13 +249,6 @@ def scale(threshold, precision):
         return 1
     alpha = (2 ** (precision - 1)) - 1
     return alpha / threshold
-
-def _mrt_sim_quantize(sym, sb, params, graph, prec):
-    name = "%s_%d_%d" % (sym.attr('name'), sb, prec)
-    if name not in graph:
-        graph[name] = mx.sym.Custom(sym, sb=sb, prec=prec,
-                name=name, op_type='mrt_sim_quant')
-    return graph[name]
 
 def sym_calibrate(symbol, params, data, **kwargs):
     logger = logging.getLogger('log.mrt')
@@ -289,26 +298,47 @@ def requant_operator(X, oname, def_prec, oscale=None, **kwargs):
     th_dict, precs = kwargs['th_dict'], kwargs['precs']
     xopn, xn = X.attr('op_name'), X.attr('name')
 
+    # (iscale, iprec): current (scale, precision) of X
+    # (oscale, oprec): allowable (scale, precision) of X
     exactly = True if oscale else False
     oprec = precs[xn].get(oname, def_prec)
     oscale = oscale if oscale else scale(th_dict[xn], oprec)
     iscale, iprec = kwargs['scales'][xn], precs[xn][OUT_KEY]
-    '''
+
     if exactly:
-        in_prec = _get_bit(kwargs['th_dict'][xn] * iscale)
-        out_prec = prec.p
+        # force quant
+        in_prec = get_bit(kwargs['th_dict'][xn] * iscale)
+        out_prec = oprec
         sb = in_prec - out_prec if in_prec > out_prec else 0
         if sb > 1:
-            iprec = PREC(iprec.p - sb)
-            X = _mrt_sim_quantize(X, sb, params, graph, iprec.p)
+            iprec = PREC(iprec - sb)
+            X = _mrt_sim_quantize(X, sb, params, graph, iprec)
             iscale = iscale / (2 ** sb)
             logger.debug(
                 "Operator  %-20s name=%-40s exactly quantize with sb=%s" +
                 " scale=%s, prec=%s",
                     xopn, xn, sb, iscale, iprec)
-    '''
+
+    # Case 1: frac > 1, add broadcast_mul to multiply frac
+    #
+    #                                            X (int iprec)   var
+    #                                                  |        /
+    #                                                  |       /
+    #  X (int iprec)  -->    broadcast_mul:    X2 (int MAX_BIT-1) 
+    #                                                  |      
+    #                                                  |      
+    #                                quant:      X' (int oprec)
+
+    # Case 2/3: frac = 1, no need to multiply frac; or iprec < oprec
+    #
+    #                                            X (int iprec) 
+    #                                                  |     
+    #                                                  |      
+    #  X (int iprec)  -->            quant:     X' (int oprec) 
 
     if exactly or (iprec > oprec and iscale > oscale):
+        # Case 1/2: Force quant
+        # Or current precision > allowable precision, quant to avoid overflow
         rescale = oscale / iscale
         frac, exp = sim.cvm_float(rescale, MAX_BIT - iprec)
         sim_scale = frac * (2 ** exp)
@@ -319,10 +349,12 @@ def requant_operator(X, oname, def_prec, oscale=None, **kwargs):
                 "with <%s, %d, %d>, error=%s",
                     xopn, xn, rescale, sim_scale, frac, exp, scale_err)
         oscale = iscale * frac * (2 ** exp)
+
         if frac > 1:
-            X = _mrt_sim_quantize(X, 0, params, graph, iprec.p)
-            var = mx_const(frac, graph, params)
-            mul_name = _uniq_name("mrt_quantize_scale")
+            # TODO: use cvm_left/right_shift
+            X = _mrt_sim_quantize(X, 0, params, graph, iprec)
+            var = _mx_const(frac, graph, params)
+            mul_name = N.n("mrt_quantize_scale")
             X = mx.sym.broadcast_mul(X, var, name=mul_name)
         X = _mrt_sim_quantize(X, (-exp), params, graph, oprec)
         logger.debug(
@@ -331,6 +363,8 @@ def requant_operator(X, oname, def_prec, oscale=None, **kwargs):
                 xopn, xn, rescale, frac, exp, iprec, iscale,
                 oprec, oscale)
     else:
+        # Case 3: current precision <= allowable precision
+        # directly treat the precision as the allowable precision
         X = _mrt_sim_quantize(X, 0, params, graph, oprec)
         oscale = iscale
         logger.debug(
@@ -338,15 +372,15 @@ def requant_operator(X, oname, def_prec, oscale=None, **kwargs):
                 xopn, xn, iprec, oprec)
     return X, oprec, oscale
 
-def requant_parameter(pname, def_prec, oscale=None, **kwargs):
-    precs = kwargs['precs']
+def requant_parameter(pname, oname, def_prec, oscale=None, **kwargs):
+    logger = logging.getLogger('mrt.log.simulate')
+    params, graph, th_dict = kwargs['params'], kwargs['graph'], kwargs['th_dict']
     P_name = N.n(pname)
-    P_prec = precs[pname].get(name, def_prec)
-    xs = oscale if oscale else scale(th_dict[pname], P_prec.p)
+    P_prec = kwargs['precs'][pname].get(oname, def_prec)
+    xs = oscale if oscale else scale(th_dict[pname], P_prec)
     params[P_name] = params[pname] * xs
-    P_attr = { 'precision': str(P_prec.p) }
-    graph[P_name] = mx.sym.var(P_name,
-            shape=params[P_name].shape, attr=P_attr)
+    P_attr = { 'precision': str(P_prec) }
+    graph[P_name] = mx.sym.var(P_name, shape=params[P_name].shape, attr=P_attr)
     logger.debug(
         "Parameter th_dict=%-12.8f name=%-40s requantize with scale=%-16.8f to prec=%s",
             th_dict[pname], pname, xs, P_prec)

@@ -157,7 +157,7 @@ def examine_parameters(symbol, params, inputs_ext, allows=[], callback=None):
     return new_params
 
 def mx_const(number, graph, params):
-    name = 'const_var_' + str(number)
+    name = N.n('const_var_')
     prec = math.ceil(math.log2(number)) + 1
     if name not in graph:
         attr = { 'precision': str(prec) }

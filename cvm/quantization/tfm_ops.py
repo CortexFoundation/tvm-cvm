@@ -170,21 +170,25 @@ class Convolution(Transformer):
         return op
 
     def quantize(self, op, **kwargs):
+        th_dict = kwargs['th_dict']
         name, op_name = op.attr('name'), op.attr('op_name')
         childs = sym_iter(op.get_children())
         cns = [c.attr('name') for c in childs] if childs else []
         def_prec = kwargs['op_input_precs'][op_name]
         X, xprec, xs = requant_operator(childs[0], name, def_prec, **kwargs)
-        W, wprec, ws = requant_parameter(cns[1], def_prec)
+        W, wprec, ws = requant_parameter(cns[1], name, def_prec, **kwargs)
         B, bprec = None, None
+        print("191107 recoreded here!")
+        exit()
         if not get_attr(attr, 'no_bias', False):
             bs = ws * xs
-            bias_prec = PREC(_get_bit(th_dict[cns[2]] * bs))
+            bias_prec = get_bit(th_dict[cns[2]] * bs)
             B, bprec, _ = requant_parameter(cns[2], bias_prec, bs)
         oscale = scales[name] = ws * xs
-        sym = get_mxnet_op(op_name)(X, W, B, **attr, name=name)
-        precs[name][out_key] = PREC(get_bit(th_dict[name] * oscale))
-        return sym
+        op = get_mxnet_op(op_name)(X, W, B, **attr, name=name)
+        kwargs['precs'][name][out_key] = get_bit(th_dict[name] * oscale)
+        # TODO: requantize
+        return op
 
     def calculate_ops(self, op, **kwargs):
         W = sym_iter(op.get_children())[1]
