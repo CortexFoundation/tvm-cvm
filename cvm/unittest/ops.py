@@ -58,6 +58,75 @@ class TestElemwiseAdd(TfmTest):
         self._assert_equal(op, des, "fuse_transpose")
 
 
+class TestBroadcastAdd(TfmTest):
+    def test_compile(self):
+        x = mx.sym.var('x', shape=(2,3))
+        y = mx.sym.var('y', shape=(2,1))
+        ans = mx.sym.broadcast_add(x, y)
+
+        x = nnvm.sym.Variable('x', __shape__=(2, 3))
+        y = nnvm.sym.Variable('y', __shape__=(2, 1))
+        des = nnvm.sym.broadcast_add(x, y)
+        self._assert_equal(ans, des, "compile")
+
+
+class TestBroadcastDiv(TfmTest):
+    def test_compile(self):
+        x = mx.sym.var('x', shape=(2,3))
+        y = mx.sym.var('y', shape=(2,1))
+        ans = mx.sym.broadcast_div(x, y)
+
+        x = nnvm.sym.Variable('x', __shape__=(2, 3))
+        y = nnvm.sym.Variable('y', __shape__=(2, 1))
+        des = nnvm.sym.broadcast_div(x, y)
+        self._assert_equal(ans, des, "compile")
+
+
+class TestBroadcastMul(TfmTest):
+    def test_compile(self):
+        x = mx.sym.var('x', shape=(2,3))
+        y = mx.sym.var('y', shape=(2,1))
+        ans = mx.sym.broadcast_mul(x, y)
+
+        x = nnvm.sym.Variable('x', __shape__=(2, 3))
+        y = nnvm.sym.Variable('y', __shape__=(2, 1))
+        des = nnvm.sym.broadcast_mul(x, y)
+        self._assert_equal(ans, des, "compile")
+
+
+class TestBroadcastGreater(TfmTest):
+    def test_compile(self):
+        x = mx.sym.var('x', shape=(2,3))
+        y = mx.sym.var('y', shape=(2,1))
+        ans = mx.sym.broadcast_greater(x, y)
+
+        x = nnvm.sym.Variable('x', __shape__=(2, 3))
+        y = nnvm.sym.Variable('y', __shape__=(2, 1))
+        des = nnvm.sym.broadcast_greater(x, y)
+        self._assert_equal(ans, des, "compile")
+
+
+class TestBroadcastSub(TfmTest):
+    def test_compile(self):
+        x = mx.sym.var('x', shape=(2,3))
+        y = mx.sym.var('y', shape=(2,1))
+        ans = mx.sym.broadcast_sub(x, y)
+
+        x = nnvm.sym.Variable('x', __shape__=(2, 3))
+        y = nnvm.sym.Variable('y', __shape__=(2, 1))
+        des = nnvm.sym.broadcast_sub(x, y)
+        self._assert_equal(ans, des, "compile")
+
+class TestBroadcastTo(TfmTest):
+    def test_compile(self):
+        x = mx.sym.var('x', shape=(1,3))
+        ans = mx.sym.broadcast_to(x, shape=(2,3))
+
+        x = nnvm.sym.Variable('x', __shape__=(1,3))
+        des = nnvm.sym.broadcast_to(x, shape=(2,3))
+        self._assert_equal(ans, des, 'compile')
+
+
 class TestConcat(TfmTest):
     def test_fuse_transpose(self):
         x = mx.sym.var('x', shape=(1, 3, 244, 244))

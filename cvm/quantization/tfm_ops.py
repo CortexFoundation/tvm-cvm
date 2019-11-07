@@ -402,6 +402,8 @@ class Pooling(Transformer):
 class BroadcastMul(Transformer):
     pass
 
+
+@register_pass("compile")
 @register_pass("validate")
 @register_pass("rewrite")
 @register_pass("fuse_transpose")
@@ -411,8 +413,49 @@ class BroadcastAdd(Transformer):
     pass
 
 
+@register_pass("compile")
 @register_pass("validate")
 @register_pass("rewrite")
+@register_pass("fuse_transpose")
+@register_pass("calculate_ops")
+@register_transformer("broadcast_div")
+class BroadcastDiv(Transformer):
+    pass
+
+
+@register_pass("compile")
+@register_pass("validate")
+@register_pass("rewrite")
+@register_pass("fuse_transpose")
+@register_pass("calculate_ops")
+@register_transformer("broadcast_sub")
+class BroadcastSub(Transformer):
+    pass
+
+
+@register_pass("compile")
+@register_pass("validate")
+@register_pass("rewrite")
+@register_pass("fuse_transpose")
+@register_pass("calculate_ops")
+@register_transformer("broadcast_to")
+class BroadcastTo(Transformer):
+    pass
+
+
+@register_pass("compile")
+@register_pass("validate")
+@register_pass("rewrite")
+@register_pass("fuse_transpose")
+@register_pass("calculate_ops")
+@register_transformer("broadcast_greater")
+class BroadcastGreater(Transformer):
+    pass
+
+
+@register_pass("rewrite")
+@register_pass("compile")
+@register_pass("validate")
 @register_pass("calculate_ops")
 @register_transformer("Concat")
 class Concat(Transformer):
@@ -594,6 +637,24 @@ class Custom(Transformer):
             sym = get_nnvm_op(op_type)(*childs, name=N.n('cvm_shift'),
                                          **new_attrs)
         return sym
+
+
+@register_pass("compile")
+@register_pass("validate")
+@register_pass("calculate_ops")
+@register_pass("rewrite")
+@register_transformer("cast")
+class Cast(Transformer):
+    pass
+
+
+@register_pass("compile")
+@register_pass("validate")
+@register_pass("calculate_ops")
+@register_pass("rewrite")
+@register_transformer("abs")
+class Abs(Transformer):
+    pass
 
 
 @register_pass("compile")
