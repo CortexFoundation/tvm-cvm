@@ -394,60 +394,36 @@ class Pooling(Transformer):
         return super().calculate_ops(op, **kwargs)
 
 @register_pass("compile")
-@register_pass("validate")
-@register_pass("rewrite")
-@register_pass("fuse_transpose")
-@register_pass("calculate_ops")
 @register_transformer("broadcast_mul")
 class BroadcastMul(Transformer):
     pass
 
 
 @register_pass("compile")
-@register_pass("validate")
-@register_pass("rewrite")
-@register_pass("fuse_transpose")
-@register_pass("calculate_ops")
 @register_transformer("broadcast_add")
 class BroadcastAdd(Transformer):
     pass
 
 
 @register_pass("compile")
-@register_pass("validate")
-@register_pass("rewrite")
-@register_pass("fuse_transpose")
-@register_pass("calculate_ops")
 @register_transformer("broadcast_div")
 class BroadcastDiv(Transformer):
     pass
 
 
 @register_pass("compile")
-@register_pass("validate")
-@register_pass("rewrite")
-@register_pass("fuse_transpose")
-@register_pass("calculate_ops")
 @register_transformer("broadcast_sub")
 class BroadcastSub(Transformer):
     pass
 
 
 @register_pass("compile")
-@register_pass("validate")
-@register_pass("rewrite")
-@register_pass("fuse_transpose")
-@register_pass("calculate_ops")
 @register_transformer("broadcast_to")
 class BroadcastTo(Transformer):
     pass
 
 
 @register_pass("compile")
-@register_pass("validate")
-@register_pass("rewrite")
-@register_pass("fuse_transpose")
-@register_pass("calculate_ops")
 @register_transformer("broadcast_greater")
 class BroadcastGreater(Transformer):
     pass
@@ -570,6 +546,18 @@ class BatchNorm(Transformer):
         kwargs['base_ops'] = 4
         return super().calculate_ops(op, **kwargs)
 
+    def compile(self, op, **kwargs):
+        childs = kwargs['childs']
+        attrs = kwargs['attr']
+        op_name = 'batch_norm'
+        new_attrs = {}
+        new_attrs['axis'] = get_attr(attrs, 'axis', 1)
+        new_attrs['epsilon'] = get_attr(attrs, 'eps', 0.001)
+        new_attrs['center'] = True
+        new_attrs['scale'] = not get_attr(attrs, 'fix_gamma', False)
+        return get_nnvm_op(op_name)(*childs,
+                name=N.n('BatchNorm'), **new_attrs)
+
 
 @register_pass("validate")
 @register_pass("fuse_transpose")
@@ -628,7 +616,7 @@ class Custom(Transformer):
             sym = get_nnvm_op(op_type)(*childs, name=N.n('cvm_clip'),
                                         **new_attrs)
         elif op_type == 'cvm_lut':
-            new_attrs['in_dim'] = attr.get['in_dim']
+            new_attrs['in_dim'] = attr['in_dim']
             sym = get_nnvm_op(op_type)(*childs, name=N.n('cvm_lut'),
                                         **new_attrs)
         else:
@@ -639,19 +627,53 @@ class Custom(Transformer):
         return sym
 
 
-@register_pass("compile")
-@register_pass("validate")
-@register_pass("calculate_ops")
-@register_pass("rewrite")
-@register_transformer("cast")
-class Cast(Transformer):
-    pass
+@register_transformer('_minimum')
+class Minimum(Transformer):
+    def compile(self, op, **kwargs):
+        childs = kwargs['childs']
+        attrs = kwargs['attr']
+        op_name = 'broadcast_min'
+        return get_nnvm_op(op_name)(*childs,
+                name=N.n('_minimum'), **attrs)
+
+
+@register_transformer('_maximum')
+class Maximum(Transformer):
+    def compile(self, op, **kwargs):
+        childs = kwargs['childs']
+        attrs = kwargs['attr']
+        op_name = 'broadcast_max'
+        return get_nnvm_op(op_name)(*childs,
+                name=N.n('_maximum'), **attrs)
+
+
+@register_transformer('argmax')
+class Argmax(Transformer):
+    def compile(self, op, **kwargs):
+        childs = kwargs['childs']
+        attrs = kwargs['attr']
+        op_name = 'argmax'
+        new_attrs = {}
+        new_attrs['axis'] = get_attr(attrs, 'axis', 0)
+        new_attrs['keepdims'] = get_attr(attrs, 'keepdims', False)
+        return get_nnvm_op(op_name)(*childs,
+                name=N.n('_argmax'), **new_attrs)
+
+
+@register_transformer('argmin')
+class Argmax(Transformer):
+    def compile(self, op, **kwargs):
+        childs = kwargs['childs']
+        attrs = kwargs['attr']
+        op_name = 'argmin'
+        new_attrs = {}
+        new_attrs['axis'] = get_attr(attrs, 'axis', 0)
+        new_attrs['keepdims'] = get_attr(attrs, 'keepdims', False)
+        return get_nnvm_op(op_name)(*childs,
+                name=N.n('_argmin'), **new_attrs)
 
 
 @register_pass("compile")
-@register_pass("validate")
-@register_pass("calculate_ops")
-@register_pass("rewrite")
 @register_transformer("abs")
 class Abs(Transformer):
     pass
