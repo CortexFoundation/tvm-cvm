@@ -306,12 +306,11 @@ def requant_operator(X, oname, def_prec, oscale=None, **kwargs):
     iscale, iprec = kwargs['scales'][xn], precs[xn][OUT_KEY]
 
     if exactly:
-        # force quant
         in_prec = get_bit(kwargs['th_dict'][xn] * iscale)
         out_prec = oprec
         sb = in_prec - out_prec if in_prec > out_prec else 0
         if sb > 1:
-            iprec = PREC(iprec - sb)
+            iprec = iprec - sb
             X = _mrt_sim_quantize(X, sb, params, graph, iprec)
             iscale = iscale / (2 ** sb)
             logger.debug(
@@ -319,26 +318,7 @@ def requant_operator(X, oname, def_prec, oscale=None, **kwargs):
                 " scale=%s, prec=%s",
                     xopn, xn, sb, iscale, iprec)
 
-    # Case 1: frac > 1, add broadcast_mul to multiply frac
-    #
-    #                                            X (int iprec)   var
-    #                                                  |        /
-    #                                                  |       /
-    #  X (int iprec)  -->    broadcast_mul:    X2 (int MAX_BIT-1) 
-    #                                                  |      
-    #                                                  |      
-    #                                quant:      X' (int oprec)
-
-    # Case 2/3: frac = 1, no need to multiply frac; or iprec < oprec
-    #
-    #                                            X (int iprec) 
-    #                                                  |     
-    #                                                  |      
-    #  X (int iprec)  -->            quant:     X' (int oprec) 
-
     if exactly or (iprec > oprec and iscale > oscale):
-        # Case 1/2: Force quant
-        # Or current precision > allowable precision, quant to avoid overflow
         rescale = oscale / iscale
         frac, exp = sim.cvm_float(rescale, MAX_BIT - iprec)
         sim_scale = frac * (2 ** exp)
@@ -351,7 +331,6 @@ def requant_operator(X, oname, def_prec, oscale=None, **kwargs):
         oscale = iscale * frac * (2 ** exp)
 
         if frac > 1:
-            # TODO: use cvm_left/right_shift
             X = _mrt_sim_quantize(X, 0, params, graph, iprec)
             var = _mx_const(frac, graph, params)
             mul_name = N.n("mrt_quantize_scale")
