@@ -160,23 +160,6 @@ class TestActivation(TfmTest):
         self._assert_equal(ans, des, 'compile')
 
 
-class TestBatchNorm(TfmTest):
-    def test_compile(self):
-        x = mx.sym.var('x', shape=(2, 4))
-        y = mx.sym.var('y', shape=(2, 4))
-        z = mx.sym.var('z', shape=(2, 4))
-        a = mx.sym.var('a', shape=(2, 4))
-        b = mx.sym.var('b', shape=(2, 4))
-        ans= mx.sym.BatchNorm(x, y, z, a, b)
-
-        x = nnvm.sym.Variable('x', __shape__=(2, 4))
-        y = nnvm.sym.Variable('y', __shape__=(2, 4))
-        z = nnvm.sym.Variable('z', __shape__=(2, 4))
-        a = nnvm.sym.Variable('a', __shape__=(2, 4))
-        b = nnvm.sym.Variable('b', __shape__=(2, 4))
-        des= nnvm.sym.batch_norm(x, y, z, a, b,
-                epsilon=0.001, axis=1, center=True, scale=True)
-        self._assert_equal(ans, des, 'compile')
 
 
 
