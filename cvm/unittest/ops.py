@@ -272,6 +272,21 @@ class TestReshape(TfmTest):
         self._assert_equal(op, des, 'compile')
 
 
+class TestConvolution(TfmTest):
+    def test_compile(self):
+        x = mx.sym.var('x', shape=(3, 2))
+        y = mx.sym.var('y', shape=(3, 2))
+        z = mx.sym.var('z', shape=(3, 2))
+        a = mx.sym.var('a', shape=(3, 2))
+        ans = mx.sym.Convolution(x, y, z, a)
+
+        x = nnvm.sym.Variable('x', shape=(3, 2))
+        y = nnvm.sym.Variable('y', shape=(3, 2))
+        z = nnvm.sym.Variable('z', shape=(3, 2))
+        a = nnvm.sym.Variable('a', shape=(3, 2))
+        des = nnvm.sym.Convolution(x, y, z, a)
+        self._assert_equal(ans, des, 'compile')
+
 if __name__ == "__main__":
     import sys
     unittest.main(argv=sys.argv, verbosity=5)
