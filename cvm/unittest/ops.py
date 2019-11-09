@@ -216,6 +216,7 @@ class TestConcat(TfmTest):
 
         self._assert_equal(op, des,
                 ["validate", "fuse_transpose"])
+
     def test_compile(self):
         x = mx.sym.var('x', shape=(2, 2))
         y = mx.sym.var('y', shape=(3, 2))
