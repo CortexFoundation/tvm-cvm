@@ -298,8 +298,6 @@ def requant_operator(X, oname, def_prec, oscale=None, **kwargs):
     th_dict, precs = kwargs['th_dict'], kwargs['precs']
     xopn, xn = X.attr('op_name'), X.attr('name')
 
-    # (iscale, iprec): current (scale, precision) of X
-    # (oscale, oprec): allowable (scale, precision) of X
     exactly = True if oscale else False
     oprec = precs[xn].get(oname, def_prec)
     oscale = oscale if oscale else scale(th_dict[xn], oprec)
@@ -342,8 +340,6 @@ def requant_operator(X, oname, def_prec, oscale=None, **kwargs):
                 xopn, xn, rescale, frac, exp, iprec, iscale,
                 oprec, oscale)
     else:
-        # Case 3: current precision <= allowable precision
-        # directly treat the precision as the allowable precision
         X = _mrt_sim_quantize(X, 0, params, graph, oprec)
         oscale = iscale
         logger.debug(
