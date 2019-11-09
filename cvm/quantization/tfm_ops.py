@@ -414,25 +414,43 @@ class Pooling(Transformer):
         return super().calculate_ops(op, **kwargs)
 
 @register_pass("compile")
-@register_pass("validate")
-@register_pass("rewrite")
-@register_pass("fuse_transpose")
-@register_pass("calculate_ops")
 @register_transformer("broadcast_mul")
 class BroadcastMul(Transformer):
     pass
 
-@register_pass("validate")
-@register_pass("rewrite")
-@register_pass("fuse_transpose")
-@register_pass("calculate_ops")
+
+@register_pass("compile")
 @register_transformer("broadcast_add")
 class BroadcastAdd(Transformer):
     pass
 
 
-@register_pass("validate")
+@register_pass("compile")
+@register_transformer("broadcast_div")
+class BroadcastDiv(Transformer):
+    pass
+
+
+@register_pass("compile")
+@register_transformer("broadcast_sub")
+class BroadcastSub(Transformer):
+    pass
+
+
+@register_pass("compile")
+@register_transformer("broadcast_to")
+class BroadcastTo(Transformer):
+    pass
+
+
+@register_pass("compile")
+@register_transformer("broadcast_greater")
+class BroadcastGreater(Transformer):
+    pass
+
+
 @register_pass("rewrite")
+@register_pass("validate")
 @register_pass("calculate_ops")
 @register_transformer("Concat")
 class Concat(Transformer):
@@ -449,7 +467,13 @@ class Concat(Transformer):
             op = mx.sym.concat(*Xs, dim=axes[dim], name=name)
             op = mx.sym.transpose(op, axes=axes, name=N.n('fuse_transpose'))
         return op
-
+    def compile(self, op, **kwargs):
+        childs = kwargs['childs']
+        attrs = kwargs['attr']
+        op_name = 'concatenate'
+        new_attrs = {'axis': get_attr(attrs, 'dim', 1)}
+        return get_nnvm_op(op_name)(*childs,
+                name=N.n('concat'), **new_attrs)
 
 @register_pass('compile')
 @register_pass("rewrite")
@@ -607,7 +631,7 @@ class Custom(Transformer):
             sym = get_nnvm_op(op_type)(*childs, name=N.n('cvm_clip'),
                                         **new_attrs)
         elif op_type == 'cvm_lut':
-            new_attrs['in_dim'] = attr.get['in_dim']
+            new_attrs['in_dim'] = attr['in_dim']
             sym = get_nnvm_op(op_type)(*childs, name=N.n('cvm_lut'),
                                         **new_attrs)
         else:
@@ -616,6 +640,58 @@ class Custom(Transformer):
             sym = get_nnvm_op(op_type)(*childs, name=N.n('cvm_shift'),
                                          **new_attrs)
         return sym
+
+
+@register_transformer('_minimum')
+class Minimum(Transformer):
+    def compile(self, op, **kwargs):
+        childs = kwargs['childs']
+        attrs = kwargs['attr']
+        op_name = 'broadcast_min'
+        return get_nnvm_op(op_name)(*childs,
+                name=N.n('_minimum'), **attrs)
+
+
+@register_transformer('_maximum')
+class Maximum(Transformer):
+    def compile(self, op, **kwargs):
+        childs = kwargs['childs']
+        attrs = kwargs['attr']
+        op_name = 'broadcast_max'
+        return get_nnvm_op(op_name)(*childs,
+                name=N.n('_maximum'), **attrs)
+
+
+@register_transformer('argmax')
+class Argmax(Transformer):
+    def compile(self, op, **kwargs):
+        childs = kwargs['childs']
+        attrs = kwargs['attr']
+        op_name = 'argmax'
+        new_attrs = {}
+        new_attrs['axis'] = get_attr(attrs, 'axis', 0)
+        new_attrs['keepdims'] = get_attr(attrs, 'keepdims', False)
+        return get_nnvm_op(op_name)(*childs,
+                name=N.n('_argmax'), **new_attrs)
+
+
+@register_transformer('argmin')
+class Argmax(Transformer):
+    def compile(self, op, **kwargs):
+        childs = kwargs['childs']
+        attrs = kwargs['attr']
+        op_name = 'argmin'
+        new_attrs = {}
+        new_attrs['axis'] = get_attr(attrs, 'axis', 0)
+        new_attrs['keepdims'] = get_attr(attrs, 'keepdims', False)
+        return get_nnvm_op(op_name)(*childs,
+                name=N.n('_argmin'), **new_attrs)
+
+
+@register_pass("compile")
+@register_transformer("abs")
+class Abs(Transformer):
+    pass
 
 
 @register_pass("compile")
