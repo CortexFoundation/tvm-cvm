@@ -291,18 +291,26 @@ def sym_calibrate(symbol, params, data, **kwargs):
     return th_dict
 
 def requant_operator(X, oname, def_prec, oscale=None, **kwargs):
+    # Case 1: exactly=False, quant to precision=oprec
+    # Designed for mul operators
+
+    # Case 2: exactly=True, quant to precision=oprec and scale=oscale
+    # Designed for add operators
+
     logger = logging.getLogger('log.mrt.simulate')
     params, graph = kwargs['params'], kwargs['graph']
     th_dict, precs = kwargs['th_dict'], kwargs['precs']
     xopn, xn = X.attr('op_name'), X.attr('name')
 
     exactly = True if oscale else False
-    oprec = precs[xn].get(oname, def_prec)
+    oprec = precs[xn].get(kwargs['oname'], def_prec)
     oscale = oscale if oscale else scale(th_dict[xn], oprec)
     iscale, iprec = kwargs['scales'][xn], precs[xn][OUT_KEY]
 
     if exactly:
-        in_prec = get_bit(kwargs['th_dict'][xn] * iscale)
+        # Case 1: quant to precision=oprec
+        sb = iprec - oprec
+        in_prec = get_bit(th_dict[xn] * iscale)
         out_prec = oprec
         sb = in_prec - out_prec if in_prec > out_prec else 0
         if sb > 1:

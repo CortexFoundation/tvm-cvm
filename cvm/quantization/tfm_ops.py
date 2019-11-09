@@ -175,8 +175,10 @@ class Convolution(Transformer):
         childs = sym_iter(op.get_children())
         cns = [c.attr('name') for c in childs] if childs else []
         def_prec = kwargs['op_input_precs'][op_name]
-        X, xprec, xs = requant_operator(childs[0], name, def_prec, **kwargs)
-        W, wprec, ws = requant_parameter(cns[1], name, def_prec, **kwargs)
+        X, xprec, xs = requant_operator(childs[0], def_prec,
+                oname=name, **kwargs)
+        W, wprec, ws = requant_parameter(cns[1], def_prec,
+                oname=name, **kwargs)
         B, bprec = None, None
         print("191107 recoreded here!")
         exit()
