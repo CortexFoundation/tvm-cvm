@@ -3,6 +3,7 @@ import math
 import numpy as np
 from sym_utils import *
 from tfm_base import *
+import sim_quant_helper as sim
 
 # === symbol pass == 
 
@@ -42,13 +43,12 @@ def rewrite(symbol, params):
             apply_pass("rewrite", infer_shapes=infer_shapes))
 
 @N.register_nm("quantize")
-def quantize(symbol, params, th_dict, precs, scales, **kwargs):
-    th_dict = check_fixed()
-    assert th_dict is not None, "Please calibrate thresholds first."
+def quantize(symbol, params, th_dict, precs, scales, op_input_precs):
     infer_shapes = infer_shape(symbol, params)
     return topo_visit_transformer(symbol, params,
-            apply_pass("quantize", infer_shapes=infer_shapes,
-            th_dict=th_dict, precs=precs, scales=scales))
+            apply_pass("quantize", infer_shapes=infer_shapes),
+            th_dict=th_dict, precs=precs, scales=scales,
+            op_input_precs=op_input_precs)
 
 @N.register_nm("cvm")
 def compile(symbol, params):
@@ -202,6 +202,10 @@ def collect_op_names(symbol, params):
 
 # === MRT ===
 
+OUT_KEY = "out_key"
+TARGET_KEY = "target_key"
+MAX_BIT = 32
+
 def _get_opt(out, lambd):
     absmax = out.abs().max().asscalar()
     if lambd is None:
@@ -214,12 +218,35 @@ def _get_opt(out, lambd):
         return alpha
     return absmax
 
-def _get_bit(opt):
+def _mrt_sim_quantize(sym, sb, params, graph, prec):
+    name = N.n("%s_%d_%d"%(sym.attr('name'), sb, prec))
+    if name not in graph:
+        graph[name] = mx.sym.Custom(sym, sb=sb, prec=prec,
+                name=name, op_type='mrt_sim_quant')
+    return graph[name]
+
+def _mx_const(number, graph, params):
+    name = N.n('const_var')
+    prec = math.ceil(math.log2(number)) + 1
+    if name not in graph:
+        attr = { 'precision': str(prec) }
+        graph[name] = mx.sym.var(name, shape=(1,), attr=attr)
+        params[name] = nd.array([number])
+    return graph[name]
+
+def get_bit(opt):
     if isinstance(opt, nd.NDArray):
         opt = opt.abs().max().asscalar()
     if opt == 0:
         return 1
     return math.ceil(math.log2(opt)) + 1
+
+def scale(threshold, precision):
+    assert threshold >= 0
+    if threshold == 0:
+        return 1
+    alpha = (2 ** (precision - 1)) - 1
+    return alpha / threshold
 
 def sym_calibrate(symbol, params, data, **kwargs):
     logger = logging.getLogger('log.mrt')
@@ -263,17 +290,74 @@ def sym_calibrate(symbol, params, data, **kwargs):
 
     return th_dict
 
+def requant_operator(X, oname, def_prec, oscale=None, **kwargs):
+    logger = logging.getLogger('log.mrt.simulate')
+    params, graph = kwargs['params'], kwargs['graph']
+    th_dict, precs = kwargs['th_dict'], kwargs['precs']
+    xopn, xn = X.attr('op_name'), X.attr('name')
 
-def check_fixed(symbol, params, th_dict):
-    for sym in topo_sort(symbol):
-        name, op_name = sym.attr('name'), sym.attr('op_name')
-    return th_dict
+    exactly = True if oscale else False
+    oprec = precs[xn].get(oname, def_prec)
+    oscale = oscale if oscale else scale(th_dict[xn], oprec)
+    iscale, iprec = kwargs['scales'][xn], precs[xn][OUT_KEY]
 
-def requant_operator():
-    pass
+    if exactly:
+        in_prec = get_bit(kwargs['th_dict'][xn] * iscale)
+        out_prec = oprec
+        sb = in_prec - out_prec if in_prec > out_prec else 0
+        if sb > 1:
+            iprec = iprec - sb
+            X = _mrt_sim_quantize(X, sb, params, graph, iprec)
+            iscale = iscale / (2 ** sb)
+            logger.debug(
+                "Operator  %-20s name=%-40s exactly quantize with sb=%s" +
+                " scale=%s, prec=%s",
+                    xopn, xn, sb, iscale, iprec)
 
-def requant_operator():
-    pass
+    if exactly or (iprec > oprec and iscale > oscale):
+        rescale = oscale / iscale
+        frac, exp = sim.cvm_float(rescale, MAX_BIT - iprec)
+        sim_scale = frac * (2 ** exp)
+        scale_err = abs((sim_scale - rescale) / rescale)
+        if exactly and scale_err > 0.001:
+            logger.warn(
+                "Operator  %-20s name=%-40s requantize to scale=%s " +
+                "with <%s, %d, %d>, error=%s",
+                    xopn, xn, rescale, sim_scale, frac, exp, scale_err)
+        oscale = iscale * frac * (2 ** exp)
+
+        if frac > 1:
+            X = _mrt_sim_quantize(X, 0, params, graph, iprec)
+            var = _mx_const(frac, graph, params)
+            mul_name = N.n("mrt_quantize_scale")
+            X = mx.sym.broadcast_mul(X, var, name=mul_name)
+        X = _mrt_sim_quantize(X, (-exp), params, graph, oprec)
+        logger.debug(
+            "Operator  %-20s name=%-40s requantize with scale=%-16.8f<%d, %d>" +
+            " iprec=%s, iscale=%-10.5f, oprec=%s, oscale=%-10.5f",
+                xopn, xn, rescale, frac, exp, iprec, iscale,
+                oprec, oscale)
+    else:
+        X = _mrt_sim_quantize(X, 0, params, graph, oprec)
+        oscale = iscale
+        logger.debug(
+            "Operator  %-20s name=%-40s clip with iprec=%s, oprec=%s",
+                xopn, xn, iprec, oprec)
+    return X, oprec, oscale
+
+def requant_parameter(pname, oname, def_prec, oscale=None, **kwargs):
+    logger = logging.getLogger('mrt.log.simulate')
+    params, graph, th_dict = kwargs['params'], kwargs['graph'], kwargs['th_dict']
+    P_name = N.n(pname)
+    P_prec = kwargs['precs'][pname].get(oname, def_prec)
+    xs = oscale if oscale else scale(th_dict[pname], P_prec)
+    params[P_name] = params[pname] * xs
+    P_attr = { 'precision': str(P_prec) }
+    graph[P_name] = mx.sym.var(P_name, shape=params[P_name].shape, attr=P_attr)
+    logger.debug(
+        "Parameter th_dict=%-12.8f name=%-40s requantize with scale=%-16.8f to prec=%s",
+            th_dict[pname], pname, xs, P_prec)
+    return graph[P_name], P_prec, xs
 
 def requant():
     pass
