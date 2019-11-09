@@ -21,6 +21,7 @@ class TestNull(TfmTest):
         des = nnvm.sym.Variable('data', __shape__=[1, 3, 2, 1])
         self._assert_equal(self.op, des, "compile")
 
+ 
 class TestTranspose(TfmTest):
     op = mx.sym.transpose(
             mx.sym.transpose(TestNull.op, axes=[0, 2, 3, 1]),
@@ -160,29 +161,6 @@ class TestActivation(TfmTest):
         self._assert_equal(ans, des, 'compile')
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 class TestMaximum(TfmTest):
     def test_compile(self):
         x = mx.sym.var('x', shape=(2, 4))
@@ -194,6 +172,7 @@ class TestMaximum(TfmTest):
         des = nnvm.sym.broadcast_max(x, y)
         self._assert_equal(ans, des, 'compile')
 
+
 class TestCustom(TfmTest):
     def test_custom(self):
         x = mx.sym.var('x', shape=(2,4))
@@ -202,7 +181,6 @@ class TestCustom(TfmTest):
         x = nnvm.sym.Variable('x', __shape__=(2,4))
         des = nnvm.sym.cvm_clip(x, precision=8)
         self._assert_equal(ans, des, 'compile')
-
 
 
 class TestBroadcastSub(TfmTest):
@@ -215,6 +193,7 @@ class TestBroadcastSub(TfmTest):
         y = nnvm.sym.Variable('y', __shape__=(2, 1))
         des = nnvm.sym.broadcast_sub(x, y)
         self._assert_equal(ans, des, "compile")
+
 
 class TestBroadcastTo(TfmTest):
     def test_compile(self):
@@ -250,7 +229,6 @@ class TestConcat(TfmTest):
         self._assert_equal(ans, des, 'compile')
 
 
-
 class TestSlice(TfmTest):
     def test_compile(self):
         data = mx.sym.var('data', shape=(20,))
@@ -260,6 +238,7 @@ class TestSlice(TfmTest):
         des = nnvm.sym.strided_slice(datan, begin=(0,), end=(6,))
 
         self._assert_equal(op, des, 'compile')
+
 
 class TestReshape(TfmTest):
     def test_compile(self):

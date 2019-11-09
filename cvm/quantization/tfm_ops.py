@@ -551,18 +551,6 @@ class BatchNorm(Transformer):
         kwargs['base_ops'] = 4
         return super().calculate_ops(op, **kwargs)
 
-    def compile(self, op, **kwargs):
-        childs = kwargs['childs']
-        attrs = kwargs['attr']
-        op_name = 'batch_norm'
-        new_attrs = {}
-        new_attrs['axis'] = get_attr(attrs, 'axis', 1)
-        new_attrs['epsilon'] = get_attr(attrs, 'eps', 0.001)
-        new_attrs['center'] = True
-        new_attrs['scale'] = not get_attr(attrs, 'fix_gamma', False)
-        return get_nnvm_op(op_name)(*childs,
-                name=N.n('BatchNorm'), **new_attrs)
-
 
 @register_pass("validate")
 @register_pass("fuse_transpose")
