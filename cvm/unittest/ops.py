@@ -237,6 +237,19 @@ class TestConcat(TfmTest):
 
         self._assert_equal(op, des,
                 ["validate", "fuse_transpose"])
+    def test_compile(self):
+        x = mx.sym.var('x', shape=(2, 2))
+        y = mx.sym.var('y', shape=(3, 2))
+        z = mx.sym.var('z', shape=(3, 2))
+        ans = mx.sym.Concat(x, y, z, dim=0)
+
+        x = nnvm.sym.Variable('x', __shape__=(2, 2))
+        y = nnvm.sym.Variable('y', __shape__=(3, 2))
+        z = nnvm.sym.Variable('z', __shape__=(3, 2))
+        des = nnvm.sym.concatenate(x, y, z, axis=0)
+        self._assert_equal(ans, des, 'compile')
+
+
 
 class TestSlice(TfmTest):
     def test_compile(self):

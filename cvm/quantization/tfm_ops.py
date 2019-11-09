@@ -430,7 +430,6 @@ class BroadcastGreater(Transformer):
 
 
 @register_pass("rewrite")
-@register_pass("compile")
 @register_pass("validate")
 @register_pass("calculate_ops")
 @register_transformer("Concat")
@@ -448,7 +447,13 @@ class Concat(Transformer):
             op = mx.sym.concat(*Xs, dim=axes[dim], name=N.n('Concat'))
             op = mx.sym.transpose(op, axes=axes, name=N.n('fuse_transpose'))
         return op
-
+    def compile(self, op, **kwargs):
+        childs = kwargs['childs']
+        attrs = kwargs['attr']
+        op_name = 'concatenate'
+        new_attrs = {'axis': get_attr(attrs, 'dim', 1)}
+        return get_nnvm_op(op_name)(*childs,
+                name=N.n('concat'), **new_attrs)
 
 @register_pass('compile')
 @register_pass("rewrite")
