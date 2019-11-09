@@ -274,17 +274,18 @@ class TestReshape(TfmTest):
 
 class TestConvolution(TfmTest):
     def test_compile(self):
-        x = mx.sym.var('x', shape=(3, 2))
-        y = mx.sym.var('y', shape=(3, 2))
-        z = mx.sym.var('z', shape=(3, 2))
-        a = mx.sym.var('a', shape=(3, 2))
-        ans = mx.sym.Convolution(x, y, z, a)
+        x = mx.sym.var('x', shape=(3, 2, 2, 2))
+        y = mx.sym.var('y', shape=(1, 2, 2, 2))
+        z = mx.sym.var('z', shape=(1,))
+        ans = mx.sym.Convolution(x, y, z, kernel=(2, 2), num_filter=1)
 
-        x = nnvm.sym.Variable('x', shape=(3, 2))
-        y = nnvm.sym.Variable('y', shape=(3, 2))
-        z = nnvm.sym.Variable('z', shape=(3, 2))
-        a = nnvm.sym.Variable('a', shape=(3, 2))
-        des = nnvm.sym.Convolution(x, y, z, a)
+        x = nnvm.sym.Variable('x', __shape__=(3, 2, 2, 2))
+        y = nnvm.sym.Variable('y', __shape__=(1, 2, 2, 2))
+        z = nnvm.sym.Variable('z', __shape__=(1, ))
+        des = nnvm.sym.conv2d(x, y, z, kernel_size=(2, 2), channels=1,
+                strides=(1, 1), padding=(0, 0), layout='NCHW',
+                kernel_layout='OIHW', use_bias=True, groups=1,
+                dilation=(1, 1))
         self._assert_equal(ans, des, 'compile')
 
 if __name__ == "__main__":
