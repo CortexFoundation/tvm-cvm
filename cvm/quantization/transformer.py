@@ -26,9 +26,11 @@ class MRT(object):
         self._lgr.info("Graph initialize and reduce...")
         _sym, _prm = init(symbol, params, input_shape)
         orig_ops = calculate_ops(_sym, _prm)
-        _sym, _prm = fuse_transpose(_sym, _prm)
-        _sym, _prm = rewrite(_sym, _prm)
         _sym, _prm = fuse_constant(_sym, _prm)
+        _sym, _prm = fuse_transpose(_sym, _prm)
+        self._sym, self._prm = rewrite(_sym, _prm)
+        # TODO: some model may need another fuse_transpose after rewrite
+
         self._lgr.info("Original ops[%s] reduced into %s",
                 orig_ops, calculate_ops(_sym, _prm))
 
@@ -43,7 +45,6 @@ class MRT(object):
         self._qprm = None
 
         self.op_input_precs = self._op_default_input_precs()
-        self._sym, self._prm = _sym, _prm
 
     def set_data(self, data):
         self._data = data
@@ -65,14 +66,13 @@ class MRT(object):
             self._lgr.error("Please calibrate thresholds first.")
             assert False
 
-        qsym, qparams = quantize(self._sym, self._prm,
+        self._qsym, self._qprm = quantize(self._sym, self._prm,
                 self.th_dict, self.precs, self.scales, self.op_input_precs)
         '''
         if not no_realize:
             qsym, qparams = self._realize()
         qext = self._get_ext()
         '''
-        return qsym, qparams
 
     def _op_default_input_precs(self):
         op_precs = {}

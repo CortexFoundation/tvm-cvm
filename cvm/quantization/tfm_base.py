@@ -55,6 +55,11 @@ class Transformer(object):
 
             Do nothing by default.
         """
+        precs, scales = kwargs['precs'], kwargs['scales']
+        name, childs = op.attr('name'), sym_iter(op.get_children())
+        cname = childs[0].attr('name')
+        precs[name][OUT_KEY] = precs[cname][OUT_KEY]
+        scales[name] = scales[cname]
         return op
 
     def compile(self, op, **kwargs):
@@ -140,6 +145,10 @@ def apply_pass(pass_t, **updates):
             kwargs[n][ret.attr('name')] = kwargs[n][op.attr('name')]
         return ret
     return wrapper
+
+OUT_KEY = "out_key"
+TARGET_KEY = "target_key"
+MAX_BIT = 32
 
 # === name manager 
 

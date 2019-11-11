@@ -59,6 +59,7 @@ class Transpose(Transformer):
 @register_pass("validate")
 @register_pass("rewrite")
 @register_pass("calculate_ops")
+@register_pass("quantize")
 @register_transformer("relu")
 class Relu(Transformer):
     def fuse_transpose(self, op, **kwargs):
@@ -172,24 +173,21 @@ class Convolution(Transformer):
     def quantize(self, op, **kwargs):
         th_dict = kwargs['th_dict']
         name, op_name = op.attr('name'), op.attr('op_name')
-        childs = sym_iter(op.get_children())
+        childs, attr = sym_iter(op.get_children()), op.list_attr()
         cns = [c.attr('name') for c in childs] if childs else []
-        def_prec = kwargs['op_input_precs'][op_name]
-        X, xprec, xs = requant_operator(childs[0], def_prec,
-                oname=name, **kwargs)
-        W, wprec, ws = requant_parameter(cns[1], def_prec,
-                oname=name, **kwargs)
+
+        oprec = kwargs['op_input_precs'][op_name]
+        X, xprec, xs = requant_operator(childs[0], oprec, oname=name, **kwargs)
+        W, wprec, ws = requant_parameter(cns[1], oprec, oname=name, **kwargs)
         B, bprec = None, None
-        print("191107 recoreded here!")
-        exit()
         if not get_attr(attr, 'no_bias', False):
             bs = ws * xs
             bias_prec = get_bit(th_dict[cns[2]] * bs)
-            B, bprec, _ = requant_parameter(cns[2], bias_prec, bs)
-        oscale = scales[name] = ws * xs
+            B, bprec, _ = requant_parameter(cns[2], bias_prec, bs,
+                oname=name, **kwargs)
+        oscale = kwargs['scales'][name] = ws * xs
         op = get_mxnet_op(op_name)(X, W, B, **attr, name=name)
-        kwargs['precs'][name][out_key] = get_bit(th_dict[name] * oscale)
-        # TODO: requantize
+        kwargs['precs'][name][OUT_KEY] = get_bit(th_dict[name] * oscale)
         return op
 
     def calculate_ops(self, op, **kwargs):
@@ -320,6 +318,7 @@ class Softmax(Transformer):
 
 
 @register_pass("fuse_transpose")
+@register_pass("quantize")
 @register_transformer("Pooling")
 class Pooling(Transformer):
     def validate(self, op, **kwargs):
@@ -451,6 +450,9 @@ class Concat(Transformer):
             op = mx.sym.concat(*Xs, dim=axes[dim], name=name)
             op = mx.sym.transpose(op, axes=axes, name=N.n('fuse_transpose'))
         return op
+
+    def quantize(self, op, **kwargs):
+        return _qt_multi_input(op, **kwargs)
 
 
 @register_pass('compile')
@@ -645,3 +647,21 @@ def _ft_multi_input(op):
         op = get_mxnet_op(opname)(*Xs, name=name)
         op = mx.sym.transpose(op, axes=axes, name=N.n('fuse_transpose'))
     return op
+
+def _qt_multi_input(op, **kwargs):
+    th_dict, precs = kwargs['th_dict'], kwargs['precs']
+    name, op_name = op.attr('name'), op.attr('op_name')
+    attr, childs = op.list_attr(), sym_iter(op.get_children())
+    cns = [c.attr('name') for c in childs]
+
+    oprec = kwargs['op_input_precs'][op_name]
+    in_th = max([th_dict[n] for n in cns])
+    oscale = kwargs['scales'][name] = scale(in_th, oprec)
+    new_childs = []
+    for c in childs:
+        c, cprec, _ = requant(c, oprec, oscale=oscale, oname=name, **kwargs)
+        new_childs.append(c)
+    op = get_mxnet_op(op_name)(*new_childs, **attr, name=name)
+    precs[name][OUT_KEY] = get_bit(th_dict[name] * oscale)
+    return op
+
