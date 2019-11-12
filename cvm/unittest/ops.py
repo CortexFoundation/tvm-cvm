@@ -252,6 +252,41 @@ class TestReshape(TfmTest):
         self._assert_equal(op, des, 'compile')
 
 
+class TestFlatten(TfmTest):
+    def test_compile(self):
+        data = mx.sym.var('data', shape=(3, 3))
+        ans = mx.sym.Flatten(data)
+
+        data = nnvm.sym.Variable('data', __shape__=(3, 3))
+        des = nnvm.sym.flatten(data)
+        self._assert_equal(ans, des, 'compile')
+
+
+class TestFullyConnected(TfmTest):
+    def test_compile(self):
+        data = mx.sym.var('data', shape=(4, 3, 3, 3))
+        weight = mx.sym.var('weight', shape=(4, 27))
+        bias = mx.sym.var('bias', shape=(4,))
+        ans = mx.sym.FullyConnected(data, weight, bias, 4, flatten=True, no_bias=False)
+
+        a = nnvm.sym.Variable('data', __shape__=(4, 3, 3, 3))
+        b = nnvm.sym.Variable('weight', __shape__=(4, 27))
+        c = nnvm.sym.Variable('bias', __shape__=(4,))
+        d = nnvm.sym.dense(nnvm.sym.flatten(a), b, c, units=4, use_bias=True)
+        self._assert_equal(ans, d, 'compile')
+
+
+class TestPooling(TfmTest):
+    def test_compile(self):
+        x = mx.sym.var('x', shape=(4, 2, 3, 5))
+        ans = mx.sym.Pooling(x, kernel=(2, 2))
+
+        x = nnvm.sym.Variable('x', __shape__=(4, 2, 3, 5))
+        des = nnvm.sym.max_pool2d(x, pool_size=(2, 2), strides=(1, 1),
+                padding=(0, 0), ceil_mode=False)
+        self._assert_equal(ans, des, 'compile')
+
+
 class TestConvolution(TfmTest):
     def test_compile(self):
         x = mx.sym.var('x', shape=(3, 2, 2, 2))

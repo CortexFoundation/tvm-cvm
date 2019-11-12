@@ -343,7 +343,7 @@ class Pooling(Transformer):
         attrs = kwargs['attr']
         kernel = get_attr(attrs, 'kernel')
         global_pool = 'global' if get_attr(attrs, 'global_pool', False) else ''
-        pool_type = attrs['pool_type']
+        pool_type = get_attr(attrs, 'pool_size', 'max')
         op_name = '_'.join([global_pool, pool_type, 'pool2d']).strip('_')
         new_attrs = {}
         if not global_pool:
@@ -580,7 +580,13 @@ class BatchNorm(Transformer):
 @register_pass("calculate_ops")
 @register_transformer("Flatten")
 class Flatten(Transformer):
-    pass
+    def compile(self, op, **kwargs):
+        childs = kwargs['childs']
+        attrs = kwargs['attr']
+        op_name = 'flatten'
+        sym = get_nnvm_op(op_name)(*childs, name=N.n(),
+                                        **attrs)
+        return sym
 
 
 @register_pass("validate")
