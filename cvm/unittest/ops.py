@@ -183,10 +183,20 @@ class TestCustom(TfmTest):
         self._assert_equal(ans, des, 'compile')
 
 
+class TestClip(TfmTest):
+    def test_compile(self):
+        x = mx.sym.var('x', shape=(2, 3))
+        ans = mx.sym.clip(x, 1, 10)
+
+        x = nnvm.sym.Variable('x', __shape__=(2, 3))
+        des = nnvm.sym.clip(x, a_min=1, a_max=10)
+        self._assert_equal(ans, des, 'compile')
+
+
 class TestBroadcastSub(TfmTest):
     def test_compile(self):
-        x = mx.sym.var('x', shape=(2,3))
-        y = mx.sym.var('y', shape=(2,1))
+        x = mx.sym.var('x', shape=(2, 3))
+        y = mx.sym.var('y', shape=(2, 1))
         ans = mx.sym.broadcast_sub(x, y)
 
         x = nnvm.sym.Variable('x', __shape__=(2, 3))
@@ -202,6 +212,16 @@ class TestBroadcastTo(TfmTest):
 
         x = nnvm.sym.Variable('x', __shape__=(1,3))
         des = nnvm.sym.broadcast_to(x, shape=(2,3))
+        self._assert_equal(ans, des, 'compile')
+
+
+class TestUnSampling(TfmTest):
+    def test_compile(self):
+        x = mx.sym.var('x', shape=(1, 1, 3, 3))
+        ans = mx.sym.UpSampling(x, scale=2, sample_type='nearest')
+
+        x = nnvm.sym.Variable('x', __shape__=(1, 1, 3, 3))
+        des = nnvm.sym.upsampling(x, scale=2)
         self._assert_equal(ans, des, 'compile')
 
 

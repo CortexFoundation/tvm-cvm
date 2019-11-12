@@ -221,6 +221,16 @@ class Convolution(Transformer):
                                     **new_attrs)
 
 
+@register_transformer('UpSampling')
+class UpSampling(Transformer):
+    def compile(self, op, **kwargs):
+        childs = kwargs['childs']
+        attrs = kwargs['attr']
+        scale = get_attr(attrs, 'scale')
+        op_name, new_attrs = 'upsampling', {'scale': int(scale)}
+        return get_nnvm_op(op_name)(childs[0], **new_attrs)
+
+
 @register_pass("validate")
 @register_pass("fuse_transpose")
 @register_transformer("FullyConnected")
@@ -646,6 +656,17 @@ class Custom(Transformer):
             sym = get_nnvm_op(op_type)(*childs, name=N.n('cvm_shift'),
                                          **new_attrs)
         return sym
+
+
+@register_transformer('clip')
+class Clip(Transformer):
+    def compile(self, op, **kwargs):
+        childs = kwargs['childs']
+        attrs = kwargs['attr']
+        op_name, new_attrs = 'clip', {}
+        new_attrs['a_min'] = get_attr(attrs, 'a_min', 'clip')
+        new_attrs['a_max'] = get_attr(attrs, 'a_max', 'clip')
+        return get_nnvm_op(op_name)(*childs, **new_attrs)
 
 
 @register_transformer('_minimum')
