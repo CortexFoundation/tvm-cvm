@@ -56,10 +56,17 @@ class Transformer(object):
             Do nothing by default.
         """
         precs, scales = kwargs['precs'], kwargs['scales']
-        name, childs = op.attr('name'), sym_iter(op.get_children())
+        name, op_name = op.attr('name'), op.attr('op_name')
+        childs = sym_iter(op.get_children())
+        cns = [c.attr('name') for c in childs] if childs else []
+
         cname = childs[0].attr('name')
         precs[name][OUT_KEY] = precs[cname][OUT_KEY]
         scales[name] = scales[cname]
+
+        logger = logging.getLogger('log.mrt.realize')
+        logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
+               op_name, name, scales[name], cns)
         return op
 
     def compile(self, op, **kwargs):

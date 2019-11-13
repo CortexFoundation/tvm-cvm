@@ -20,6 +20,11 @@ class Null(Transformer):
             scales[name] = scale(th_dict[name], precs[name][OUT_KEY])
             attr = { 'precision': str(precs[name]) }
             return mx.sym.var(name, attr=attr)
+
+            logger = logging.getLogger('log.mrt.realize')
+            logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
+                   op_name, name, scales[name], [])
+            op = requant_output(op, name, **kwargs)
         return op
 
     def compile(self, op, **kwargs):
@@ -171,24 +176,7 @@ class Convolution(Transformer):
         return op
 
     def quantize(self, op, **kwargs):
-        th_dict = kwargs['th_dict']
-        name, op_name = op.attr('name'), op.attr('op_name')
-        childs, attr = sym_iter(op.get_children()), op.list_attr()
-        cns = [c.attr('name') for c in childs] if childs else []
-
-        oprec = kwargs['op_input_precs'][op_name]
-        X, xprec, xs = requant_operator(childs[0], oprec, oname=name, **kwargs)
-        W, wprec, ws = requant_parameter(cns[1], oprec, oname=name, **kwargs)
-        B, bprec = None, None
-        if not get_attr(attr, 'no_bias', False):
-            bs = ws * xs
-            bias_prec = get_bit(th_dict[cns[2]] * bs)
-            B, bprec, _ = requant_parameter(cns[2], bias_prec, bs,
-                oname=name, **kwargs)
-        oscale = kwargs['scales'][name] = ws * xs
-        op = get_mxnet_op(op_name)(X, W, B, **attr, name=name)
-        kwargs['precs'][name][OUT_KEY] = get_bit(th_dict[name] * oscale)
-        return op
+        return _quantize_xwb(op, **kwargs)
 
     def calculate_ops(self, op, **kwargs):
         W = sym_iter(op.get_children())[1]
@@ -230,6 +218,8 @@ class FullyConnected(Transformer):
         op = self._matrix_decomposition(op, params, infer_shapes)
         return op
 
+    def quantize(self, op, **kwargs):
+        return _quantize_xwb(op, **kwargs)
 
     def compile(self, op, **kwargs):
         childs = kwargs['childs']
@@ -315,6 +305,65 @@ class Softmax(Transformer):
         axis = get_attr(op.list_attr(), 'axis', -1)
         kwargs['base_ops'] = 2 + 2 * xshp[axis]
         return super().calculate_ops(op, **kwargs)
+
+    def quantize(self, op, **kwargs):
+        params, graph = kwargs['params'], kwargs['graph']
+        scales = kwargs['scales']
+        name, op_name = op.attr('name'), op.attr('op_name')
+        childs, attr = sym_iter(op.get_children()), op.list_attr()
+        cns = [c.attr('name') for c in childs] if childs else []
+
+        oprec = kwargs['op_input_precs'][op_name]
+        xs = scale(kwargs['th_dict'][childs[0].attr('name')], oprec)
+        X, xprec, xs = requant_operator(childs[0], oprec, xs,
+                oname=name, **kwargs)
+        axis = get_attr(attr, 'axis', -1)
+        lambd = 10
+        alpha = int(lambd*xs)
+        var = mx_const(alpha, graph, params)
+        max_axis = mx.sym.max(X, axis=axis, keepdims=True)
+        offset = mx.sym.broadcast_sub(max_axis, var, name=N.n('softmax_offset'))
+        offset = realize(offset, 0, xprec, **kwargs)
+        norm = mx.sym.broadcast_sub(X, offset, name=N.n('softmax_normalize'))
+        norm = mx.sym.relu(norm, name=N.n('Softmax_filter'))
+        norm = realize(norm, 0, xprec, **kwargs)
+
+        data = nd.arange(0, alpha+1)
+        table = nd.exp(data/xs)
+
+        tprec = get_bit(math.exp(lambd))
+        table = nd.clip(table, a_min=0, a_max=get_range(tprec))
+        W_name = N.n('cvm_lut_weight')
+        params[W_name] = weight = table.round().reshape(alpha+1, 1)
+        wattr = { 'precision': str(tprec) }
+        W = graph[W_name] = mx.sym.var(W_name, shape=weight.shape, attr=wattr)
+        lut = mx.sym.Custom(norm, W, in_dim=alpha+1,
+                name=name, op_type='cvm_lut')
+        sum_lut = mx.sym.sum(lut, axis=axis, keepdims=True,
+                name=N.n("softmax_sum"))
+
+        oprec = min(15, 31 - tprec)
+        assert oprec > 8, "operator softmax(%s) lambda(%d) is too large" \
+                % (name, lambd)
+        oscale = get_range(oprec)
+        var_scale = mx_const(oscale, graph, params)
+        prob = mx.sym.broadcast_mul(lut, var_scale,
+                name=N.n("softmax_output_scale"))
+        var_one = mx_const(1, graph, params)
+        half_lut = realize(sum_lut, 1, 31, **kwargs)
+        prob = mx.sym.broadcast_add(prob, half_lut, name=N.n("softmax_round"))
+        op = mx.sym.broadcast_div(prob, sum_lut, name=N.n("softmax_prob"))
+        op = op.astype('int32').astype('float32')
+        # op = mx.sym.floor(op) # simulate integer division
+        op = realize(op, 0, oprec, **kwargs)
+        kwargs['precs'][name][OUT_KEY] = oprec
+        scales[name]= oscale
+
+        logger = logging.getLogger('log.mrt.realize')
+        logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
+               op_name, name, scales[name], cns)
+        op = requant_output(op, name, **kwargs)
+        return op
 
 
 @register_pass("fuse_transpose")
@@ -421,7 +470,25 @@ class Pooling(Transformer):
 @register_pass("calculate_ops")
 @register_transformer("broadcast_mul")
 class BroadcastMul(Transformer):
-    pass
+    def quantize(self, op, **kwargs):
+        scales = kwargs['scales']
+        name, op_name = op.attr('name'), op.attr('op_name')
+        childs, attr = sym_iter(op.get_children()), op.list_attr()
+        cns = [c.attr('name') for c in childs] if childs else []
+
+        oprec = kwargs['op_input_precs'][op_name]
+        X, xprec, xs = requant(childs[0], oprec, oname=name, **kwargs)
+        B, bprec, bs = requant(childs[1], oprec, oname=name, **kwargs)
+        oscale = scales[name] = xs * bs
+        op = get_mxnet_op(op_name)(X, B, **attr, name=name)
+        kwargs['precs'][name][OUT_KEY] = get_bit(kwargs['th_dict'][name]*oscale)
+
+        logger = logging.getLogger('log.mrt.realize')
+        logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
+               op_name, name, scales[name], cns)
+        op = requant_output(op, name, **kwargs)
+        return op
+
 
 @register_pass("validate")
 @register_pass("rewrite")
@@ -429,7 +496,8 @@ class BroadcastMul(Transformer):
 @register_pass("calculate_ops")
 @register_transformer("broadcast_add")
 class BroadcastAdd(Transformer):
-    pass
+    def quantize(self, op, **kwargs):
+        return _quantize_scale(op, **kwargs)
 
 
 @register_pass("validate")
@@ -452,7 +520,7 @@ class Concat(Transformer):
         return op
 
     def quantize(self, op, **kwargs):
-        return _qt_multi_input(op, **kwargs)
+        return _quantize_scale(op, **kwargs)
 
 
 @register_pass('compile')
@@ -491,6 +559,24 @@ class Sum(Transformer):
         ishp = infer_shapes[X.attr('name')][get_entry_id(X)]
         kwargs['base_ops'] = np.product(oshp) / np.product(ishp)
         return super().calculate_ops(op, **kwargs)
+
+    def quantize(self, op, **kwargs):
+        scales = kwargs['scales']
+        name, op_name = op.attr('name'), op.attr('op_name')
+        childs, attr = sym_iter(op.get_children()), op.list_attr()
+        cns = [c.attr('name') for c in childs] if childs else []
+
+        oprec = kwargs['op_input_precs'][op_name]
+        X, xprec, xs = requant_operator(childs[0], oprec, oname=name, **kwargs)
+        oscale = scales[name] = xs
+        op = get_mxnet_op(op_name)(X, **attr, name=name)
+        kwargs['precs'][name][OUT_KEY] = get_bit(kwargs['th_dict'][name]*oscale)
+
+        logger = logging.getLogger('log.mrt.realize')
+        logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
+               op_name, name, scales[name], cns)
+        op = requant_output(op, name, **kwargs)
+        return op
 
 
 @register_pass("validate")
@@ -648,20 +734,52 @@ def _ft_multi_input(op):
         op = mx.sym.transpose(op, axes=axes, name=N.n('fuse_transpose'))
     return op
 
-def _qt_multi_input(op, **kwargs):
+def _quantize_scale(op, **kwargs):
+    scales = kwargs['scales']
     th_dict, precs = kwargs['th_dict'], kwargs['precs']
     name, op_name = op.attr('name'), op.attr('op_name')
     attr, childs = op.list_attr(), sym_iter(op.get_children())
-    cns = [c.attr('name') for c in childs]
+    cns = [c.attr('name') for c in childs] if childs else []
 
     oprec = kwargs['op_input_precs'][op_name]
     in_th = max([th_dict[n] for n in cns])
-    oscale = kwargs['scales'][name] = scale(in_th, oprec)
+    oscale = scales[name] = scale(in_th, oprec)
     new_childs = []
     for c in childs:
         c, cprec, _ = requant(c, oprec, oscale=oscale, oname=name, **kwargs)
         new_childs.append(c)
     op = get_mxnet_op(op_name)(*new_childs, **attr, name=name)
     precs[name][OUT_KEY] = get_bit(th_dict[name] * oscale)
+
+    logger = logging.getLogger('log.mrt.realize')
+    logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
+           op_name, name, scales[name], cns)
+    op = requant_output(op, name, **kwargs)
     return op
+
+def _quantize_xwb(op, **kwargs):
+    th_dict, scales = kwargs['th_dict'], kwargs['scales']
+    name, op_name = op.attr('name'), op.attr('op_name')
+    childs, attr = sym_iter(op.get_children()), op.list_attr()
+    cns = [c.attr('name') for c in childs] if childs else []
+
+    oprec = kwargs['op_input_precs'][op_name]
+    X, xprec, xs = requant_operator(childs[0], oprec, oname=name, **kwargs)
+    W, wprec, ws = requant_parameter(cns[1], oprec, oname=name, **kwargs)
+    B, bprec = None, None
+    if not get_attr(attr, 'no_bias', False):
+        bs = ws * xs
+        bias_prec = get_bit(th_dict[cns[2]] * bs)
+        B, bprec, _ = requant_parameter(cns[2], bias_prec, bs,
+            oname=name, **kwargs)
+    oscale = scales[name] = ws * xs
+    op = get_mxnet_op(op_name)(X, W, B, **attr, name=name)
+    kwargs['precs'][name][OUT_KEY] = get_bit(th_dict[name] * oscale)
+
+    logger = logging.getLogger('log.mrt.realize')
+    logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
+           op_name, name, scales[name], cns)
+    op = requant_output(op, name, **kwargs)
+    return op
+
 

@@ -214,7 +214,7 @@ def _get_opt(out, lambd):
         return alpha
     return absmax
 
-def _mx_const(number, graph, params):
+def mx_const(number, graph, params):
     name = N.n('const_var')
     prec = math.ceil(math.log2(number)) + 1
     if name not in graph:
@@ -230,6 +230,9 @@ def get_bit(opt):
         return 1
     return math.ceil(math.log2(opt)) + 1
     # return math.floor(math.log2(opt)) + 2
+
+def get_range(prec):
+    return (2 ** (prec - 1)) - 1
 
 def scale(threshold, precision):
     assert threshold >= 0
@@ -280,7 +283,7 @@ def sym_calibrate(symbol, params, data, **kwargs):
 
     return th_dict
 
-def _realize(X, sb, prec, **kwargs):
+def realize(X, sb, prec, **kwargs):
     name = kwargs.get('name', N.n(X.attr('name')))
     if sb == 0:
         sym = mx.sym.Custom(X, precision=prec,
@@ -309,7 +312,7 @@ def requant_operator(X, oprec, oscale=None, **kwargs):
         sb = get_bit(th_dict[xn]*iscale) - oprec
         if sb > 1:
             iprec -= sb
-            X = _realize(X, sb, iprec)
+            X = realize(X, sb, iprec)
             iscale = iscale / (2**sb)
             logger.debug(
                 "Operator  %-20s name=%-40s exactly quantize with sb=%s" +
@@ -327,16 +330,16 @@ def requant_operator(X, oprec, oscale=None, **kwargs):
                     xopn, xn, rescale, sim_scale, frac, exp, scale_err)
         oscale = iscale * frac * (2 ** exp)
         if frac > 1:
-            X = _realize(X, 0, iprec)
+            X = realize(X, 0, iprec)
             var = mx_const(frac, graph, params)
             X = mx.sym.broadcast_mul(X, var, name=N.n("mrt_quantize_scale"))
-        X = _realize(X, -exp, oprec)
+        X = realize(X, -exp, oprec)
         logger.debug(
             "Operator  %-20s name=%-40s requantize with scale=%-16.8f<%d, %d>" +
             " iprec=%s, iscale=%-10.5f, oprec=%s, oscale=%-10.5f",
                 xopn, xn, rescale, frac, exp, iprec, iscale, oprec, oscale)
     else:
-        X = _realize(X, 0, oprec)
+        X = realize(X, 0, oprec)
         oscale = iscale
         logger.debug(
             "Operator  %-20s name=%-40s clip with iprec=%s, oprec=%s",
@@ -361,10 +364,31 @@ def requant_parameter(wname, oprec, oscale=None, **kwargs):
     return W, oprec, oscale
 
 def requant(sym, oprec, oscale=None, **kwargs):
-    if is_params(sym, params):
-        return requant_parameter(X.attr('name'), oprec, oscale, **kwargs)
+    if is_params(sym, kwargs['params']):
+        return requant_parameter(sym.attr('name'), oprec, oscale, **kwargs)
     else:
-        return _requant_operator(X, oprec, oscale)
+        return requant_operator(sym, oprec, oscale, **kwargs)
 
+def requant_output(op, name, **kwargs):
+    infer_shapes, th_dict = kwargs['infer_shapes'], kwargs['th_dict']
+    precs, scales = kwargs['precs'], kwargs['scales']
 
+    oname = op.attr('name')
+    infer_shapes[oname] = infer_shapes[name]
+    th_dict[oname] = th_dict[name]
+    precs[oname] = precs[name]
+    scales[oname] = scales[name]
+
+    # Requantize output symbol
+    if name in precs[name]:
+        oprec = precs[name][name]
+        os = scale(th_dict[name], oprec)
+        op, oprec, os = requant_operator(op, oprec, os, oname=name, **kwargs)
+
+        oname = op.attr('name')
+        infer_shapes[oname] = infer_shapes[name]
+        th_dict[oname] = th_dict[name]
+        precs[oname] = oprec
+        scales[oname] = os
+    return op
 

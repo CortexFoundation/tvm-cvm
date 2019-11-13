@@ -74,6 +74,12 @@ class MRT(object):
         qext = self._get_ext()
         '''
 
+    def dump(self, path="~/tvm-cvm/data/test_dump.json"):
+        assert self._qsym is not None
+        import os
+        with open(os.path.expanduser(path), 'w') as f:
+            f.write(self._qsym.tojson())
+
     def _op_default_input_precs(self):
         op_precs = {}
         for n in ['Convolution', 'FullyConnected', 'sigmoid', 'exp', 'softmax']:
@@ -116,6 +122,7 @@ if __name__ == "__main__":
     mrt.set_input_prec(8)
     mrt.set_output_prec(8)
     mrt.quantize()
+    mrt.dump()
     #sym, params = quantize(sym, params, th_dict, precs, scales)
     #print (calculate_ops(sym, params))
 
