@@ -72,8 +72,8 @@ class MRT(object):
 
         self._qsym, self._qprm = quantize(self._sym, self._prm,
                 self.th_dict, self.precs, self.scales, self.op_input_precs)
-        qext = self._get_ext()
-        return self._qsym, self._qprm, qext
+        self._qext = self._get_ext()
+        return self._qsym, self._qprm, self._qext
 
     def dump(self, fname="test_dump", directory="~/tvm-cvm/data/"):
         assert self._qsym is not None
@@ -108,12 +108,33 @@ class MRT(object):
         return precs
 
     def _get_ext(self):
-        self._qext = { 'data': {} }
-        self._qext['data'] = {
+        qext = { 'data': {} }
+        qext['data'] = {
             'shape': self._ishp,
             'scale': self.scales['data'],
             'target_bit': self.precs['data'][OUT_KEY], }
-        return self._qext
+        return qext
+
+def load_model(sym_path, prm_path, ctx, inputs_ext=None):
+    inputs = [mx.sym.var('data')]
+    net = utils.load_model(sym_path, prm_path, inputs, ctx=ctx)
+    acc_top1 = mx.metric.Accuracy()
+    acc_top5 = mx.metric.TopKAccuracy(5)
+    acc_top1.reset()
+    acc_top5.reset()
+    def model_func(data, label):
+        data = sim.load_real_data(data, 'data', inputs_ext) if inputs_ext \
+            else data
+        data = gluon.utils.split_and_load(data, ctx_list=ctx,
+            batch_axis=0, even_split=False)
+        res = [net.forward(d) for d in data]
+        res = nd.concatenate(res)
+        acc_top1.update(label, res)
+        _, top1 = acc_top1.get()
+        acc_top5.update(label, res)
+        _, top5 = acc_top5.get()
+        return "top1={:6.2%} top5={:6.2%}".format(top1, top5)
+    return model_func
 
 if __name__ == "__main__":
     import os
@@ -149,43 +170,15 @@ if __name__ == "__main__":
 
     ctx = [mx.gpu(int(i)) for i in "4".split(',') if i.strip()]
     inputs = [mx.sym.var('data')]
-    inputs_ext = { 'data': { 'shape': (1, 3, 299, 299), } }
+    inputs_ext = { 'data': {
+        'shape': (batch_size, 3, input_size, input_size), } }
 
     # load original model
-    net1 = utils.load_model(sym_path, prm_path, inputs, ctx=ctx)
-    acc_top1 = mx.metric.Accuracy()
-    acc_top5 = mx.metric.TopKAccuracy(5)
-    acc_top1.reset()
-    acc_top5.reset()
-    def inception_v3(data, label):
-        data = gluon.utils.split_and_load(data, ctx_list=ctx,
-            batch_axis=0, even_split=False)
-        res = [net1.forward(d) for d in data]
-        res = nd.concatenate(res)
-        acc_top1.update(label, res)
-        _, top1 = acc_top1.get()
-        acc_top5.update(label, res)
-        _, top5 = acc_top5.get()
-        return "top1={:6.2%} top5={:6.2%}".format(top1, top5)
+    inception_v3 = load_model(sym_path, prm_path, ctx)
 
     # load quantized model
     (inputs_ext, ) = sim.load_ext(qext_path)
-    net2 = utils.load_model(qsym_path, qprm_path, inputs, ctx=ctx)
-    qacc_top1 = mx.metric.Accuracy()
-    qacc_top5 = mx.metric.TopKAccuracy(5)
-    qacc_top1.reset()
-    qacc_top5.reset()
-    def cvm_quantize(data, label):
-        data = sim.load_real_data(data, 'data', inputs_ext)
-        data = gluon.utils.split_and_load(data, ctx_list=ctx,
-            batch_axis=0, even_split=False)
-        res = [net2.forward(d) for d in data]
-        res = nd.concatenate(res)
-        qacc_top1.update(label, res)
-        _, top1 = qacc_top1.get()
-        qacc_top5.update(label, res)
-        _, top5 = qacc_top5.get()
-        return "top1={:6.2%} top5={:6.2%}".format(top1, top5)
+    cvm_quantize = load_model(qsym_path, qprm_path, ctx, inputs_ext=inputs_ext)
 
     utils.multi_validate(inception_v3, data_iter_func, cvm_quantize,
             iter_num=10, logger=logging.getLogger('mrt.validate'))
