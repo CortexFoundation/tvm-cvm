@@ -46,8 +46,13 @@ def rewrite(symbol, params):
 def quantize(symbol, params, th_dict, precs, scales, op_input_precs):
     infer_shapes = infer_shape(symbol, params)
     return topo_visit_transformer(symbol, params,
-            apply_pass("quantize", infer_shapes=infer_shapes),
-            th_dict=th_dict, precs=precs, scales=scales,
+            apply_pass(
+                "quantize",
+                infer_shapes=infer_shapes,
+                # th_dict=th_dict,
+            ),
+            th_dict=th_dict,
+            precs=precs, scales=scales,
             op_input_precs=op_input_precs)
 
 @N.register_nm("cvm")
