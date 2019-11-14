@@ -221,6 +221,43 @@ class Convolution(Transformer):
                                     **new_attrs)
 
 
+@register_transformer('expand_dims')
+class ExpandDims(Transformer):
+    def compile(self, op, **kwargs):
+        childs = kwargs['childs']
+        attrs = kwargs['attr']
+        op_name, new_attrs = 'expand_dims', {}
+        new_attrs['axis'] = get_attr(attrs, 'axis', 'expand_dims')
+        return get_nnvm_op(op_name)(*childs, **new_attrs)
+
+
+@register_transformer('Embedding')
+class Embedding(Transformer):
+    def compile(self, op, **kwargs):
+        childs = kwargs['childs']
+        attrs = kwargs['attr']
+        indices, weight = childs
+        op_name = 'take'
+        return get_nnvm_op(op_name)(weight, indices, axis=0)
+
+
+@register_transformer('repeat')
+class Repeat(Transformer):
+    def compile(self, op, **kwargs):
+        childs = kwargs['childs']
+        attrs = kwargs['attr']
+        data = childs[0]
+        new_attrs = {}
+        op_name = 'repeat'
+        new_attrs['repeats'] = get_attr(attrs, 'repeats', 'repeat')
+        if 'axis' in attrs:
+            new_attrs['axis'] = get_attr(attrs, 'axis')
+        else:
+            data = get_nnvm_op('flatten')(data)
+            new_attrs['axis'] = 0
+        return get_nnvm_op(op_name)(childs[0], **new_attrs)
+
+
 @register_transformer('UpSampling')
 class UpSampling(Transformer):
     def compile(self, op, **kwargs):

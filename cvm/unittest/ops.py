@@ -193,6 +193,28 @@ class TestClip(TfmTest):
         self._assert_equal(ans, des, 'compile')
 
 
+class TestExpandDims(TfmTest):
+    def test_compile(self):
+        x = mx.sym.var('x', shape=(2, 3, 4))
+        ans = mx.sym.expand_dims(x, axis=1)
+
+        x = nnvm.sym.Variable('x', __shape__=(2, 3, 4))
+        des = nnvm.sym.expand_dims(x, axis=1)
+        self._assert_equal(ans, des, 'compile')
+
+
+class TestEmbedding(TfmTest):
+    def test_compile(self):
+        x = mx.sym.var('x', shape=(2, 2))
+        y = mx.sym.var('y', shape=(4, 5))
+        ans = mx.sym.Embedding(x, y, 4, 5)
+
+        x = nnvm.sym.Variable('x', __shape__=(2, 2))
+        y = nnvm.sym.Variable('y', __shape__=(4, 5))
+        des = nnvm.sym.take(y, x, axis=0)
+        self._assert_equal(ans, des, 'compile')
+
+
 class TestBroadcastSub(TfmTest):
     def test_compile(self):
         x = mx.sym.var('x', shape=(2, 3))
@@ -203,6 +225,16 @@ class TestBroadcastSub(TfmTest):
         y = nnvm.sym.Variable('y', __shape__=(2, 1))
         des = nnvm.sym.broadcast_sub(x, y)
         self._assert_equal(ans, des, "compile")
+
+
+class TestRepeat(TfmTest):
+    def test_compile(self):
+        x = mx.sym.var('x', shape=(2, 2))
+        ans = mx.sym.repeat(x, repeats=2)
+
+        x = nnvm.sym.Variable('x', __shape__=(2, 2))
+        des = nnvm.sym.repeat(x, repeats=2, axis=0)
+        self._assert_equal(ans, des, 'compile')
 
 
 class TestBroadcastTo(TfmTest):
