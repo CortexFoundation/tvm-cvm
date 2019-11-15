@@ -237,6 +237,35 @@ class TestRepeat(TfmTest):
         self._assert_equal(ans, des, 'compile')
 
 
+class TestSliceLike(TfmTest):
+    def test_compile(self):
+        x = mx.sym.var('x', shape=(3, 4))
+        y = mx.sym.var('y', shape=(2, 3))
+        ans = mx.sym.slice_like(x, y, axes=(0, 0))
+
+        x = nnvm.sym.Variable('x', __shape__=(3, 4))
+        y = nnvm.sym.Variable('y', __shape__=(2, 3))
+        des = nnvm.sym.slice_like(x, y, axis=(0, 0))
+        self._assert_equal(ans, des, 'compile')
+
+
+class TestBoxNms(TfmTest):
+    def test_compile(self):
+        x = mx.sym.var('x', shape=(4, 6))
+        ans = mx.sym.contrib.box_nms(x)
+
+        x = nnvm.sym.Variable('x', __shape__=(4, 6))
+        des = nnvm.sym.get_valid_counts(x, score_threshold=0)
+        des = nnvm.sym.non_max_suppression(des[1], des[0],
+                iou_threshold=0.5,
+                force_suppress=False, top_k=-1,
+                coord_start=2,
+                score_index=1, id_index=-1,
+                return_indices=False, invalid_to_bottom=True)
+        self._assert_equal(ans, des, 'compile')
+
+
+
 class TestBroadcastTo(TfmTest):
     def test_compile(self):
         x = mx.sym.var('x', shape=(1,3))

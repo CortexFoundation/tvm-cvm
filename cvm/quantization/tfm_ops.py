@@ -258,6 +258,43 @@ class Repeat(Transformer):
         return get_nnvm_op(op_name)(childs[0], **new_attrs)
 
 
+@register_transformer('_contrib_box_nms')
+class BoxNms(Transformer):
+    def compile(self, op, **kwargs):
+        childs = kwargs['childs']
+        attrs = kwargs['attr']
+        force_suppress = get_attr(attrs, 'force_suppress', False)
+        iou_thresh = get_attr(attrs, ' overlap_thresh', 0.5)
+        top_k = get_attr(attrs, 'topk', -1)
+        valid_thresh = get_attr(attrs, 'valid_thresh', 0)
+        coord_start = get_attr(attrs, 'coord_start', 2)
+        score_index = get_attr(attrs, 'score_index', 1)
+        id_index = get_attr(attrs, 'id_index', -1)
+        in_format = get_attr(attrs, 'in_format', 'corner')
+        out_format = get_attr(attrs, 'out_format', 'corner')
+        op_name = 'get_valid_counts'
+        ret = get_nnvm_op(op_name)(childs[0],
+                score_threshold=valid_thresh)
+        op_name = 'non_max_suppression'
+        nms_out = get_nnvm_op(op_name)(ret[1], ret[0],
+                iou_threshold=iou_thresh,
+                force_suppress=force_suppress, top_k=top_k,
+                coord_start=coord_start,
+                score_index=score_index, id_index=id_index,
+                return_indices=False, invalid_to_bottom=True)
+        return nms_out
+
+
+@register_transformer('slice_like')
+class SliceLike(Transformer):
+    def compile(self, op, **kwargs):
+        childs = kwargs['childs']
+        attrs = kwargs['attr']
+        new_attrs = {'axis': get_attr(attrs, 'axes', ())}
+        op_name = 'slice_like'
+        return get_nnvm_op(op_name)(*childs, **new_attrs)
+
+
 @register_transformer('UpSampling')
 class UpSampling(Transformer):
     def compile(self, op, **kwargs):
