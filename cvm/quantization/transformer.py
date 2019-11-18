@@ -143,8 +143,8 @@ if __name__ == "__main__":
     # set python-logging color format
     utils.log_init()
 
-    # sym = mx.sym.load("/tmp/densenet/densenet161.json")
-    # params = mx.nd.load("/tmp/densenet/densenet161.params")
+    # sym_path = "/tmp/densenet/densenet161.json"
+    # prm_path = "/tmp/densenet/densenet161.params"
     sym_path = "./data/tf_inceptionv3.json"
     prm_path = "./data/tf_inceptionv3.params"
 
