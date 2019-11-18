@@ -2,6 +2,7 @@ from mxnet import gluon
 
 import tfm_ops
 from tfm_pass import *
+from gluon_zoo import *
 
 import utils
 import sym_utils as sutils
@@ -12,9 +13,10 @@ import logging
 #TODO(wlt): control available api for MRT
 
 def init(symbol, params, input_shape=None):
-    sym, params = graph_validate(symbol, params)
     if input_shape is not None:
-        sym, params = attach_input_shape(sym, params, {'data': input_shape})
+        symbol, params = attach_input_shape(symbol, params,
+            {'data': input_shape})
+    sym, params = graph_validate(symbol, params)
     infer_shape(sym, params) # check infer_shape is correct.
     sym, params = validate(sym, params)
     return sym, params
@@ -135,51 +137,4 @@ def load_model(sym_path, prm_path, ctx, inputs_ext=None):
         _, top5 = acc_top5.get()
         return "top1={:6.2%} top5={:6.2%}".format(top1, top5)
     return model_func
-
-if __name__ == "__main__":
-    import os
-    import dataset as ds
-
-    # set python-logging color format
-    utils.log_init()
-
-    # sym_path = "/tmp/densenet/densenet161.json"
-    # prm_path = "/tmp/densenet/densenet161.params"
-    sym_path = "./data/tf_inceptionv3.json"
-    prm_path = "./data/tf_inceptionv3.params"
-
-    sym, params = mx.sym.load(sym_path), mx.nd.load(prm_path)
-    print (collect_op_names(sym, params))
-    print ("Registered Graph Pass")
-    for k, v in pass_info().items():
-        print ("%20s" % k, v)
-
-    batch_size = 16
-    input_size = 299
-    data_iter_func = ds.data_iter('imagenet',
-            batch_size, input_size=input_size)
-    data, _ = data_iter_func()
-    mrt = MRT(sym, params,
-            input_shape=(batch_size, 3, input_size, input_size))
-    mrt.set_data(data)
-    mrt.calibrate()
-    mrt.set_input_prec(8)
-    mrt.set_output_prec(8)
-    mrt.quantize()
-    qsym_path, qprm_path, qext_path = mrt.dump()
-
-    ctx = [mx.gpu(int(i)) for i in "4".split(',') if i.strip()]
-    inputs = [mx.sym.var('data')]
-    inputs_ext = { 'data': {
-        'shape': (batch_size, 3, input_size, input_size), } }
-
-    # load original model
-    inception_v3 = load_model(sym_path, prm_path, ctx)
-
-    # load quantized model
-    (inputs_ext, ) = sim.load_ext(qext_path)
-    cvm_quantize = load_model(qsym_path, qprm_path, ctx, inputs_ext=inputs_ext)
-
-    utils.multi_validate(inception_v3, data_iter_func, cvm_quantize,
-            iter_num=10, logger=logging.getLogger('mrt.validate'))
 

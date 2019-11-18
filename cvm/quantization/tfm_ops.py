@@ -82,6 +82,7 @@ class Relu(Transformer):
         return sym
 
 
+@register_pass("quantize")
 @register_transformer("Activation")
 class Activation(Transformer):
     def validate(self, op, **kwargs):
@@ -643,6 +644,7 @@ class BatchNorm(Transformer):
 @register_pass("validate")
 @register_pass("fuse_transpose")
 @register_pass("rewrite")
+@register_pass("quantize")
 @register_pass("calculate_ops")
 @register_transformer("Flatten")
 class Flatten(Transformer):
