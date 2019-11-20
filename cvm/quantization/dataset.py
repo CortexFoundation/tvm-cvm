@@ -72,7 +72,7 @@ def load_voc(batch_size, input_size=416, **kwargs):
 def load_voc_metric():
     return VOC07MApMetric(iou_thresh=0.5, class_names=gdata.VOCDetection.CLASSES)
 
-def load_imagenet_rec(batch_size, input_size=224, **kwargs):
+def load_imagenet_rec(batch_size, input_size=224, device_id=4, **kwargs):
     files = ["rec/val.rec", "rec/val.idx"]
     root_dir = download_files("imagenet", files, **kwargs)
     crop_ratio = 0.875
@@ -97,6 +97,8 @@ def load_imagenet_rec(batch_size, input_size=224, **kwargs):
 	std_r               = std_rgb[0],
 	std_g               = std_rgb[1],
 	std_b               = std_rgb[2],
+
+        device_id           = device_id,
     )
     return val_data
 

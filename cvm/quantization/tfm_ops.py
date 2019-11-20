@@ -423,7 +423,7 @@ class Pooling(Transformer):
             scale_name = N.n('avg_scale')
             graph[scale_name] = scale_sym = mx.sym.var(scale_name, shape=(1,))
             params[scale_name] = nd.array([1. / (X_shape[2] * X_shape[3])])
-            op = mx.sym.sum(childs[0], axis=(2, 3), name=N.n('sum'))
+            op = mx.sym.sum(childs[0], axis=(2, 3), name=N.n('sum'), keepdims=True)
             op = mx.sym.broadcast_mul(op, scale_sym, name=N.n('braodcast_mul'))
         elif pool_type == 'avg':
             X = childs[0]
@@ -652,6 +652,16 @@ class Flatten(Transformer):
 
 
 @register_pass("validate")
+@register_pass("fuse_transpose")
+@register_pass("rewrite")
+@register_pass("quantize")
+@register_pass("calculate_ops")
+@register_transformer("clip")
+class Clip(Transformer):
+    pass
+
+
+@register_pass("validate")
 @register_transformer("slice")
 class Slice(Transformer):
     def compile(self, op, **kwargs):
@@ -718,6 +728,27 @@ class Custom(Transformer):
 class ElemwiseAdd(Transformer):
     def fuse_transpose(self, op, **kwargs):
         return _ft_multi_input(op)
+
+    def quantize(self, op, **kwargs):
+        return _quantize_scale(op, **kwargs)
+
+
+@register_pass("validate")
+@register_pass("calculate_ops")
+@register_pass("rewrite")
+@register_pass("quantize")
+@register_transformer("Dropout")
+class Dropout(Transformer):
+    def fuse_transpose(self, op, **kwargs):
+        X, name = op.get_children()[0], op.attr('name')
+        op_name = op.attr('name')
+        if X.attr('op_name') == Transpose.op_name:
+            t_name, t_attr = X.attr('name'), X.list_attr()
+            X = X.get_children()[0]
+            op = get_mxnet_op(op_name)(X, name=name)
+            op = mx.sym.transpose(op, name=t_name, **t_attr)
+        return op
+
 
 def _ft_multi_input(op):
     name, childs = op.attr('name'), sym_iter(op.get_children())

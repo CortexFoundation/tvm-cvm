@@ -1,5 +1,6 @@
 from mxnet import gluon
 
+import dataset as ds
 import tfm_ops
 from tfm_pass import *
 from gluon_zoo import *
@@ -137,4 +138,36 @@ def load_model(sym_path, prm_path, ctx, inputs_ext=None):
         _, top5 = acc_top5.get()
         return "top1={:6.2%} top5={:6.2%}".format(top1, top5)
     return model_func
+
+def validate_model(sym_path, prm_path, input_size,
+        batch_size=16, ds_name='imagenet', ctx=[mx.gpu(0)]):
+    sym, params = mx.sym.load(sym_path), mx.nd.load(prm_path)
+    print (collect_op_names(sym, params))
+    print ("Registered Graph Pass")
+    for k, v in pass_info().items():
+        print ("%20s" % k, v)
+
+    data_iter_func = ds.data_iter(ds_name, batch_size, input_size=input_size)
+    data, _ = data_iter_func()
+    mrt = MRT(sym, params, input_shape=(batch_size, 3, input_size, input_size))
+    mrt.set_data(data)
+    mrt.calibrate()
+    mrt.set_input_prec(8)
+    mrt.set_output_prec(8)
+    mrt.quantize()
+    qsym_path, qprm_path, qext_path = mrt.dump()
+
+    inputs = [mx.sym.var('data')]
+    inputs_ext = { 'data': {
+        'shape': (batch_size, 3, input_size, input_size), } }
+
+    # load original model
+    org_model = load_model(sym_path, prm_path, ctx)
+
+    # load quantized model
+    (inputs_ext, ) = sim.load_ext(qext_path)
+    cvm_quantize = load_model(qsym_path, qprm_path, ctx, inputs_ext=inputs_ext)
+
+    utils.multi_validate(org_model, data_iter_func, cvm_quantize,
+            iter_num=10, logger=logging.getLogger('mrt.validate'))
 
