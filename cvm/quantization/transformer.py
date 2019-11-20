@@ -82,9 +82,9 @@ class MRT(object):
         assert self._qsym is not None
         import os
         directory = os.path.expanduser(directory)
-        qsym_path = os.path.join(directory, fname+'.json')
-        qprm_path = os.path.join(directory, fname+'.params')
-        qext_path = os.path.join(directory, fname+'.ext')
+        prefix = os.path.join(directory, fname)
+        qsym_path, qprm_path, qext_path = utils.extend_fname(prefix, True)
+
         with open(os.path.expanduser(qsym_path), 'w') as f:
             f.write(self._qsym.tojson())
         nd.save(qprm_path, self._qprm)

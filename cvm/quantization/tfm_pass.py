@@ -288,17 +288,17 @@ def sym_calibrate(symbol, params, data, **kwargs):
 
     return th_dict
 
-def realize(X, sb, prec, **kwargs):
-    name = kwargs.get('name', N.n(X.attr('name')))
+def realize(X, sb, prec, name=None):
+    name = name if name else N.n('realize')
     if sb == 0:
         sym = mx.sym.Custom(X, precision=prec,
-                cvm_name=name, name=name, op_type='cvm_clip')
+                name=name, op_type='cvm_clip')
     elif sb < 0:
         sym = mx.sym.Custom(X, shift_bit=-sb, precision=prec,
                 name=name, op_type='cvm_left_shift')
     else:
         sym = mx.sym.Custom(X, shift_bit=sb, precision=prec,
-                cvm_name=name, name=name, op_type='cvm_right_shift')
+                name=name, op_type='cvm_right_shift')
     return sym
 
 def requant_operator(X, oprec, oscale=None, **kwargs):

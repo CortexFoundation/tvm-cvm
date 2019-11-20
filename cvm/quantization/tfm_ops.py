@@ -324,10 +324,10 @@ class Softmax(Transformer):
         var = mx_const(alpha, graph, params)
         max_axis = mx.sym.max(X, axis=axis, keepdims=True)
         offset = mx.sym.broadcast_sub(max_axis, var, name=N.n('softmax_offset'))
-        offset = realize(offset, 0, xprec, **kwargs)
+        offset = realize(offset, 0, xprec)
         norm = mx.sym.broadcast_sub(X, offset, name=N.n('softmax_normalize'))
         norm = mx.sym.relu(norm, name=N.n('Softmax_filter'))
-        norm = realize(norm, 0, xprec, **kwargs)
+        norm = realize(norm, 0, xprec)
 
         data = nd.arange(0, alpha+1)
         table = nd.exp(data/xs)
@@ -351,12 +351,12 @@ class Softmax(Transformer):
         prob = mx.sym.broadcast_mul(lut, var_scale,
                 name=N.n("softmax_output_scale"))
         var_one = mx_const(1, graph, params)
-        half_lut = realize(sum_lut, 1, 31, **kwargs)
+        half_lut = realize(sum_lut, 1, 31)
         prob = mx.sym.broadcast_add(prob, half_lut, name=N.n("softmax_round"))
         op = mx.sym.broadcast_div(prob, sum_lut, name=N.n("softmax_prob"))
         op = op.astype('int32').astype('float32')
         # op = mx.sym.floor(op) # simulate integer division
-        op = realize(op, 0, oprec, **kwargs)
+        op = realize(op, 0, oprec)
         kwargs['precs'][name][OUT_KEY] = oprec
         scales[name]= oscale
 
