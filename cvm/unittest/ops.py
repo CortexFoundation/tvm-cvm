@@ -183,16 +183,87 @@ class TestCustom(TfmTest):
         self._assert_equal(ans, des, 'compile')
 
 
+class TestClip(TfmTest):
+    def test_compile(self):
+        x = mx.sym.var('x', shape=(2, 3))
+        ans = mx.sym.clip(x, 1, 10)
+
+        x = nnvm.sym.Variable('x', __shape__=(2, 3))
+        des = nnvm.sym.clip(x, a_min=1, a_max=10)
+        self._assert_equal(ans, des, 'compile')
+
+
+class TestExpandDims(TfmTest):
+    def test_compile(self):
+        x = mx.sym.var('x', shape=(2, 3, 4))
+        ans = mx.sym.expand_dims(x, axis=1)
+
+        x = nnvm.sym.Variable('x', __shape__=(2, 3, 4))
+        des = nnvm.sym.expand_dims(x, axis=1)
+        self._assert_equal(ans, des, 'compile')
+
+
+class TestEmbedding(TfmTest):
+    def test_compile(self):
+        x = mx.sym.var('x', shape=(2, 2))
+        y = mx.sym.var('y', shape=(4, 5))
+        ans = mx.sym.Embedding(x, y, 4, 5)
+
+        x = nnvm.sym.Variable('x', __shape__=(2, 2))
+        y = nnvm.sym.Variable('y', __shape__=(4, 5))
+        des = nnvm.sym.take(y, x, axis=0)
+        self._assert_equal(ans, des, 'compile')
+
+
 class TestBroadcastSub(TfmTest):
     def test_compile(self):
-        x = mx.sym.var('x', shape=(2,3))
-        y = mx.sym.var('y', shape=(2,1))
+        x = mx.sym.var('x', shape=(2, 3))
+        y = mx.sym.var('y', shape=(2, 1))
         ans = mx.sym.broadcast_sub(x, y)
 
         x = nnvm.sym.Variable('x', __shape__=(2, 3))
         y = nnvm.sym.Variable('y', __shape__=(2, 1))
         des = nnvm.sym.broadcast_sub(x, y)
         self._assert_equal(ans, des, "compile")
+
+
+class TestRepeat(TfmTest):
+    def test_compile(self):
+        x = mx.sym.var('x', shape=(2, 2))
+        ans = mx.sym.repeat(x, repeats=2)
+
+        x = nnvm.sym.Variable('x', __shape__=(2, 2))
+        des = nnvm.sym.repeat(x, repeats=2, axis=0)
+        self._assert_equal(ans, des, 'compile')
+
+
+class TestSliceLike(TfmTest):
+    def test_compile(self):
+        x = mx.sym.var('x', shape=(3, 4))
+        y = mx.sym.var('y', shape=(2, 3))
+        ans = mx.sym.slice_like(x, y, axes=(0, 0))
+
+        x = nnvm.sym.Variable('x', __shape__=(3, 4))
+        y = nnvm.sym.Variable('y', __shape__=(2, 3))
+        des = nnvm.sym.slice_like(x, y, axis=(0, 0))
+        self._assert_equal(ans, des, 'compile')
+
+
+class TestBoxNms(TfmTest):
+    def test_compile(self):
+        x = mx.sym.var('x', shape=(4, 6))
+        ans = mx.sym.contrib.box_nms(x)
+
+        x = nnvm.sym.Variable('x', __shape__=(4, 6))
+        des = nnvm.sym.get_valid_counts(x, score_threshold=0)
+        des = nnvm.sym.non_max_suppression(des[1], des[0],
+                iou_threshold=0.5,
+                force_suppress=False, top_k=-1,
+                coord_start=2,
+                score_index=1, id_index=-1,
+                return_indices=False, invalid_to_bottom=True)
+        self._assert_equal(ans, des, 'compile')
+
 
 
 class TestBroadcastTo(TfmTest):
@@ -202,6 +273,16 @@ class TestBroadcastTo(TfmTest):
 
         x = nnvm.sym.Variable('x', __shape__=(1,3))
         des = nnvm.sym.broadcast_to(x, shape=(2,3))
+        self._assert_equal(ans, des, 'compile')
+
+
+class TestUnSampling(TfmTest):
+    def test_compile(self):
+        x = mx.sym.var('x', shape=(1, 1, 3, 3))
+        ans = mx.sym.UpSampling(x, scale=2, sample_type='nearest')
+
+        x = nnvm.sym.Variable('x', __shape__=(1, 1, 3, 3))
+        des = nnvm.sym.upsampling(x, scale=2)
         self._assert_equal(ans, des, 'compile')
 
 
@@ -250,6 +331,41 @@ class TestReshape(TfmTest):
         des = nnvm.sym.reshape(datan, shape=(1, 2, 3, 4))
 
         self._assert_equal(op, des, 'compile')
+
+
+class TestFlatten(TfmTest):
+    def test_compile(self):
+        data = mx.sym.var('data', shape=(3, 3))
+        ans = mx.sym.Flatten(data)
+
+        data = nnvm.sym.Variable('data', __shape__=(3, 3))
+        des = nnvm.sym.flatten(data)
+        self._assert_equal(ans, des, 'compile')
+
+
+class TestFullyConnected(TfmTest):
+    def test_compile(self):
+        data = mx.sym.var('data', shape=(4, 3, 3, 3))
+        weight = mx.sym.var('weight', shape=(4, 27))
+        bias = mx.sym.var('bias', shape=(4,))
+        ans = mx.sym.FullyConnected(data, weight, bias, 4, flatten=True, no_bias=False)
+
+        a = nnvm.sym.Variable('data', __shape__=(4, 3, 3, 3))
+        b = nnvm.sym.Variable('weight', __shape__=(4, 27))
+        c = nnvm.sym.Variable('bias', __shape__=(4,))
+        d = nnvm.sym.dense(nnvm.sym.flatten(a), b, c, units=4, use_bias=True)
+        self._assert_equal(ans, d, 'compile')
+
+
+class TestPooling(TfmTest):
+    def test_compile(self):
+        x = mx.sym.var('x', shape=(4, 2, 3, 5))
+        ans = mx.sym.Pooling(x, kernel=(2, 2))
+
+        x = nnvm.sym.Variable('x', __shape__=(4, 2, 3, 5))
+        des = nnvm.sym.max_pool2d(x, pool_size=(2, 2), strides=(1, 1),
+                padding=(0, 0), ceil_mode=False)
+        self._assert_equal(ans, des, 'compile')
 
 
 class TestConvolution(TfmTest):

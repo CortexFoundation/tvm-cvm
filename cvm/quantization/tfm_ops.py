@@ -221,6 +221,90 @@ class Convolution(Transformer):
                                     **new_attrs)
 
 
+@register_transformer('expand_dims')
+class ExpandDims(Transformer):
+    def compile(self, op, **kwargs):
+        childs = kwargs['childs']
+        attrs = kwargs['attr']
+        op_name, new_attrs = 'expand_dims', {}
+        new_attrs['axis'] = get_attr(attrs, 'axis', 'expand_dims')
+        return get_nnvm_op(op_name)(*childs, **new_attrs)
+
+
+@register_transformer('Embedding')
+class Embedding(Transformer):
+    def compile(self, op, **kwargs):
+        childs = kwargs['childs']
+        attrs = kwargs['attr']
+        indices, weight = childs
+        op_name = 'take'
+        return get_nnvm_op(op_name)(weight, indices, axis=0)
+
+
+@register_transformer('repeat')
+class Repeat(Transformer):
+    def compile(self, op, **kwargs):
+        childs = kwargs['childs']
+        attrs = kwargs['attr']
+        data = childs[0]
+        new_attrs = {}
+        op_name = 'repeat'
+        new_attrs['repeats'] = get_attr(attrs, 'repeats', 'repeat')
+        if 'axis' in attrs:
+            new_attrs['axis'] = get_attr(attrs, 'axis')
+        else:
+            data = get_nnvm_op('flatten')(data)
+            new_attrs['axis'] = 0
+        return get_nnvm_op(op_name)(childs[0], **new_attrs)
+
+
+@register_transformer('_contrib_box_nms')
+class BoxNms(Transformer):
+    def compile(self, op, **kwargs):
+        childs = kwargs['childs']
+        attrs = kwargs['attr']
+        force_suppress = get_attr(attrs, 'force_suppress', False)
+        iou_thresh = get_attr(attrs, ' overlap_thresh', 0.5)
+        top_k = get_attr(attrs, 'topk', -1)
+        valid_thresh = get_attr(attrs, 'valid_thresh', 0)
+        coord_start = get_attr(attrs, 'coord_start', 2)
+        score_index = get_attr(attrs, 'score_index', 1)
+        id_index = get_attr(attrs, 'id_index', -1)
+        in_format = get_attr(attrs, 'in_format', 'corner')
+        out_format = get_attr(attrs, 'out_format', 'corner')
+        op_name = 'get_valid_counts'
+        ret = get_nnvm_op(op_name)(childs[0],
+                score_threshold=valid_thresh)
+        op_name = 'non_max_suppression'
+        nms_out = get_nnvm_op(op_name)(ret[1], ret[0],
+                iou_threshold=iou_thresh,
+                force_suppress=force_suppress, top_k=top_k,
+                coord_start=coord_start,
+                score_index=score_index, id_index=id_index,
+                return_indices=False, invalid_to_bottom=True)
+        return nms_out
+
+
+@register_transformer('slice_like')
+class SliceLike(Transformer):
+    def compile(self, op, **kwargs):
+        childs = kwargs['childs']
+        attrs = kwargs['attr']
+        new_attrs = {'axis': get_attr(attrs, 'axes', ())}
+        op_name = 'slice_like'
+        return get_nnvm_op(op_name)(*childs, **new_attrs)
+
+
+@register_transformer('UpSampling')
+class UpSampling(Transformer):
+    def compile(self, op, **kwargs):
+        childs = kwargs['childs']
+        attrs = kwargs['attr']
+        scale = get_attr(attrs, 'scale')
+        op_name, new_attrs = 'upsampling', {'scale': int(scale)}
+        return get_nnvm_op(op_name)(childs[0], **new_attrs)
+
+
 @register_pass("validate")
 @register_pass("fuse_transpose")
 @register_transformer("FullyConnected")
@@ -343,7 +427,7 @@ class Pooling(Transformer):
         attrs = kwargs['attr']
         kernel = get_attr(attrs, 'kernel')
         global_pool = 'global' if get_attr(attrs, 'global_pool', False) else ''
-        pool_type = attrs['pool_type']
+        pool_type = get_attr(attrs, 'pool_size', 'max')
         op_name = '_'.join([global_pool, pool_type, 'pool2d']).strip('_')
         new_attrs = {}
         if not global_pool:
@@ -580,7 +664,13 @@ class BatchNorm(Transformer):
 @register_pass("calculate_ops")
 @register_transformer("Flatten")
 class Flatten(Transformer):
-    pass
+    def compile(self, op, **kwargs):
+        childs = kwargs['childs']
+        attrs = kwargs['attr']
+        op_name = 'flatten'
+        sym = get_nnvm_op(op_name)(*childs, name=N.n(),
+                                        **attrs)
+        return sym
 
 
 @register_pass("validate")
@@ -640,6 +730,17 @@ class Custom(Transformer):
             sym = get_nnvm_op(op_type)(*childs, name=N.n('cvm_shift'),
                                          **new_attrs)
         return sym
+
+
+@register_transformer('clip')
+class Clip(Transformer):
+    def compile(self, op, **kwargs):
+        childs = kwargs['childs']
+        attrs = kwargs['attr']
+        op_name, new_attrs = 'clip', {}
+        new_attrs['a_min'] = get_attr(attrs, 'a_min')
+        new_attrs['a_max'] = get_attr(attrs, 'a_max')
+        return get_nnvm_op(op_name)(*childs, **new_attrs)
 
 
 @register_transformer('_minimum')
