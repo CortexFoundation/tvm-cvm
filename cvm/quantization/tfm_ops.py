@@ -738,8 +738,8 @@ class Clip(Transformer):
         childs = kwargs['childs']
         attrs = kwargs['attr']
         op_name, new_attrs = 'clip', {}
-        new_attrs['a_min'] = get_attr(attrs, 'a_min', 'clip')
-        new_attrs['a_max'] = get_attr(attrs, 'a_max', 'clip')
+        new_attrs['a_min'] = get_attr(attrs, 'a_min')
+        new_attrs['a_max'] = get_attr(attrs, 'a_max')
         return get_nnvm_op(op_name)(*childs, **new_attrs)
 
 
