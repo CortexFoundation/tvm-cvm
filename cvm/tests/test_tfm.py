@@ -57,8 +57,8 @@ def test_alexnet():
 
 
 if __name__ == '__main__':
-    # test_mobilenet1_0()
+    test_mobilenet1_0()
     test_mobilenet_v2_1_0() # zero precision
-    # test_tf_inceptionv3()
-    # test_alexnet()
+    test_tf_inceptionv3()
+    test_alexnet()
 
