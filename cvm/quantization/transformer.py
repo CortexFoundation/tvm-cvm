@@ -10,6 +10,7 @@ import sym_utils as sutils
 import cvm_op
 
 import logging
+from os import path
 
 #TODO(wlt): control available api for MRT
 
@@ -81,11 +82,11 @@ class MRT(object):
     def dump(self, fname="test_dump", directory="~/tvm-cvm/data/"):
         assert self._qsym is not None
         import os
-        directory = os.path.expanduser(directory)
-        prefix = os.path.join(directory, fname)
+        directory = path.expanduser(directory)
+        prefix = path.join(directory, fname)
         qsym_path, qprm_path, qext_path = utils.extend_fname(prefix, True)
 
-        with open(os.path.expanduser(qsym_path), 'w') as f:
+        with open(path.expanduser(qsym_path), 'w') as f:
             f.write(self._qsym.tojson())
         nd.save(qprm_path, self._qprm)
         sim.save_ext(qext_path, self._qext)
@@ -139,9 +140,15 @@ def load_model(sym_path, prm_path, ctx, inputs_ext=None):
         return "top1={:6.2%} top5={:6.2%}".format(top1, top5)
     return model_func
 
-def validate_model(sym_path, prm_path, input_size,
-        batch_size=16, ds_name='imagenet', ctx=[mx.gpu(0)]):
+def validate_model(sym_path, prm_path, input_size=224,
+        batch_size=16, iter_num=10, ds_name='imagenet', ctx=None):
+    model_name, _ = path.splitext(path.basename(sym_path))
+    logger = logging.getLogger("log.validate.%s"%model_name)
+    if not path.exists(sym_path) or not path.exists(prm_path):
+        save_model(model_name)
+    ctx = [mx.gpu(0)] if not ctx else ctx
     sym, params = mx.sym.load(sym_path), mx.nd.load(prm_path)
+
     print (collect_op_names(sym, params))
     print ("Registered Graph Pass")
     for k, v in pass_info().items():
@@ -169,5 +176,6 @@ def validate_model(sym_path, prm_path, input_size,
     cvm_quantize = load_model(qsym_path, qprm_path, ctx, inputs_ext=inputs_ext)
 
     utils.multi_validate(org_model, data_iter_func, cvm_quantize,
-            iter_num=10, logger=logging.getLogger('mrt.validate'))
+            iter_num=iter_num, logger=logging.getLogger('mrt.validate'))
+    logger.info("test %s finished."%model_name)
 

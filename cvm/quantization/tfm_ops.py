@@ -82,6 +82,42 @@ class Relu(Transformer):
         return sym
 
 
+@register_pass("validate")
+@register_pass("rewrite")
+@register_pass("calculate_ops")
+@register_pass("quantize")
+@register_transformer("LeakyReLU")
+class LeakyReLU(Transformer):
+    def fuse_transpose(self, op, **kwargs):
+        X, name = op.get_children()[0], op.attr('name')
+        if X.attr('op_name') == Transpose.op_name:
+            t_name, t_attr = X.attr('name'), X.list_attr()
+            X = X.get_children()[0]
+            op = mx.sym.relu(X, name=name)
+            op = mx.sym.transpose(op, name=t_name, **t_attr)
+        return op
+
+
+@register_pass("validate")
+@register_pass("rewrite")
+@register_pass("calculate_ops")
+@register_pass("fuse_transpose")
+@register_pass("quantize")
+@register_transformer("_mul_scalar")
+class MulScalar(Transformer):
+    pass
+
+
+@register_pass("validate")
+@register_pass("rewrite")
+@register_pass("calculate_ops")
+@register_pass("fuse_transpose")
+@register_pass("quantize")
+@register_transformer("_div_scalar")
+class DivScalar(Transformer):
+    pass
+
+
 @register_pass("quantize")
 @register_transformer("Activation")
 class Activation(Transformer):
@@ -210,6 +246,11 @@ class Convolution(Transformer):
                                     **new_attrs)
 
 
+@register_pass("validate")
+@register_pass("calculate_ops")
+@register_pass("fuse_transpose")
+@register_pass("rewrite")
+@register_pass("quantize")
 @register_transformer('expand_dims')
 class ExpandDims(Transformer):
     def compile(self, op, **kwargs):
@@ -230,7 +271,12 @@ class Embedding(Transformer):
         return get_nnvm_op(op_name)(weight, indices, axis=0)
 
 
-@register_transformer('repeat')
+@register_pass("validate")
+@register_pass("rewrite")
+@register_pass("calculate_ops")
+@register_pass("fuse_transpose")
+@register_pass("quantize")
+@register_transformer("repeat")
 class Repeat(Transformer):
     def compile(self, op, **kwargs):
         childs = kwargs['childs']
@@ -247,6 +293,11 @@ class Repeat(Transformer):
         return get_nnvm_op(op_name)(childs[0], **new_attrs)
 
 
+@register_pass("validate")
+@register_pass("calculate_ops")
+@register_pass("fuse_transpose")
+@register_pass("rewrite")
+@register_pass("quantize")
 @register_transformer('_contrib_box_nms')
 class BoxNms(Transformer):
     def compile(self, op, **kwargs):
@@ -274,6 +325,11 @@ class BoxNms(Transformer):
         return nms_out
 
 
+@register_pass("validate")
+@register_pass("rewrite")
+@register_pass("calculate_ops")
+@register_pass("fuse_transpose")
+@register_pass("quantize")
 @register_transformer('slice_like')
 class SliceLike(Transformer):
     def compile(self, op, **kwargs):
@@ -282,6 +338,16 @@ class SliceLike(Transformer):
         new_attrs = {'axis': get_attr(attrs, 'axes', ())}
         op_name = 'slice_like'
         return get_nnvm_op(op_name)(*childs, **new_attrs)
+
+
+@register_pass("validate")
+@register_pass("rewrite")
+@register_pass("calculate_ops")
+@register_pass("fuse_transpose")
+@register_pass("quantize")
+@register_transformer('slice_axis')
+class SliceAxis(Transformer):
+    pass
 
 
 @register_transformer('UpSampling')
@@ -376,6 +442,26 @@ class FullyConnected(Transformer):
         if not get_attr(op.list_attr(), 'no_bias', False):
             kwargs['base_ops'] += 1
         return super().calculate_ops(op, **kwargs)
+
+
+@register_pass("calculate_ops")
+@register_pass("validate")
+@register_pass("rewrite")
+@register_pass("fuse_transpose")
+@register_transformer("sigmoid")
+class Sigmoid(Transformer):
+    def quantize(self, op, **kwargs):
+        return _quantize_table(op, **kwargs)
+
+
+@register_pass("calculate_ops")
+@register_pass("validate")
+@register_pass("rewrite")
+@register_pass("fuse_transpose")
+@register_transformer("exp")
+class Exp(Transformer):
+    def quantize(self, op, **kwargs):
+        return _quantize_table(op, **kwargs)
 
 
 @register_pass("validate")
@@ -574,7 +660,6 @@ class BroadcastMul(Transformer):
                op_name, name, scales[name], cns)
         op = requant_output(op, name, **kwargs)
         return op
-
 
 
 @register_pass("validate")
@@ -793,6 +878,9 @@ class Slice(Transformer):
 
 
 @register_pass("validate")
+@register_pass("calculate_ops")
+@register_pass("fuse_transpose")
+@register_pass("rewrite")
 @register_transformer("Reshape")
 class Reshape(Transformer):
     def compile(self, op, **kwargs):
@@ -916,6 +1004,19 @@ class ElemwiseAdd(Transformer):
         return _quantize_scale(op, **kwargs)
 
 
+@register_pass("compile")
+@register_pass("validate")
+@register_pass("calculate_ops")
+@register_pass("rewrite")
+@register_transformer("elemwise_sub")
+class ElemwiseSub(Transformer):
+    def fuse_transpose(self, op, **kwargs):
+        return _ft_multi_input(op)
+
+    def quantize(self, op, **kwargs):
+        return _quantize_scale(op, **kwargs)
+
+
 @register_pass("validate")
 @register_pass("calculate_ops")
 @register_pass("rewrite")
@@ -931,6 +1032,25 @@ class Dropout(Transformer):
             op = get_mxnet_op(op_name)(X, name=name)
             op = mx.sym.transpose(op, name=t_name, **t_attr)
         return op
+
+
+@register_pass("validate")
+@register_pass("calculate_ops")
+@register_pass("rewrite")
+@register_pass("quantize")
+@register_transformer("_arange")
+class Arange(Transformer):
+    pass
+
+
+@register_pass("validate")
+@register_pass("calculate_ops")
+@register_pass("fuse_transpose")
+@register_pass("rewrite")
+@register_pass("quantize")
+@register_transformer("tile")
+class Tile(Transformer):
+    pass
 
 
 def _ft_multi_input(op):
@@ -998,4 +1118,33 @@ def _quantize_xwb(op, **kwargs):
     op = requant_output(op, name, **kwargs)
     return op
 
+def _quantize_table(op, **kwargs):
+    th_dict, precs = kwargs['th_dict'], kwargs['precs']
+    name, op_name = op.attr('name'), op.attr('op_name')
+    childs, attr = sym_iter(op.get_children()), op.list_attr()
+    cns = [c.attr('name') for c in childs] if childs else []
+
+    oprec = kwargs['op_input_precs'][op_name]
+    xs = scale(th_dict[cns[0]], oprec)
+    X, xprec, xs = _requant_operator(childs[0], oprec, xs)
+    alpha = get_range(xprec)
+    var = mx_const(alpha, graph, params)
+    X = mx.sym.broadcast_add(X, var, name=N.n(op_name+'_offset'))
+
+    out = get_nd_op(op_name)(nd.arange(-alpha, alpha+1) / xs)
+    oprec = precs[name].get(OUT_KEY, 16)
+    oscale = kwargs['scales'][name] = scale(out.abs().max().asscalar(), oprec)
+
+    W_name = N.n("cvm_lut_weight")
+    params[W_name] = weight = (out * oscale).round().reshape(2*alpha+1, 1)
+    wattr = { 'precision': str(oprec)}
+    W = graph[W_name] = mx.sym.var(W_name, shape=weight.shape, attr=wattr)
+    op = mx.sym.Custom(X, W, in_dim=2*alpha+1, name=name, op_type='cvm_lut')
+    precs[name][OUT_KEY] = oprec
+
+    logger = logging.getLogger('log.mrt.realize')
+    logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
+           op_name, name, scales[name], cns)
+    op = requant_output(op, name, **kwargs)
+    return op
 
