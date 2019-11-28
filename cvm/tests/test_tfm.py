@@ -43,22 +43,14 @@ def test_resnet18_v1():
     ctx = [mx.gpu(int(i)) for i in "4".split(',') if i.strip()]
     validate_model(sym_path, prm_path, iter_num=100, ctx=ctx)
 
-def test_yolo3_darknet53_voc():
-    sym_path = "./data/yolo3_darknet53_voc.json"
-    prm_path = "./data/yolo3_darknet53_voc.params"
-    ctx = [mx.gpu(int(i)) for i in "4".split(',') if i.strip()]
-    validate_model(sym_path, prm_path, input_size=416,
-            batch_size=1, iter_num=100, ctx=ctx)
-
 if __name__ == '__main__':
     utils.log_init()
 
-    test_mobilenet1_0() # 81-71%
+    test_mobilenet1_0() # 71%
     test_mobilenet_v2_1_0() # quantized_model zero precision
-    test_tf_inceptionv3() # 80-56%
+    test_tf_inceptionv3() # 56%
     test_alexnet() # 56%
     test_cifar10_resnet20_v1() # org_model/quantized_model zero precision
-    test_resnet18_v1() # 87-70%
-    # test_yolo3_darknet53_voc()
+    test_resnet18_v1() # 70%
 
 

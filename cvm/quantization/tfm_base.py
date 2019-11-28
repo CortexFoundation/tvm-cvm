@@ -59,9 +59,12 @@ class Transformer(object):
         name, op_name = op.attr('name'), op.attr('op_name')
         childs = sym_iter(op.get_children())
 
-        if len(childs) > 1:
-            assert op_name in ['slice_like']
+        # flags = [1 if OUT_KEY in precs[c.attr('name')] else 0 for c in childs]
+        # assert sum(flags) == 1, \
+        #         "name: %s, op_name: %s"%(name, op_name)
+        # cname = childs[flags.index(1)].attr('name')
         cname = childs[0].attr('name')
+
         precs[name][OUT_KEY] = precs[cname][OUT_KEY]
         scales[name] = scales[cname]
 
