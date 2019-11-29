@@ -53,30 +53,32 @@ def validate_data(net, data, label, eval_metric):
     acc = {k:v for k,v in zip(map_name, mean_ap)}['mAP']
     return acc
 
-def test_mrt_quant(batch_size=1, iter_num=10, from_scratch=4):
+def test_mrt_quant(batch_size=1, iter_num=10, from_scratch=0):
     logger = logging.getLogger("log.test.mrt.quantize")
     flag = [False]*from_scratch + [True]*(4-from_scratch)
 
-    base_ctx = mx.gpu(1)
     ctx = mx.gpu(2)
     qctx = mx.gpu(3)
     input_size = 416
     input_shape = (batch_size, 3, input_size, input_size)
 
+    # define data iter function, get:
+    # get_iter_func
     val_data = dataset.load_voc(batch_size, input_size)
     val_data_iter = iter(val_data)
     def data_iter_func():
         data, label = next(val_data_iter)
         return data, label
 
-    sym_file, param_file = load_fname("_darknet53_voc")
-    sym, params = mx.sym.load(sym_file), nd.load(param_file)
-
     # split model, get:
     # base, base_params, top, top_params, top_inputs_ext 
     base, base_params, top, top_params, top_inputs_ext = \
             None, None, None, None, None
     if flag[0]:
+        sym_file, param_file = load_fname("_darknet53_voc")
+        sym, params = mx.sym.load(sym_file), nd.load(param_file)
+        mrt = MRT(sym, params, input_shape)
+        mrt.prepare()
         keys = [
           'yolov30_yolooutputv30_expand_dims0',
           'yolov30_yolooutputv31_expand_dims0',
@@ -89,7 +91,7 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratch=4):
           'yolov30_yolooutputv32_broadcast_add1',
         ]
         base, base_params, top, top_params, top_inputs_ext \
-                = split_model(sym, params, {'data': input_shape}, keys)
+                = split_model(mrt._sym, mrt._prm, {'data': input_shape}, keys)
         dump_sym, dump_params = load_fname("_darknet53_voc", "mrt.base")
         open(dump_sym, "w").write(base.tojson())
         nd.save(dump_params, base_params)
@@ -144,9 +146,6 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratch=4):
     qbase, qbase_params, qbase_inputs_ext, oscales, maps = \
             None, None, None, None, None
     if flag[2]:
-        import os
-        with open(os.path.expanduser('~/tvm-cvm/data/test_ryt.json'), 'w') as f:
-            f.write(base.tojson())
         mrt = MRT(base, base_params, input_shape)
         mrt.set_th_dict(th_dict)
         mrt.set_threshold('data', 2.64)
@@ -173,8 +172,8 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratch=4):
         qbase_inputs_ext, oscales, maps = sim.load_ext(qb_ext)
 
     # merge quantized split model, get:
-    # qsym, qparams, oscales
-    qsym, qparams, oscales = None, None, None
+    # qsym, qparams, oscales2
+    qsym, qparams = None, None
     if flag[3]:
         def box_nms(node, params, graph):
             name, op_name = node.attr('name'), node.attr('op_name')
@@ -184,39 +183,36 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratch=4):
                 attr['valid_thresh'] = int(valid_thresh * oscales[3])
                 node = sutils.get_mxnet_op(op_name)(*childs, **attr, name=name)
             return node
-        qsym, qparams = _mrt.merge_model(qbase, qbase_params,
+        qsym, qparams = merge_model(qbase, qbase_params,
                 top, top_params, maps, box_nms)
+        oscales2 = [oscales[0], oscales[3], oscales[4]]
         sym_file, param_file, ext_file = \
                 load_fname("_darknet53_voc", "mrt.all.quantize", True)
         open(sym_file, "w").write(qsym.tojson())
         nd.save(param_file, qparams)
-        sim.save_ext(ext_file, qbase_inputs_ext,
-                [oscales[0], oscales[3], oscales[4]])
+        sim.save_ext(ext_file, qbase_inputs_ext, oscales2)
     else:
         dump_sym, dump_params, dump_ext = \
                 load_fname("_darknet53_voc", "mrt.all.quantize", True)
         qsym, qparams = mx.sym.load(dump_sym), nd.load(dump_params)
-        _, oscales = sim.load_ext(dump_ext)
-
-    print("success")
-    exit()
+        _, oscales2 = sim.load_ext(dump_ext)
 
     inputs = [mx.sym.var(n) for n in qbase_inputs_ext]
     net2 = mx.gluon.nn.SymbolBlock(qsym, inputs)
-    load_parameters(net2, qparams, ctx=qctx)
+    utils.load_parameters(net2, qparams, ctx=qctx)
     net2_metric = dataset.load_voc_metric()
     net2_metric.reset()
     def mrt_quantize(data, label):
         def net(data):
             data = sim.load_real_data(data, 'data', qbase_inputs_ext)
             outs = net2(data.as_in_context(qctx))
-            outs = [o.as_in_context(ctx) / oscales[i] for i, o in enumerate(outs)]
+            outs = [o.as_in_context(ctx) / oscales2[i] \
+                   for i, o in enumerate(outs)]
             return outs
         acc = validate_data(net, data, label, net2_metric)
         return "{:6.2%}".format(acc)
 
-    utils.multi_validate(yolov3, data_iter_func,
-            mrt_quantize,
+    utils.multi_validate(yolov3, data_iter_func, mrt_quantize,
             iter_num=iter_num, logger=logger)
 
 def test_sym_nnvm(batch_size, iter_num):
@@ -234,6 +230,6 @@ if __name__ == '__main__':
 
     zoo.save_model('yolo3_darknet53_voc')
 
-    from_scratch = 2
+    from_scratch = 0
     test_mrt_quant(1, 100, from_scratch)
     #test_sym_nnvm(16, 0)

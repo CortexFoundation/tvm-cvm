@@ -1049,24 +1049,10 @@ class Dropout(Transformer):
 @register_pass("validate")
 @register_pass("calculate_ops")
 @register_pass("rewrite")
+@register_pass("quantize")
 @register_transformer("_arange")
 class Arange(Transformer):
-    def quantize(self, op, **kwargs):
-        scales = kwargs['scales']
-        name, op_name = op.attr('name'), op.attr('op_name')
-        childs, attr = sym_iter(op.get_children()), op.list_attr()
-        cns = [c.attr('name') for c in childs] if childs else []
-
-        oprec = kwargs['op_input_precs'][op_name]
-        op, _, xs = requant(op, oprec, oname=name, **kwargs)
-        oscale = scales[name] = xs
-        kwargs['precs'][name][OUT_KEY] = get_bit(kwargs['th_dict'][name]*oscale)
-
-        logger = logging.getLogger('log.mrt.realize')
-        logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
-               op_name, name, scales[name], cns)
-        op = requant_output(op, name, **kwargs)
-        return op
+    pass
 
 
 @register_pass("validate")

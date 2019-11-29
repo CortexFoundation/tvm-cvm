@@ -110,6 +110,20 @@ class MRT(object):
     def set_threshold(self, name, threshold):
         self.th_dict[name] = threshold
 
+    def get_output_scales(self):
+        oscales = []
+        for s in self._qsym:
+            name = s.attr('name')
+            if name in self.scales:
+                oscales.append(self.scales[name])
+            else:
+                oscales.append(1)
+        return oscales
+
+    def get_maps(self):
+        return dict(zip([c.attr('name') for c in self._qsym],
+                    [c.attr('name') for c in self._sym]))
+
     def _op_default_input_precs(self):
         op_precs = {}
         for n in ['Convolution', 'FullyConnected', 'sigmoid', 'exp', 'softmax']:
@@ -121,7 +135,6 @@ class MRT(object):
         op_precs['Concat'] = 16
         op_precs['Embedding'] = 16
         op_precs['slice_like'] = 30
-        op_precs['_arange'] = 30
         return op_precs
 
     def _update_precs(self):

@@ -237,7 +237,6 @@ def get_bit(opt):
     if opt == 0:
         return 1
     return math.ceil(math.log2(opt)) + 1
-    # return math.floor(math.log2(opt)) + 2
 
 def get_range(prec):
     return (2 ** (prec - 1)) - 1

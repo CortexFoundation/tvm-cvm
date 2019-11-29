@@ -119,7 +119,7 @@ def test_mrt_quant(batch_size=1, iter_num=10):
        acc = validate_data(net, data, label, metric)
        return "{:6.2%}".format(acc)
 
-    if False:
+    if True:
         mrt = _mrt.MRT(base, base_params, inputs_ext)
         for i in range(16):
             data, _ = data_iter_func()
@@ -210,4 +210,4 @@ if __name__ == '__main__':
     zoo.save_model('yolo3_darknet53_voc')
 
     test_mrt_quant(1, 100)
-    test_sym_nnvm(16, 0)
+    # test_sym_nnvm(16, 0)
