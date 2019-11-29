@@ -8,7 +8,7 @@ from mxnet import ndarray as nd
 import nnvm as nnvm
 import tvm
 from tvm import relay
-
+import transformer as tfm
 from sym_utils import *
 from utils import *
 
@@ -96,13 +96,24 @@ def mxnet_build(sym, params, inputs_ext, dump_sym, dump_params,
 
 def mxnet_to_nnvm(sym, params, inputs_ext, logger=logging):
     sym, params = prepare_for_cvm(sym, params, inputs_ext)
+    print('byr1')
+    print(sym, inputs_ext)
     nnvm_sym, _ = nnvm.frontend.from_mxnet(sym)
+    #sym, params = tfm.attach_input_shape(sym, params,
+    #        {'data': inputs_ext.get('data').get('shape')})
+    #nnvm_sym, _ = tfm.compile(sym, params)
+
+
     # nnvm_sym, params = nnvm_realize(nnvm_sym, params, inputs_ext)
+    print('byr2')
+    print(nnvm_sym)
 
     args = nnvm_sym.list_input_names()
     real_params = {}
     use_dtype = "int32"
     tvm_ctx = tvm.context("llvm", 0)
+    print('byr3')
+    print(params)
     for key, value in params.items():
         if key not in args:
             logger.warn("key:%s not exists in graph", key)
@@ -112,11 +123,15 @@ def mxnet_to_nnvm(sym, params, inputs_ext, logger=logging):
             assert all(flat >= INT32_MIN) and all(flat <= INT32_MAX), msg
             assert all(flat.astype('int32').astype('float32') == flat), msg
             real_params[key] = tvm.nd.array(value.astype(use_dtype).asnumpy(), tvm_ctx)
+    print('byr4')
+    print(real_params)
     return nnvm_sym, real_params
 
 def cvm_build(nnvm_sym, nnvm_params, inputs_ext, dump_sym, dump_params,
         runtime="cvm", target="cuda", logger=logging, dtype="int32"):
     logger.debug("Compile nnvm graph to %s", runtime)
+    print('byrc1')
+    print(nnvm_sym, nnvm_params)
     tvm_ctx = tvm.context(target, 0)
     inputs_shape = {k:v['shape'] for k,v in inputs_ext.items()}
     print (inputs_shape)
@@ -130,6 +145,8 @@ def cvm_build(nnvm_sym, nnvm_params, inputs_ext, dump_sym, dump_params,
     open(dump_sym, "w").write(deploy_graph.json())
     param_bytes = nnvm.compiler.save_param_dict(real_params)
     open(dump_params, "wb").write(param_bytes)
+    print('byrc2')
+    print(deploy_graph, real_params)
     if runtime == "cvm":
         return deploy_graph, real_params
     else:
@@ -139,17 +156,25 @@ def cvm_build(nnvm_sym, nnvm_params, inputs_ext, dump_sym, dump_params,
 def mxnet_to_tvm(sym, params, inputs_ext, dump_sym, dump_params,
         logger=logging):
     inputs_shape = {k:v['shape'] for k,v in inputs_ext.items()}
+    logger.debug('herebyr')
+    print('byr1')
+    print(sym, params)
     sym, params = prepare_for_cvm(sym, params, inputs_ext)
+    print('byr2')
+    print(sym, params)
     relay_sym, relay_params = relay.frontend.from_mxnet(sym, inputs_shape,
             arg_params=params)
+    print('byr3')
+    print(relay_sym, real_params)
     real_params = tvm_params_reduce(sym, relay_params, inputs_ext, tvm.context("cpu"))
-
+    print('byr4')
+    print(relay_sym, real_params)
     # TODO: conv and dense layer dump without precision
     logger.debug("Compiling into CVM Executor Graph")
     with relay.build_config(opt_level=0):
         graph_json, lib, graph_params = relay.build(relay_sym, "cvm")
     assert len(graph_params.keys()) == 0, graph_params.keys()
-
+    print('byr5')
     logger.debug("Dump json & params to file")
     open(dump_sym, "w").write(graph_json)
     param_bytes = nnvm.compiler.save_param_dict(real_params)

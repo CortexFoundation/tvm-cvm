@@ -31,6 +31,7 @@ class Null(Transformer):
 
 @register_pass("rewrite")
 @register_pass("calculate_ops")
+@register_pass('compile')
 @register_transformer("transpose")
 class Transpose(Transformer):
     def validate(self, op, **kwargs):
@@ -761,6 +762,18 @@ class Maximum(Transformer):
         op_name = 'broadcast_max'
         return get_nnvm_op(op_name)(*childs,
                 name=N.n('_maximum'), **attrs)
+
+
+@register_pass('compile')
+@register_transformer('max')
+class Max(Transformer):
+    pass
+
+
+@register_pass('compile')
+@register_transformer('min')
+class Min(Transformer):
+    pass
 
 
 @register_transformer('argmax')

@@ -10,7 +10,7 @@ import sim_quant_helper as sim
 import utils
 import mrt as _mrt
 
-# gz.save_model("alexnet")
+gz.save_model("alexnet")
 
 
 def load_fname(version, suffix=None, with_ext=False):
