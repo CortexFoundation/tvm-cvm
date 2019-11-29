@@ -55,6 +55,22 @@ class Transformer(object):
 
             Do nothing by default.
         """
+        precs, scales = kwargs['precs'], kwargs['scales']
+        name, op_name = op.attr('name'), op.attr('op_name')
+        childs = sym_iter(op.get_children())
+
+        # flags = [1 if OUT_KEY in precs[c.attr('name')] else 0 for c in childs]
+        # assert sum(flags) == 1, \
+        #         "name: %s, op_name: %s"%(name, op_name)
+        # cname = childs[flags.index(1)].attr('name')
+        cname = childs[0].attr('name')
+
+        precs[name][OUT_KEY] = precs[cname][OUT_KEY]
+        scales[name] = scales[cname]
+
+        logger = logging.getLogger('log.mrt.realize')
+        logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
+               op_name, name, scales[name], scales[cname])
         return op
 
     def compile(self, op, **kwargs):
@@ -140,6 +156,10 @@ def apply_pass(pass_t, **updates):
             kwargs[n][ret.attr('name')] = kwargs[n][op.attr('name')]
         return ret
     return wrapper
+
+OUT_KEY = "out_key"
+TARGET_KEY = "target_key"
+MAX_BIT = 32
 
 # === name manager 
 
