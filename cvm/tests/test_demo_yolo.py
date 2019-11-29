@@ -74,6 +74,9 @@ def test_mrt_quant(batch_size=1, iter_num=10):
     sym_file, param_file = load_fname("_darknet53_voc")
     sym, params = mx.sym.load(sym_file), nd.load(param_file)
     sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
+    import os
+    open(os.path.expanduser("~/tvm-cvm/data/demo_prepare.json"), "w").write(sym.tojson())
+    exit()
     keys = [
       'yolov30_yolooutputv30_expand_dims0',
       'yolov30_yolooutputv31_expand_dims0',

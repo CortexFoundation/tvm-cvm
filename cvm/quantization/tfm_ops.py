@@ -1,6 +1,7 @@
 from tfm_pass import *
 from sym_utils import *
 
+from mxnet import ndarray as nd
 import mxnet as mx
 import nnvm
 
@@ -76,12 +77,16 @@ class Relu(Transformer):
         return sym
 
 
-@register_pass("validate")
-@register_pass("rewrite")
 @register_pass("calculate_ops")
-@register_pass("quantize")
 @register_transformer("LeakyReLU")
 class LeakyReLU(Transformer):
+    def validate(self, op, **kwargs):
+        name, attr = op.attr('name'), op.list_attr()
+        act = get_attr(attr, 'act_type', 'leaky')
+        assert act == 'leaky', "Unsupported LeakyReLU %s for act_type: %s" \
+                % (name, act)
+        return op
+
     def fuse_transpose(self, op, **kwargs):
         X, name = op.get_children()[0], op.attr('name')
         if X.attr('op_name') == Transpose.op_name:
@@ -91,15 +96,45 @@ class LeakyReLU(Transformer):
             op = mx.sym.transpose(op, name=t_name, **t_attr)
         return op
 
+    def rewrite(self, op, **kwargs):
+        name, op_name = op.attr('name'), op.attr('op_name')
+        childs, attr = sym_iter(op.get_children()), op.list_attr()
+
+        slope = get_attr(attr, 'slope', 0.25)
+        X = childs[0]
+        posi_X = mx.sym.relu(X)
+        nega_X = mx.sym.negative(X)
+        nega_X = mx.sym.relu(nega_X)
+        slope_name = N.n('slope')
+        kwargs['params'][slope_name] = nd.array([slope])
+        kwargs['graph'][slope_name] = slope_sym = \
+                mx.sym.var(slope_name, shape=(1,))
+        scale_X = mx.sym.broadcast_mul(nega_X, slope_sym)
+        op = posi_X - scale_X
+        return op
+
 
 @register_pass("validate")
-@register_pass("rewrite")
 @register_pass("calculate_ops")
 @register_pass("fuse_transpose")
-@register_pass("quantize")
 @register_transformer("_mul_scalar")
 class MulScalar(Transformer):
-    pass
+    def rewrite(self, op, **kwargs):
+        params, graph = kwargs['infer_shapes'], kwargs['graph']
+        infer_shapes = kwargs['infer_shapes']
+        name = op.attr('name')
+        scalar = get_attr(op.list_attr(), 'scalar')
+        if scalar == 0:
+            shp = infer_shapes[name][get_entry_id(op)]
+            params[name] = nd.zeros(shp)
+            op = mx.sym.var(name, shape=shp)
+        else:
+            X = op.get_children()[0]
+            sname = N.n('scalar')
+            params[sname] = nd.array([scalar])
+            graph[sname] = mx.sym.var(sname, shape=(1,))
+            op = mx.sym.broadcast_mul(X, graph[sname], name=name)
+        return op
 
 
 @register_pass("validate")
@@ -1062,6 +1097,15 @@ class Arange(Transformer):
 @register_pass("quantize")
 @register_transformer("tile")
 class Tile(Transformer):
+    pass
+
+@register_pass("validate")
+@register_pass("calculate_ops")
+@register_pass("fuse_transpose")
+@register_pass("rewrite")
+@register_pass("quantize")
+@register_transformer("negative")
+class Negative(Transformer):
     pass
 
 
