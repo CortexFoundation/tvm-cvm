@@ -4,12 +4,11 @@ from mxnet import ndarray as nd
 import numpy as np
 
 class Clip(mx.operator.CustomOp):
-    def __init__(self, precision, cvm_name, **kwargs):
+    def __init__(self, precision, **kwargs):
         super(Clip, self).__init__(**kwargs)
         clip = 2 ** (int(precision) - 1) - 1
         self.min = float(-clip)
         self.max = float(clip)
-        self.cvm_name = cvm_name
 
     def forward(self, is_train, req, in_data, out_data, aux):
         assert is_train == False
@@ -44,14 +43,13 @@ class LeftShift(mx.operator.CustomOp):
         assert False
 
 class RightShift(mx.operator.CustomOp):
-    def __init__(self, precision, shift_bit, cvm_name, **kwargs):
+    def __init__(self, precision, shift_bit, **kwargs):
         super(RightShift, self).__init__(**kwargs)
         clip = 2 ** (int(precision) - 1) - 1
         self.min = int(-clip)
         self.max = int(clip)
         self.sb = int(shift_bit)
         assert self.sb > 0
-        self.cvm_name = cvm_name
 
     def forward(self, is_train, req, in_data, out_data, aux):
         assert is_train == False
@@ -71,10 +69,9 @@ class RightShift(mx.operator.CustomOp):
         assert False
 
 class LUT(mx.operator.CustomOp):
-    def __init__(self, in_dim, cvm_name, **kwargs):
+    def __init__(self, in_dim, **kwargs):
         super(LUT, self).__init__(**kwargs)
         self.in_dim = int(in_dim)
-        self.cvm_name = cvm_name
 
     def forward(self, is_train, req, in_data, out_data, aux):
         assert is_train == False
@@ -135,10 +132,9 @@ class Pad(mx.operator.CustomOp):
 
 @mx.operator.register("cvm_clip")
 class ClipProp(mx.operator.CustomOpProp):
-    def __init__(self, precision=8, shift_bit=0, cvm_name='clip'):
+    def __init__(self, precision=8, shift_bit=0):
         self.precision= precision
         self.shift_bit = shift_bit
-        self.cvm_name = cvm_name
         super(ClipProp, self).__init__(need_top_grad=False)
     def list_arguments(self):
         return ['data']
@@ -152,7 +148,7 @@ class ClipProp(mx.operator.CustomOpProp):
         X_type = in_type[0]
         return [X_type], [X_type], []
     def create_operator(self, ctx, shapes, dtypes):
-        return Clip(self.precision, self.cvm_name)
+        return Clip(self.precision)
 
 @mx.operator.register("cvm_left_shift")
 class LeftShiftProp(mx.operator.CustomOpProp):
@@ -176,10 +172,9 @@ class LeftShiftProp(mx.operator.CustomOpProp):
 
 @mx.operator.register("cvm_right_shift")
 class RightShiftProp(mx.operator.CustomOpProp):
-    def __init__(self, precision=8, shift_bit=0, cvm_name='right_shift'):
+    def __init__(self, precision=8, shift_bit=0):
         self.precision= precision
         self.shift_bit = shift_bit
-        self.cvm_name = cvm_name
         super(RightShiftProp, self).__init__(need_top_grad=False)
     def list_arguments(self):
         return ['data']
@@ -193,13 +188,12 @@ class RightShiftProp(mx.operator.CustomOpProp):
         X_type = in_type[0]
         return [X_type], [X_type], []
     def create_operator(self, ctx, shapes, dtypes):
-        return RightShift(self.precision, self.shift_bit, self.cvm_name)
+        return RightShift(self.precision, self.shift_bit)
 
 @mx.operator.register("cvm_lut")
 class LUTProp(mx.operator.CustomOpProp):
-    def __init__(self, in_dim, cvm_name='cvm_lut'):
+    def __init__(self, in_dim):
         self.in_dim = in_dim
-        self.cvm_name = cvm_name
         super(LUTProp, self).__init__(need_top_grad=False)
     def list_arguments(self):
         return ['data', 'table']
@@ -215,7 +209,7 @@ class LUTProp(mx.operator.CustomOpProp):
         B_type = X_type
         return [X_type, B_type], [X_type], []
     def create_operator(self, ctx, shapes, dtypes):
-        return LUT(self.in_dim, self.cvm_name)
+        return LUT(self.in_dim)
 
 @mx.operator.register("cvm_annotate")
 class AnnotateProp(mx.operator.CustomOpProp):
