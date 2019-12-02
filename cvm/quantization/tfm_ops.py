@@ -363,6 +363,7 @@ class BoxNms(Transformer):
 
 @register_pass("validate")
 @register_pass("rewrite")
+@register_pass("quantize")
 @register_pass("calculate_ops")
 @register_pass("fuse_transpose")
 @register_transformer('slice_like')

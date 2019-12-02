@@ -67,8 +67,6 @@ class MRT(object):
             self._lgr.error("Please calibrate thresholds first.")
             assert False
 
-        print (collect_op_names(self._sym, self._prm))
-        exit()
         self._qsym, self._qprm = quantize(self._sym, self._prm,
                 self.th_dict, self.precs, self.scales, self.op_input_precs)
         self._get_ext()
