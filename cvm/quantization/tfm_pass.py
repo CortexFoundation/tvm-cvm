@@ -52,7 +52,6 @@ def quantize(symbol, params, th_dict, precs, scales, op_input_precs):
             apply_pass(
                 "quantize",
                 infer_shapes=infer_shapes,
-                # th_dict=th_dict,
             ),
             th_dict=th_dict,
             precs=precs, scales=scales,
@@ -171,6 +170,10 @@ def attach_input_shape(symbol, params, input_shapes):
             op = mx.sym.var(name, shape=input_shapes[name], attr=attr)
         return op
     return topo_visit_transformer(symbol, params, _impl)
+
+# TODO: reduce graph for adjacent broadcast_mul
+def reduce_graph(symbol, params):
+    pass
 
 def infer_shape(symbol, params, input_shape=None):
     infer_shapes = {}

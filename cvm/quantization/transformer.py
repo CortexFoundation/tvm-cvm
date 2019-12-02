@@ -51,8 +51,9 @@ class MRT(object):
         orig_ops = calculate_ops(_sym, _prm)
         _sym, _prm = fuse_constant(_sym, _prm)
         _sym, _prm = fuse_transpose(_sym, _prm)
-        self._sym, self._prm = rewrite(_sym, _prm)
-        # TODO: some model may need another fuse_transpose after rewrite
+        _sym, _prm = rewrite(_sym, _prm)
+        self._sym, self._prm = fuse_constant(_sym, _prm)
+
         self._update_precs()
         self._lgr.info("Original ops[%s] reduced into %s",
                 orig_ops, calculate_ops(_sym, _prm))
@@ -66,6 +67,8 @@ class MRT(object):
             self._lgr.error("Please calibrate thresholds first.")
             assert False
 
+        print (collect_op_names(self._sym, self._prm))
+        exit()
         self._qsym, self._qprm = quantize(self._sym, self._prm,
                 self.th_dict, self.precs, self.scales, self.op_input_precs)
         self._get_ext()

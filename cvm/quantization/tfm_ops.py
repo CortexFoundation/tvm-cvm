@@ -120,7 +120,7 @@ class LeakyReLU(Transformer):
 @register_transformer("_mul_scalar")
 class MulScalar(Transformer):
     def rewrite(self, op, **kwargs):
-        params, graph = kwargs['infer_shapes'], kwargs['graph']
+        params, graph = kwargs['params'], kwargs['graph']
         infer_shapes = kwargs['infer_shapes']
         name = op.attr('name')
         scalar = get_attr(op.list_attr(), 'scalar')
@@ -138,13 +138,20 @@ class MulScalar(Transformer):
 
 
 @register_pass("validate")
-@register_pass("rewrite")
 @register_pass("calculate_ops")
 @register_pass("fuse_transpose")
-@register_pass("quantize")
 @register_transformer("_div_scalar")
 class DivScalar(Transformer):
-    pass
+    def rewrite(self, op, **kwargs):
+        graph = kwargs['graph']
+        name = op.attr('name')
+        attr, childs = op.list_attr(), sym_iter(op.get_children())
+
+        scalar = get_attr(attr, 'scalar')
+        sname = N.n('scalar')
+        kwargs['params'][sname] = nd.array([1/scalar])
+        graph[sname] = mx.sym.var(sname, shape=(1,))
+        return mx.sym.broadcast_mul(childs[0], graph[sname], name=name)
 
 
 @register_pass("quantize")
