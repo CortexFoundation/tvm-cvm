@@ -105,7 +105,6 @@ def mxnet_to_nnvm(sym, params, inputs_ext, logger=logging):
     real_params = {}
     use_dtype = "int32"
     tvm_ctx = tvm.context("llvm", 0)
-    print(params)
     for key, value in params.items():
         if key not in args:
             logger.warn("key:%s not exists in graph", key)
