@@ -677,7 +677,6 @@ def std_dump(sym, params, inputs_ext, data, model_name,
     datadir = "/data/std_out/" + model_name
     os.makedirs(datadir, exist_ok=True)
     if is_mxnet:
-        print('herebyr')
         data = sim.load_real_data(data, 'data', inputs_ext)
         inputs_ext['data']['data'] = data
         spass.sym_dump_layer_outputs(sym, params, inputs_ext, datadir,
