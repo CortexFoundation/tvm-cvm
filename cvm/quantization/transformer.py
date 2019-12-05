@@ -43,10 +43,67 @@ class MRT(object):
 
         self.op_input_precs = self._op_default_input_precs()
 
-    def compile(self, inputs_ext, model_name):
+
+    def prepare_for_cvm(self, symbol, params):
+        infer_shapes = infer_shape(symbol, params)
+        def _mx_prepare(sym, params, graph):
+            name, op_name = sym.attr('name'), sym.attr('op_name')
+            childs, attr = sym_iter(sym.get_children()), sym.list_attr()
+            if op_name == 'null':
+                return sym, params
+
+            if 'scalar' in attr:
+                scalar = float(attr['scalar'])
+                msg = "name:%s, op_name:%s, scalar:%s"%(name, op_name, attr)
+                assert scalar >= INT32_MIN and scalar <= INT32_MAX, msg
+                assert float(int(scalar)) == scalar, msg
+                attr['scalar'] = int(scalar)
+            if 'overlap_thresh' in attr:
+                thresh = float(attr['overlap_thresh']) * 100
+                attr['overlap_thresh'] = int(thresh)
+            node = get_mxnet_op(op_name)(*childs, **attr)
+
+            if op_name in ['slice_axis']:
+                X = childs[0]
+                cshape = infer_shapes[X.attr('name')]
+                axis = get_attr(attr, 'axis')
+                axis_begin = get_attr(attr, 'begin')
+                axis_end = get_attr(attr, 'end')
+                if axis_end is None:
+                    axis_end = cshape[axis]
+                begin = [0 for s in cshape]
+                end = [s for s in cshape]
+                begin[axis], end[axis] = axis_begin, axis_end
+                node = get_mxnet_op('slice')(X, begin=begin, end=end, name=name)
+            elif op_name in ['slice']:
+                X = childs[0]
+                cshape = infer_shapes[X.attr('name')]
+                begin = get_attr(attr, 'begin')
+                end = get_attr(attr, 'end')
+                begin = [0 if s is None else s for s in begin]
+                end = [cshape[i] if s is None else s for i,s in enumerate(end)]
+                node = get_mxnet_op('slice')(X, begin=begin, end=end, name=name)
+            elif op_name in ['floor', 'ceil', 'round', 'fix', 'Cast']:
+                node = childs[0]
+            elif op_name == '_greater_scalar':
+                X = childs[0]
+                scalar = int(attr['scalar'])
+                assert int(scalar) == scalar
+                var = mx_const(scalar, graph, params)
+                node = mx.sym.broadcast_greater(X, var, name=name)
+            infer_shapes[node.attr('name')] = infer_shapes[name]
+            return node, params
+
+        psym, pparams = topo_visit_transformer(symbol, params,
+                get_op=get_mxnet_op,
+                callback=_mx_prepare)
+        return psym, pparams
+
+    def compile(self, model_name):
+        logger = logging.getLogger('mrt.compile')
         datadir = "/data/std_out/" + model_name
-        sym, params = sym_pass.prepare_for_cvm(self._qsym,
-                self._qprm, inputs_ext)
+        sym, params = attach_input_shape(self._qsym, self._qprm, {'data': self._ishp})
+        sym, params = self.prepare_for_cvm(sym, params)
         nnvm_sym, _ = compile(sym, params)
         args = nnvm_sym.list_input_names()
         real_params = {}
@@ -61,9 +118,40 @@ class MRT(object):
                 assert all(flat >= INT32_MIN) and all(flat <= INT32_MAX), msg
                 assert all(flat.astype('int32').astype('float32') == flat), msg
                 real_params[key] = tvm.nd.array(value.astype(use_dtype).asnumpy(), tvm_ctx)
-        print(real_params)
-        return sym_pass.cvm_build(nnvm_sym, real_params, inputs_ext,
+        return self.cvm_build(nnvm_sym, real_params,
                 datadir+"/symbol", datadir+"/params")
+
+    def cvm_build(self, nnvm_sym, nnvm_params, dump_sym, dump_params,
+            runtime="cvm", target="cuda", logger=logging, dtype="int32"):
+        logger.debug("Compile nnvm graph to %s", runtime)
+        tvm_ctx = tvm.context(target, 0)
+        inputs_shape = {'data': self._ishp}
+        with nnvm.compiler.build_config(opt_level=0, runtime=runtime):
+            deploy_graph, lib, real_params = nnvm.compiler.build(
+                nnvm_sym, target=target, shape=inputs_shape,
+                params=nnvm_params, dtype=dtype)
+        if runtime == "cvm":
+            real_params = self.tvm_params_reduce(
+                    nnvm_sym, real_params, tvm_ctx)
+        open(dump_sym, "w").write(deploy_graph.json())
+        param_bytes = nnvm.compiler.save_param_dict(real_params)
+        open(dump_params, "wb").write(param_bytes)
+        if runtime == "cvm":
+            return deploy_graph, real_params
+        else:
+            return deploy_graph, real_params, lib
+
+    def tvm_params_reduce(self, symbol, params, ctx):
+        for sym in topo_sort(symbol):
+            name, attr = sym.attr('name'), sym.list_attr()
+            if is_params(sym, params):
+                precision = get_attr(attr, "precision")
+                val = params[name]
+                if precision > 8:
+                    params[name] = tvm.nd.array(val.asnumpy().astype('int32'), ctx)
+                else:
+                    params[name] = tvm.nd.array(val.asnumpy().astype('int8'), ctx)
+        return params
 
     def prepare(self):
         self._lgr = logging.getLogger('mrt')

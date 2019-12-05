@@ -15,9 +15,10 @@ class Null(Transformer):
     def quantize(self, op, **kwargs):
         if is_inputs(op, kwargs['params']):
             name = op.attr('name')
-            kwargs['scales'][name] = scale(kwargs['th_dict'][name],
-                    kwargs['precs'][name][OUT_KEY])
-            return mx.sym.var(name)
+            prec = kwargs['precs'][name][OUT_KEY]
+            kwargs['scales'][name] = scale(kwargs['th_dict'][name], prec)
+            attr = { 'precision': str(prec) }
+            return mx.sym.var(name, attr=attr)
         return op
 
     def compile(self, op, **kwargs):
