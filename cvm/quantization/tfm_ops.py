@@ -1058,6 +1058,13 @@ class Dropout(Transformer):
             op = mx.sym.transpose(op, name=t_name, **t_attr)
         return op
 
+    def compile(self, op, **kwargs):
+        childs = kwargs['childs']
+        attrs = kwargs['attr']
+        op_name, new_attrs = 'dropout', {}
+        new_attrs['rate'] = get_attr(attrs, 'p', 0.5)
+        return get_nnvm_op(op_name)(*childs, **new_attrs)
+
 
 @register_pass("validate")
 @register_pass("calculate_ops")

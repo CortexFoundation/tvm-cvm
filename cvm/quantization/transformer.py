@@ -1,12 +1,12 @@
 from mxnet import gluon
-
+import tvm
 import tfm_ops
 from tfm_pass import *
 from gluon_zoo import *
 
 import sym_utils as sutils
 import cvm_op
-
+import sym_pass
 import logging
 from os import path
 
@@ -42,6 +42,28 @@ class MRT(object):
         self._qext = None
 
         self.op_input_precs = self._op_default_input_precs()
+
+    def compile(self, inputs_ext, model_name):
+        datadir = "/data/std_out/" + model_name
+        sym, params = sym_pass.prepare_for_cvm(self._qsym,
+                self._qprm, inputs_ext)
+        nnvm_sym, _ = compile(sym, params)
+        args = nnvm_sym.list_input_names()
+        real_params = {}
+        use_dtype = "int32"
+        tvm_ctx = tvm.context("llvm", 0)
+        for key, value in params.items():
+            if key not in args:
+                logger.warn("key:%s not exists in graph", key)
+            else:
+                msg = "key:%s value:%s"%(key, value)
+                flat = value.asnumpy().flatten()
+                assert all(flat >= INT32_MIN) and all(flat <= INT32_MAX), msg
+                assert all(flat.astype('int32').astype('float32') == flat), msg
+                real_params[key] = tvm.nd.array(value.astype(use_dtype).asnumpy(), tvm_ctx)
+        print(real_params)
+        return sym_pass.cvm_build(nnvm_sym, real_params, inputs_ext,
+                datadir+"/symbol", datadir+"/params")
 
     def prepare(self):
         self._lgr = logging.getLogger('mrt')
