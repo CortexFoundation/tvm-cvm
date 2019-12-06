@@ -177,7 +177,7 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratch=0):
                 node = sutils.get_mxnet_op(op_name)(*childs, **attr, name=name)
             return node
         qsym, qparams = merge_model(qbase, qbase_params,
-                top, top_params, maps, None)
+                top, top_params, maps, box_nms)
         oscales2 = [oscales[0], oscales[3], oscales[4]]
         sym_file, param_file, ext_file = \
                 load_fname("_darknet53_voc", "mrt.all.quantize", True)
@@ -189,6 +189,7 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratch=0):
                 load_fname("_darknet53_voc", "mrt.all.quantize", True)
         qsym, qparams = mx.sym.load(dump_sym), nd.load(dump_params)
         _, oscales2 = sim.load_ext(dump_ext)
+
 
     metric = dataset.load_voc_metric()
     metric.reset()
@@ -205,9 +206,10 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratch=0):
     utils.load_parameters(net2, qparams, ctx=qctx)
     net2_metric = dataset.load_voc_metric()
     net2_metric.reset()
+    print (qbase_inputs_ext, oscales, oscales2)
     def mrt_quantize(data, label):
         def net(data):
-            data = sim.load_sim_data(data, 'data', qbase_inputs_ext)
+            data = sim.load_real_data(data, 'data', qbase_inputs_ext)
             outs = net2(data.as_in_context(qctx))
             outs = [o.as_in_context(ctx) / oscales2[i] \
                     for i, o in enumerate(outs)]

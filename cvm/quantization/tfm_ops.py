@@ -249,7 +249,7 @@ class Convolution(Transformer):
         return op
 
     def quantize(self, op, **kwargs):
-        return _restore(op, **kwargs)
+        # return _restore(op, **kwargs)
         return _quantize_xwb(op, **kwargs)
 
     def calculate_ops(self, op, **kwargs):
@@ -425,7 +425,7 @@ class FullyConnected(Transformer):
         return op
 
     def quantize(self, op, **kwargs):
-        return _restore(op, **kwargs)
+        # return _restore(op, **kwargs)
         return _quantize_xwb(op, **kwargs)
 
     def compile(self, op, **kwargs):
@@ -507,7 +507,7 @@ class FullyConnected(Transformer):
 @register_transformer("sigmoid")
 class Sigmoid(Transformer):
     def quantize(self, op, **kwargs):
-        return _restore(op, **kwargs)
+        # return _restore(op, **kwargs)
         return _quantize_table(op, **kwargs)
 
 
@@ -518,7 +518,7 @@ class Sigmoid(Transformer):
 @register_transformer("exp")
 class Exp(Transformer):
     def quantize(self, op, **kwargs):
-        return _restore(op, **kwargs)
+        # return _restore(op, **kwargs)
         return _quantize_table(op, **kwargs)
 
 
@@ -700,7 +700,7 @@ class Pooling(Transformer):
 @register_transformer("broadcast_mul")
 class BroadcastMul(Transformer):
     def quantize(self, op, **kwargs):
-        return _restore(op, **kwargs)
+        # return _restore(op, **kwargs)
         scales = kwargs['scales']
         name, op_name = op.attr('name'), op.attr('op_name')
         childs, attr = sym_iter(op.get_children()), op.list_attr()
@@ -728,7 +728,7 @@ class BroadcastMul(Transformer):
 @register_transformer("broadcast_add")
 class BroadcastAdd(Transformer):
     def quantize(self, op, **kwargs):
-        return _restore(op, **kwargs)
+        # return _restore(op, **kwargs)
         return _quantize_scale(op, **kwargs)
 
 
@@ -776,7 +776,7 @@ class Concat(Transformer):
         return op
 
     def quantize(self, op, **kwargs):
-        return _restore(op, **kwargs)
+        # return _restore(op, **kwargs)
         return _quantize_scale(op, **kwargs)
 
     def compile(self, op, **kwargs):
@@ -1062,7 +1062,7 @@ class ElemwiseAdd(Transformer):
         return _ft_multi_input(op)
 
     def quantize(self, op, **kwargs):
-        return _restore(op, **kwargs)
+        # return _restore(op, **kwargs)
         return _quantize_scale(op, **kwargs)
 
 
@@ -1076,7 +1076,7 @@ class ElemwiseSub(Transformer):
         return _ft_multi_input(op)
 
     def quantize(self, op, **kwargs):
-        return _restore(op, **kwargs)
+        # return _restore(op, **kwargs)
         return _quantize_scale(op, **kwargs)
 
 

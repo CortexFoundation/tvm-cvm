@@ -57,8 +57,6 @@ def quantize(symbol, params, th_dict, precs, scales, op_input_precs):
             precs=precs, scales=scales,
             op_input_precs=op_input_precs)
 
-    return sym, params
-
     def quantize_output(op, **kwargs):
         name = op.attr('name')
         th_dict = kwargs['th_dict']
@@ -66,9 +64,8 @@ def quantize(symbol, params, th_dict, precs, scales, op_input_precs):
 
         # Requantize output symbol
         if name in precs and name in precs[name]:
-            print (precs[name])
             oprec = precs[name][name]
-            os = scales[name] = scale(th_dict[name], oprec)
+            os = scale(th_dict[name], oprec)
             op, oprec, os = requant(op, oprec, os, oname=name, **kwargs)
 
             oname = op.attr('name')

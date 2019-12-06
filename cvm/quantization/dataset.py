@@ -185,6 +185,11 @@ def data_iter(dataset, batch_size, **kwargs):
         data_iter = iter(val_data)
         def data_iter_func():
             return next(data_iter)
+    elif dataset == "cifar10":
+        val_data = load_cifar10(batch_size, **kwargs)
+        data_iter = iter(val_data)
+        def data_iter_func():
+            return next(data_iter)
     else:
         assert False, "dataset:%s is not supported" % (dataset)
     return data_iter_func

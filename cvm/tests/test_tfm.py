@@ -35,7 +35,7 @@ def test_cifar10_resnet20_v1():
     sym_path = "./data/cifar_resnet20_v1.json"
     prm_path = "./data/cifar_resnet20_v1.params"
     ctx = [mx.gpu(int(i)) for i in "4".split(',') if i.strip()]
-    validate_model(sym_path, prm_path, ctx, input_size=32)
+    validate_model(sym_path, prm_path, ctx, input_size=32, ds_name='cifar10')
 
 def test_resnet18_v1():
     sym_path = "./data/resnet18_v1.json"
@@ -64,7 +64,7 @@ if __name__ == '__main__':
     # test_mobilenet_v2_1_0() # 73% --> 0%
     # test_tf_inceptionv3() # 56% --> 55%
     # test_alexnet() # 56% --> 55%
-    # test_cifar10_resnet20_v1() # 0% --> 0%
+    # test_cifar10_resnet20_v1() # 91% --> 90%
     # test_resnet18_v1() # 70% --> 69%
 
     # TODO: improve precision for densenet
