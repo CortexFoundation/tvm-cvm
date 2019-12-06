@@ -25,7 +25,7 @@ def extract_file(tar_path, target_path):
     tar.extractall(target_path)
     tar.close()
 
-def download_files(category, files, baseUrl=src, root=dataset_dir):
+def download_files(category, files, baseUrl=src, root=dataset_dir, **kwargs):
     logger = logging.getLogger("dataset")
     root_dir = os.path.join(root, category)
     os.makedirs(root_dir, exist_ok=True)

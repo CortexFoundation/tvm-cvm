@@ -36,7 +36,7 @@ def load_fname(version, suffix=None, with_ext=False):
     fname = "./data/resnet%s%s"%(version, suffix)
     return utils.extend_fname(fname, with_ext)
 
-version = "50_v2"
+version = "18_v1b_0.89"
 
 def test_sym_nnvm(batch_size=10):
     dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
@@ -125,7 +125,7 @@ if __name__ == "__main__":
     # zoo.save_model('resnet18_v1')
     # zoo.save_model('resnet50_v1d_0.86')
     # zoo.save_model('resnet18_v1b_0.89')
-    #  zoo.save_model("resnet50_v2")
+    # zoo.save_model("resnet50_v2")
     #  exit()
 
     # save_data()

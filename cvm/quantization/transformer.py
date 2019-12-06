@@ -176,7 +176,7 @@ def load_model(model_name, sym_path, prm_path, ctx, inputs_qext=None):
     return model_func
 
 def validate_model(sym_path, prm_path, ctx, num_channel=3, input_size=224,
-        batch_size=16, iter_num=10, ds_name='imagenet', from_scratch=0):
+        batch_size=16, iter_num=10, ds_name='imagenet', from_scratch=0, lambd=None):
     flag = [False]*from_scratch + [True]*(2-from_scratch)
     model_name, _ = path.splitext(path.basename(sym_path))
     model_dir = path.dirname(sym_path)
@@ -204,7 +204,7 @@ def validate_model(sym_path, prm_path, ctx, num_channel=3, input_size=224,
     prefix = path.join(model_dir, model_name+'.mrt.dict')
     _, _, dump_ext = utils.extend_fname(prefix, True)
     if flag[0]:
-        th_dict = mrt.calibrate()
+        th_dict = mrt.calibrate(lambd=lambd)
         sim.save_ext(dump_ext, th_dict)
     else:
         (th_dict,) = sim.load_ext(dump_ext)
