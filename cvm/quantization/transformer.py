@@ -42,12 +42,13 @@ class MRT(object):
         self._qext = None
 
         self.op_input_precs = self._op_default_input_precs()
+        self._sym, self._prm = init(self._sym, self._prm, self._ishp)
 
     def prepare(self):
         self._lgr = logging.getLogger('mrt')
         self._lgr.info("Graph initialize and reduce...")
 
-        _sym, _prm = init(self._sym, self._prm, self._ishp)
+        _sym, _prm = self._sym, self._prm
         orig_ops = calculate_ops(_sym, _prm)
         _sym, _prm = fuse_constant(_sym, _prm)
         _sym, _prm = fuse_transpose(_sym, _prm)
@@ -61,29 +62,18 @@ class MRT(object):
     def calibrate(self, ctx=mx.cpu(), lambd=None, old_ths=None):
         self.th_dict = sym_calibrate(self._sym, self._prm, self._data,
                 ctx=ctx, lambd=lambd, old_ths=old_ths)
+        return self.th_dict
 
     def quantize(self, no_realize=False):
         if self.th_dict is None:
             self._lgr.error("Please calibrate thresholds first.")
             assert False
 
+        self._check_fixed()
         self._qsym, self._qprm = quantize(self._sym, self._prm,
                 self.th_dict, self.precs, self.scales, self.op_input_precs)
         self._get_ext()
         return self._qsym, self._qprm, self._qext
-
-    def dump(self, fname="test_dump", directory="~/tvm-cvm/data/"):
-        assert self._qsym is not None
-        import os
-        directory = path.expanduser(directory)
-        prefix = path.join(directory, fname)
-        qsym_path, qprm_path, qext_path = utils.extend_fname(prefix, True)
-
-        with open(path.expanduser(qsym_path), 'w') as f:
-            f.write(self._qsym.tojson())
-        nd.save(qprm_path, self._qprm)
-        sim.save_ext(qext_path, self._qext)
-        return qsym_path, qprm_path, qext_path
 
     def set_data(self, data):
         self._data = data
@@ -150,6 +140,20 @@ class MRT(object):
             'scale': self.scales['data'],
             'target_bit': self.precs['data'][OUT_KEY], } }
 
+    def _check_fixed(self):
+        for sym in topo_sort(self._sym):
+            name, op_name = sym.attr('name'), sym.attr('op_name')
+            if name not in self._fixed:
+                continue
+            assert op_name == 'null'
+            if is_params(sym, self._prm):
+                bit = get_bit(self._prm[name])
+                self.precs[name] = { OUT_KEY: bit, }
+            else:
+                bit = self.precs[name][OUT_KEY]
+                self.precs[name] = { OUT_KEY: bit, }
+            self.th_dict[name] = get_range(bit)
+
 def load_model(model_name, sym_path, prm_path, ctx, inputs_qext=None):
     inputs = [mx.sym.var('data')]
     net = utils.load_model(sym_path, prm_path, inputs, ctx=ctx)
@@ -171,10 +175,14 @@ def load_model(model_name, sym_path, prm_path, ctx, inputs_qext=None):
         return "top1={:6.2%} top5={:6.2%}".format(top1, top5)
     return model_func
 
-def validate_model(sym_path, prm_path, ctx, input_size=224,
-        batch_size=16, iter_num=10, ds_name='imagenet', qctx=None):
+def validate_model(sym_path, prm_path, ctx, num_channel=3, input_size=224,
+        batch_size=16, iter_num=10, ds_name='imagenet', from_scratch=0):
+    flag = [False]*from_scratch + [True]*(2-from_scratch)
     model_name, _ = path.splitext(path.basename(sym_path))
+    model_dir = path.dirname(sym_path)
+    input_shape = (batch_size, num_channel, input_size, input_size)
     logger = logging.getLogger("log.validate.%s"%model_name)
+
     if not path.exists(sym_path) or not path.exists(prm_path):
         save_model(model_name)
     sym, params = mx.sym.load(sym_path), mx.nd.load(prm_path)
@@ -186,28 +194,45 @@ def validate_model(sym_path, prm_path, ctx, input_size=224,
 
     data_iter_func = ds.data_iter(ds_name, batch_size, input_size=input_size)
     data, _ = data_iter_func()
-    mrt = MRT(sym, params, (batch_size, 3, input_size, input_size))
+
+    # prepare
+    mrt = MRT(sym, params, input_shape)
     mrt.prepare()
     mrt.set_data(data)
-    mrt.calibrate()
+
+    # calibrate
+    prefix = path.join(model_dir, model_name+'.mrt.dict')
+    _, _, dump_ext = utils.extend_fname(prefix, True)
+    if flag[0]:
+        th_dict = mrt.calibrate()
+        sim.save_ext(dump_ext, th_dict)
+    else:
+        (th_dict,) = sim.load_ext(dump_ext)
+        mrt.set_th_dict(th_dict)
+
     mrt.set_input_prec(8)
     mrt.set_output_prec(8)
-    mrt.quantize()
-    qsym_path, qprm_path, qext_path = mrt.dump()
-    (inputs_qext, ) = sim.load_ext(qext_path)
+
+    # quantize, get: qsym, qprm, inputs_qext
+    qsym, qprm, inputs_qext = None, None, None
+    prefix = path.join(model_dir, model_name+'.mrt.quantize')
+    qsym_path, qprm_path, qext_path = utils.extend_fname(prefix, True)
+    if flag[1]:
+        qsym, qprm, inputs_qext = mrt.quantize()
+        open(path.expanduser(qsym_path), 'w').write(qsym.tojson())
+        nd.save(qprm_path, qprm)
+        sim.save_ext(qext_path, inputs_qext)
+    else:
+        qsym, qprm = mx.sym.load(qsym_path), nd.load(qprm_path)
+        (inputs_qext, ) = sim.load_ext(qext_path)
 
     inputs = [mx.sym.var('data')]
-    inputs_ext = { 'data': {
-        'shape': (batch_size, 3, input_size, input_size), } }
+    inputs_ext = { 'data': { 'shape': input_shape } }
 
-    org_model, cvm_quantize = None, None
-    if model_name in ['yolo3_darknet53_voc']:
-        org_model, cvm_quantize = load_model_yolo(model_name, sym_path, prm_path,
-                ctx, qctx, inputs_ext, inputs_qext, mrt._sym, mrt._prm)
-    else:
-        org_model = load_model(model_name, sym_path, prm_path, ctx)
-        cvm_quantize = load_model(model_name, qsym_path, qprm_path, ctx, \
-                inputs_qext=inputs_qext)
+    # validate
+    org_model = load_model(model_name, sym_path, prm_path, ctx)
+    cvm_quantize = load_model(model_name, qsym_path, qprm_path, ctx, \
+            inputs_qext=inputs_qext)
 
     utils.multi_validate(org_model, data_iter_func, cvm_quantize,
             iter_num=iter_num, logger=logging.getLogger('mrt.validate'))
@@ -240,8 +265,10 @@ def split_model(symbol, params, input_shapes, keys):
 
     return base, base_params, top, top_params, top_inputs_ext
 
-def merge_model(base, base_params, top, top_params, base_maps, callback=None):
-    graph = {base_maps[c.attr('name')]:c for c in base}
+def merge_model(base, base_params, top, top_params,
+        base_maps={}, callback=None):
+    graph = {base_maps.get(c.attr('name'), c.attr('name')):c \
+        for c in base }
     for sym in topo_sort(top):
         name, op_name = sym.attr('name'), sym.attr('op_name')
         childs, attr = sym_iter(sym.get_children()), sym.list_attr()

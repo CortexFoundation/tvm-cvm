@@ -79,6 +79,8 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratch=0):
         sym, params = mx.sym.load(sym_file), nd.load(param_file)
         mrt = MRT(sym, params, input_shape)
         mrt.prepare()
+        # print (collect_op_names(mrt._sym, mrt._prm))
+        # exit()
         keys = [
           'yolov30_yolooutputv30_expand_dims0',
           'yolov30_yolooutputv31_expand_dims0',
@@ -115,22 +117,13 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratch=0):
             [mx.sym.var(n) for n in top_inputs_ext])
     utils.load_parameters(top_graph, top_params, ctx=ctx)
 
-    metric = dataset.load_voc_metric()
-    metric.reset()
-    def yolov3(data, label):
-       def net(data):
-           tmp = base_graph(data.as_in_context(ctx))
-           outs = top_graph(*tmp)
-           return outs
-       acc = validate_data(net, data, label, metric)
-       return "{:6.2%}".format(acc)
-
     # calibrate split model, get:
     # th_dict
     th_dict = None
     if flag[1]:
         mrt = MRT(base, base_params, input_shape)
-        for i in range(16):
+        # for i in range(16):
+        for i in range(1):
             data, _ = data_iter_func()
             mrt.set_data(data)
             mrt.calibrate(ctx=ctx)
@@ -184,7 +177,7 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratch=0):
                 node = sutils.get_mxnet_op(op_name)(*childs, **attr, name=name)
             return node
         qsym, qparams = merge_model(qbase, qbase_params,
-                top, top_params, maps, box_nms)
+                top, top_params, maps, None)
         oscales2 = [oscales[0], oscales[3], oscales[4]]
         sym_file, param_file, ext_file = \
                 load_fname("_darknet53_voc", "mrt.all.quantize", True)
@@ -197,6 +190,16 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratch=0):
         qsym, qparams = mx.sym.load(dump_sym), nd.load(dump_params)
         _, oscales2 = sim.load_ext(dump_ext)
 
+    metric = dataset.load_voc_metric()
+    metric.reset()
+    def yolov3(data, label):
+       def net(data):
+           tmp = base_graph(data.as_in_context(ctx))
+           outs = top_graph(*tmp)
+           return outs
+       acc = validate_data(net, data, label, metric)
+       return "{:6.2%}".format(acc)
+
     inputs = [mx.sym.var(n) for n in qbase_inputs_ext]
     net2 = mx.gluon.nn.SymbolBlock(qsym, inputs)
     utils.load_parameters(net2, qparams, ctx=qctx)
@@ -204,15 +207,16 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratch=0):
     net2_metric.reset()
     def mrt_quantize(data, label):
         def net(data):
-            data = sim.load_real_data(data, 'data', qbase_inputs_ext)
+            data = sim.load_sim_data(data, 'data', qbase_inputs_ext)
             outs = net2(data.as_in_context(qctx))
             outs = [o.as_in_context(ctx) / oscales2[i] \
-                   for i, o in enumerate(outs)]
+                    for i, o in enumerate(outs)]
             return outs
         acc = validate_data(net, data, label, net2_metric)
         return "{:6.2%}".format(acc)
 
-    utils.multi_validate(yolov3, data_iter_func, mrt_quantize,
+    utils.multi_validate(yolov3, data_iter_func,
+            mrt_quantize,
             iter_num=iter_num, logger=logger)
 
 def test_sym_nnvm(batch_size, iter_num):
@@ -230,6 +234,8 @@ if __name__ == '__main__':
 
     zoo.save_model('yolo3_darknet53_voc')
 
-    from_scratch = 0
-    test_mrt_quant(1, 100, from_scratch)
+    from_scratch = 2
+    test_mrt_quant(16, 10, from_scratch) #85% --> 75%
+    # TODO: improve precision
+    # original mrt precision: 85% --> 86%
     #test_sym_nnvm(16, 0)

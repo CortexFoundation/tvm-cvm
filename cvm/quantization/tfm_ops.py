@@ -249,6 +249,7 @@ class Convolution(Transformer):
         return op
 
     def quantize(self, op, **kwargs):
+        return _restore(op, **kwargs)
         return _quantize_xwb(op, **kwargs)
 
     def calculate_ops(self, op, **kwargs):
@@ -363,28 +364,28 @@ class BoxNms(Transformer):
 
 @register_pass("validate")
 @register_pass("rewrite")
-@register_pass("quantize")
 @register_pass("calculate_ops")
+@register_pass("quantize")
 @register_pass("fuse_transpose")
 @register_transformer('slice_like')
 class SliceLike(Transformer):
-    def quantize(self, op, **kwargs):
-        th_dict, scales = kwargs['th_dict'], kwargs['scales']
-        name, op_name = op.attr('name'), op.attr('op_name')
-        childs, attr = sym_iter(op.get_children()), op.list_attr()
-        cns = [c.attr('name') for c in childs] if childs else []
+    # def quantize(self, op, **kwargs):
+    #     th_dict, scales = kwargs['th_dict'], kwargs['scales']
+    #     name, op_name = op.attr('name'), op.attr('op_name')
+    #     childs, attr = sym_iter(op.get_children()), op.list_attr()
+    #     cns = [c.attr('name') for c in childs] if childs else []
 
-        oprec = kwargs['op_input_precs'][op_name]
-        X, _, xs = requant(childs[0], oprec, oname=name, **kwargs)
-        oscale = scales[name] = xs
-        op = get_mxnet_op(op_name)(X, childs[1], **attr, name=name)
-        kwargs['precs'][name][OUT_KEY] = get_bit(th_dict[name] * oscale)
+    #     oprec = kwargs['op_input_precs'][op_name]
+    #     X, _, xs = requant(childs[0], oprec, oname=name, **kwargs)
+    #     oscale = scales[name] = xs
+    #     op = get_mxnet_op(op_name)(X, childs[1], **attr, name=name)
+    #     kwargs['precs'][name][OUT_KEY] = get_bit(th_dict[name] * oscale)
 
-        logger = logging.getLogger('log.mrt.realize')
-        logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
-               op_name, name, scales[name], cns)
-        op = requant_output(op, name, **kwargs)
-        return op
+    #     logger = logging.getLogger('log.mrt.realize')
+    #     logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
+    #            op_name, name, scales[name], cns)
+    #     op = requant_output(op, name, **kwargs)
+    #     return op
 
     def compile(self, op, **kwargs):
         childs = kwargs['childs']
@@ -424,6 +425,7 @@ class FullyConnected(Transformer):
         return op
 
     def quantize(self, op, **kwargs):
+        return _restore(op, **kwargs)
         return _quantize_xwb(op, **kwargs)
 
     def compile(self, op, **kwargs):
@@ -505,6 +507,7 @@ class FullyConnected(Transformer):
 @register_transformer("sigmoid")
 class Sigmoid(Transformer):
     def quantize(self, op, **kwargs):
+        return _restore(op, **kwargs)
         return _quantize_table(op, **kwargs)
 
 
@@ -515,6 +518,7 @@ class Sigmoid(Transformer):
 @register_transformer("exp")
 class Exp(Transformer):
     def quantize(self, op, **kwargs):
+        return _restore(op, **kwargs)
         return _quantize_table(op, **kwargs)
 
 
@@ -674,7 +678,6 @@ class Pooling(Transformer):
             op = mx.sym.Convolution(X, W, **conv_attr, name=conv_name)
         return op
 
-
     def calculate_ops(self, op, **kwargs):
         X, attr = sym_iter(op.get_children())[0], op.list_attr()
         pool_type = get_attr(attr, 'pool_type', 'max')
@@ -697,6 +700,7 @@ class Pooling(Transformer):
 @register_transformer("broadcast_mul")
 class BroadcastMul(Transformer):
     def quantize(self, op, **kwargs):
+        return _restore(op, **kwargs)
         scales = kwargs['scales']
         name, op_name = op.attr('name'), op.attr('op_name')
         childs, attr = sym_iter(op.get_children()), op.list_attr()
@@ -724,6 +728,7 @@ class BroadcastMul(Transformer):
 @register_transformer("broadcast_add")
 class BroadcastAdd(Transformer):
     def quantize(self, op, **kwargs):
+        return _restore(op, **kwargs)
         return _quantize_scale(op, **kwargs)
 
 
@@ -771,6 +776,7 @@ class Concat(Transformer):
         return op
 
     def quantize(self, op, **kwargs):
+        return _restore(op, **kwargs)
         return _quantize_scale(op, **kwargs)
 
     def compile(self, op, **kwargs):
@@ -891,7 +897,7 @@ class BatchNorm(Transformer):
             bias_name = N.n('bias')
             params[bias_name] = bias.reshape(reshp)
             B = mx.sym.var(bias_name, shape=reshp)
-            op = mx.sym.broadcast_add(op, B, name=N.n("broadcast_add"))
+            op = mx.sym.broadcast_add(node, B, name=N.n("broadcast_add"))
         return op
 
     def calculate_ops(self, op, **kwargs):
@@ -1056,6 +1062,7 @@ class ElemwiseAdd(Transformer):
         return _ft_multi_input(op)
 
     def quantize(self, op, **kwargs):
+        return _restore(op, **kwargs)
         return _quantize_scale(op, **kwargs)
 
 
@@ -1069,6 +1076,7 @@ class ElemwiseSub(Transformer):
         return _ft_multi_input(op)
 
     def quantize(self, op, **kwargs):
+        return _restore(op, **kwargs)
         return _quantize_scale(op, **kwargs)
 
 
@@ -1182,6 +1190,29 @@ def _quantize_xwb(op, **kwargs):
     op = requant_output(op, name, **kwargs)
     return op
 
+def _restore(op, **kwargs):
+    params, graph = kwargs['params'], kwargs['graph']
+    th_dict, precs, scales = kwargs['th_dict'], kwargs['precs'], kwargs['scales']
+    name, op_name = op.attr('name'), op.attr('op_name')
+    childs, attr = sym_iter(op.get_children()), op.list_attr()
+    cns = [c.attr('name') for c in childs] if childs else []
+
+    childs = [] if childs is None else childs
+    new_childs = [c / scales[c.attr('name')] \
+        if scales.get(c.attr('name'), 1) != 1 else c \
+                 for c in childs]
+
+    out = get_mxnet_op(op_name)(*new_childs, **attr, name=name)
+
+    oprec = precs[name].get(OUT_KEY, 16)
+    oscale = scales[name] = 1
+    oscale = scales[name] = scale(th_dict[name], oprec)
+    out = (out * oscale)
+    precs[name][OUT_KEY] = oprec
+
+    out = requant_output(out, name, **kwargs)
+    return out
+
 def _quantize_table(op, **kwargs):
     params, graph = kwargs['params'], kwargs['graph']
     th_dict, precs, scales = kwargs['th_dict'], kwargs['precs'], kwargs['scales']
@@ -1189,10 +1220,11 @@ def _quantize_table(op, **kwargs):
     childs, attr = sym_iter(op.get_children()), op.list_attr()
     cns = [c.attr('name') for c in childs] if childs else []
 
-    oprec = kwargs['op_input_precs'][op_name]
-    oscale = scale(th_dict[cns[0]], oprec)
-    X, xprec, xs = requant_operator(childs[0], oprec, \
-            oscale=oscale, oname=name, **kwargs)
+    iprec = kwargs['op_input_precs'][op_name]
+    xs = scale(th_dict[cns[0]], iprec)
+    # xs= scales[cns[0]]
+    X, xprec, xs = requant_operator(childs[0], iprec, \
+            oscale=xs, oname=name, **kwargs)
     alpha = get_range(xprec)
     var = mx_const(alpha, graph, params)
     X = mx.sym.broadcast_add(X, var, name=N.n(op_name+'_offset'))

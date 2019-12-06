@@ -48,7 +48,7 @@ def rewrite(symbol, params):
 @N.register_nm("quantize")
 def quantize(symbol, params, th_dict, precs, scales, op_input_precs):
     infer_shapes = infer_shape(symbol, params)
-    return topo_visit_transformer(symbol, params,
+    sym, params = topo_visit_transformer(symbol, params,
             apply_pass(
                 "quantize",
                 infer_shapes=infer_shapes,
@@ -56,6 +56,30 @@ def quantize(symbol, params, th_dict, precs, scales, op_input_precs):
             th_dict=th_dict,
             precs=precs, scales=scales,
             op_input_precs=op_input_precs)
+
+    return sym, params
+
+    def quantize_output(op, **kwargs):
+        name = op.attr('name')
+        th_dict = kwargs['th_dict']
+        precs, scales = kwargs['precs'], kwargs['scales']
+
+        # Requantize output symbol
+        if name in precs and name in precs[name]:
+            print (precs[name])
+            oprec = precs[name][name]
+            os = scales[name] = scale(th_dict[name], oprec)
+            op, oprec, os = requant(op, oprec, os, oname=name, **kwargs)
+
+            oname = op.attr('name')
+            th_dict[oname] = th_dict[name]
+            precs[oname] = oprec
+            scales[oname] = os
+        return op
+    return topo_visit_transformer(sym, params,
+            quantize_output, th_dict=th_dict,
+            precs=precs, scales=scales)
+
 
 @N.register_nm("cvm")
 def compile(symbol, params):
@@ -390,15 +414,16 @@ def requant_output(op, name, **kwargs):
     scales[oname] = scales[name]
 
     # Requantize output symbol
-    if name in precs[name]:
-        oprec = precs[name][name]
-        os = scale(th_dict[name], oprec)
-        op, oprec, os = requant_operator(op, oprec, os, oname=name, **kwargs)
+    # if name in precs[name]:
+    #     print (precs[name])
+    #     oprec = precs[name][name]
+    #     os = scale(th_dict[name], oprec)
+    #     op, oprec, os = requant_operator(op, oprec, os, oname=name, **kwargs)
 
-        oname = op.attr('name')
-        infer_shapes[oname] = infer_shapes[name]
-        th_dict[oname] = th_dict[name]
-        precs[oname] = oprec
-        scales[oname] = os
+    #     oname = op.attr('name')
+    #     infer_shapes[oname] = infer_shapes[name]
+    #     th_dict[oname] = th_dict[name]
+    #     precs[oname] = oprec
+    #     scales[oname] = os
     return op
 
