@@ -307,8 +307,8 @@ class BoxNms(Transformer):
         if isinstance(attrs['valid_thresh'], int) == False:
             if attrs['valid_thresh'] * 10 == int(attrs['valid_thresh']) * 10:
                 attrs['valid_thresh'] = int(attrs['valid_thresh'])
-        else:
-            assert False
+            else:
+                assert False
         return get_mxnet_op(self.op_name)(
                 sym_iter(op.get_children()), **attrs, name=op.attr('name'))
 
