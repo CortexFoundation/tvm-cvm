@@ -304,11 +304,8 @@ class BoxNms(Transformer):
         iou_thresh = get_attr(attrs, ' overlap_thresh', 0.5) * 100
         iou_thresh = int(iou_thresh)
         attrs['overlap_thresh'] = iou_thresh
-        if isinstance(attrs['valid_thresh'], int) == False:
-            if attrs['valid_thresh'] * 10 == int(attrs['valid_thresh']) * 10:
-                attrs['valid_thresh'] = int(attrs['valid_thresh'])
-            else:
-                assert False
+        assert attrs['valid_thresh'] == int(attrs['valid_thresh'])
+        attrs['valid_thresh'] = int(attrs['valid_thresh'])
         return get_mxnet_op(self.op_name)(
                 sym_iter(op.get_children()), **attrs, name=op.attr('name'))
 
