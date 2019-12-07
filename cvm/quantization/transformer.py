@@ -55,13 +55,13 @@ class MRT(object):
         tvm_ctx = tvm.context("llvm", 0)
         for key, value in params.items():
             if key not in args:
-                logger.warn("key:%s not exists in graph", key)
-            else:
-                msg = "key:%s value:%s"%(key, value)
-                flat = value.asnumpy().flatten()
-                assert all(flat >= INT32_MIN) and all(flat <= INT32_MAX), msg
-                assert all(flat.astype('int32').astype('float32') == flat), msg
-                real_params[key] = tvm.nd.array(value.astype(use_dtype).asnumpy(), tvm_ctx)
+                continue
+
+            msg = "key:%s value:%s"%(key, value)
+            flat = value.asnumpy().flatten()
+            assert all(flat >= INT32_MIN) and all(flat <= INT32_MAX), msg
+            assert all(flat.astype('int32').astype('float32') == flat), msg
+            real_params[key] = tvm.nd.array(value.astype(use_dtype).asnumpy(), tvm_ctx)
         return self.cvm_build(nnvm_sym, real_params,
                 datadir+"/symbol", datadir+"/params")
 
@@ -85,11 +85,11 @@ class MRT(object):
             name, attr = sym.attr('name'), sym.list_attr()
             if is_params(sym, params):
                 precision = get_attr(attr, "precision")
-                val = params[name]
+                val = params[name].asnumpy()
                 if precision > 8:
-                    params[name] = tvm.nd.array(val.asnumpy().astype('int32'), ctx)
+                    params[name] = tvm.nd.array(val.astype('int32'), ctx)
                 else:
-                    params[name] = tvm.nd.array(val.asnumpy().astype('int8'), ctx)
+                    params[name] = tvm.nd.array(val.astype('int8'), ctx)
         return params
 
     def prepare(self):
