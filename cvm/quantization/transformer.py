@@ -1,12 +1,11 @@
 from mxnet import gluon
-
+import tvm
 import tfm_ops
 from tfm_pass import *
 from gluon_zoo import *
 
 import sym_utils as sutils
 import cvm_op
-
 import logging
 from os import path
 
@@ -42,6 +41,56 @@ class MRT(object):
         self._qext = None
 
         self.op_input_precs = self._op_default_input_precs()
+
+
+    def compile(self, model_name):
+        logger = logging.getLogger('mrt.compile')
+        datadir = "/data/std_out/" + model_name
+        sym, params = attach_input_shape(self._qsym, self._qprm, {'data': self._ishp})
+        sym, params = prepare_for_compile(sym, params)
+        nnvm_sym, _ = compile(sym, params)
+        args = nnvm_sym.list_input_names()
+        real_params = {}
+        use_dtype = "int32"
+        tvm_ctx = tvm.context("llvm", 0)
+        for key, value in params.items():
+            if key not in args:
+                logger.warn("key:%s not exists in graph", key)
+            else:
+                msg = "key:%s value:%s"%(key, value)
+                flat = value.asnumpy().flatten()
+                assert all(flat >= INT32_MIN) and all(flat <= INT32_MAX), msg
+                assert all(flat.astype('int32').astype('float32') == flat), msg
+                real_params[key] = tvm.nd.array(value.astype(use_dtype).asnumpy(), tvm_ctx)
+        return self.cvm_build(nnvm_sym, real_params,
+                datadir+"/symbol", datadir+"/params")
+
+    def cvm_build(self, nnvm_sym, nnvm_params, dump_sym, dump_params,
+            target="cuda", logger=logging, dtype="int32"):
+        tvm_ctx = tvm.context(target, 0)
+        inputs_shape = {'data': self._ishp}
+        with nnvm.compiler.build_config(opt_level=0):
+            deploy_graph, lib, real_params = nnvm.compiler.build(
+                nnvm_sym, target=target, shape=inputs_shape,
+                params=nnvm_params, dtype=dtype)
+        real_params = self.tvm_params_reduce(
+                    nnvm_sym, real_params, tvm_ctx)
+        open(dump_sym, "w").write(deploy_graph.json())
+        param_bytes = nnvm.compiler.save_param_dict(real_params)
+        open(dump_params, "wb").write(param_bytes)
+        return deploy_graph, real_params
+
+    def tvm_params_reduce(self, symbol, params, ctx):
+        for sym in topo_sort(symbol):
+            name, attr = sym.attr('name'), sym.list_attr()
+            if is_params(sym, params):
+                precision = get_attr(attr, "precision")
+                val = params[name]
+                if precision > 8:
+                    params[name] = tvm.nd.array(val.asnumpy().astype('int32'), ctx)
+                else:
+                    params[name] = tvm.nd.array(val.asnumpy().astype('int8'), ctx)
+        return params
 
     def prepare(self):
         self._lgr = logging.getLogger('mrt')

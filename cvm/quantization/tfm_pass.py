@@ -58,6 +58,15 @@ def quantize(symbol, params, th_dict, precs, scales, op_input_precs):
             precs=precs, scales=scales,
             op_input_precs=op_input_precs)
 
+@N.register_nm("prepare_for_cvm")
+def prepare_for_compile(symbol, params):
+    infer_shapes = infer_shape(symbol, params)
+    return topo_visit_transformer(symbol, params,
+            apply_pass(
+                "prepare_for_compile",
+                infer_shapes=infer_shapes,
+            ))
+
 @N.register_nm("cvm")
 def compile(symbol, params):
     def _as_list(arr):
