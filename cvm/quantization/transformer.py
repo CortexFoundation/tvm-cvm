@@ -46,8 +46,7 @@ class MRT(object):
     def compile(self, model_name):
         logger = logging.getLogger('mrt.compile')
         datadir = "/data/std_out/" + model_name
-        sym, params = attach_input_shape(self._qsym, self._qprm, {'data': self._ishp})
-        sym, params = prepare_for_compile(sym, params)
+        sym, params = prepare_for_compile(self._qsym, self._qprm)
         nnvm_sym, _ = compile(sym, params)
         args = nnvm_sym.list_input_names()
         real_params = {}
