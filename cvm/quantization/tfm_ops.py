@@ -33,7 +33,6 @@ class Null(Transformer):
 @register_pass("quantize")
 @register_pass("calculate_ops")
 @register_pass('compile')
-@register_pass("prepare_for_compile")
 @register_transformer("transpose")
 class Transpose(Transformer):
     def validate(self, op, **kwargs):
@@ -63,7 +62,6 @@ class Transpose(Transformer):
 @register_pass("rewrite")
 @register_pass("calculate_ops")
 @register_pass("quantize")
-@register_pass("prepare_for_compile")
 @register_transformer("relu")
 class Relu(Transformer):
     def fuse_transpose(self, op, **kwargs):
@@ -85,7 +83,6 @@ class Relu(Transformer):
 @register_pass("rewrite")
 @register_pass("calculate_ops")
 @register_pass("quantize")
-@register_pass("prepare_for_compile")
 @register_transformer("LeakyReLU")
 class LeakyReLU(Transformer):
     def fuse_transpose(self, op, **kwargs):
@@ -103,7 +100,6 @@ class LeakyReLU(Transformer):
 @register_pass("calculate_ops")
 @register_pass("fuse_transpose")
 @register_pass("quantize")
-@register_pass("prepare_for_compile")
 @register_transformer("_mul_scalar")
 class MulScalar(Transformer):
     pass
@@ -114,7 +110,6 @@ class MulScalar(Transformer):
 @register_pass("calculate_ops")
 @register_pass("fuse_transpose")
 @register_pass("quantize")
-@register_pass("prepare_for_compile")
 @register_transformer("_div_scalar")
 class DivScalar(Transformer):
     pass
@@ -255,7 +250,6 @@ class Convolution(Transformer):
 @register_pass("fuse_transpose")
 @register_pass("rewrite")
 @register_pass("quantize")
-@register_pass("prepare_for_compile")
 @register_transformer('expand_dims')
 class ExpandDims(Transformer):
     def compile(self, op, **kwargs):
@@ -266,7 +260,6 @@ class ExpandDims(Transformer):
         return get_nnvm_op(op_name)(*childs, **new_attrs)
 
 
-@register_pass("prepare_for_compile")
 @register_transformer('Embedding')
 class Embedding(Transformer):
     def compile(self, op, **kwargs):
@@ -282,7 +275,6 @@ class Embedding(Transformer):
 @register_pass("calculate_ops")
 @register_pass("fuse_transpose")
 @register_pass("quantize")
-@register_pass("prepare_for_compile")
 @register_transformer("repeat")
 class Repeat(Transformer):
     def compile(self, op, **kwargs):
@@ -312,7 +304,13 @@ class BoxNms(Transformer):
         iou_thresh = get_attr(attrs, ' overlap_thresh', 0.5) * 100
         iou_thresh = int(iou_thresh)
         attrs['overlap_thresh'] = iou_thresh
-        return get_mxnet_op(self.op_name)(sym_iter(op.get_children()), **attrs, name=op.attr('name'))
+        if isinstance(attrs['valid_thresh'], int) == False:
+            if attrs['valid_thresh'] * 10 == int(attrs['valid_thresh']) * 10:
+                attrs['valid_thresh'] = int(attrs['valid_thresh'])
+        else:
+            assert False
+        return get_mxnet_op(self.op_name)(
+                sym_iter(op.get_children()), **attrs, name=op.attr('name'))
 
     def compile(self, op, **kwargs):
         childs = kwargs['childs']
@@ -343,7 +341,6 @@ class BoxNms(Transformer):
 @register_pass("rewrite")
 @register_pass("calculate_ops")
 @register_pass("fuse_transpose")
-@register_pass("prepare_for_compile")
 @register_transformer('slice_like')
 class SliceLike(Transformer):
     def quantize(self, op, **kwargs):
@@ -385,16 +382,14 @@ class SliceAxis(Transformer):
         cshape = infer_shapes[X.attr('name')]
         axis = get_attr(attr, 'axis')
         axis_begin = get_attr(attr, 'begin')
-        axis_end = get_attr(attr, 'end')
-        if axis_end is None:
-            axis_end = cshape[axis]
+        axis_end = get_attr(attr, 'end', None)
+        axis_end = cshape[axis]
         begin = [0 for s in cshape]
         end = [s for s in cshape]
         begin[axis], end[axis] = axis_begin, axis_end
         return get_mxnet_op('slice')(X, begin=begin, end=end, name=name)
 
 
-@register_pass("prepare_for_compile")
 @register_transformer('UpSampling')
 class UpSampling(Transformer):
     def compile(self, op, **kwargs):
@@ -494,7 +489,6 @@ class FullyConnected(Transformer):
 @register_pass("validate")
 @register_pass("rewrite")
 @register_pass("fuse_transpose")
-@register_pass("prepare_for_compile")
 @register_transformer("sigmoid")
 class Sigmoid(Transformer):
     def quantize(self, op, **kwargs):
@@ -505,7 +499,6 @@ class Sigmoid(Transformer):
 @register_pass("validate")
 @register_pass("rewrite")
 @register_pass("fuse_transpose")
-@register_pass("prepare_for_compile")
 @register_transformer("exp")
 class Exp(Transformer):
     def quantize(self, op, **kwargs):
@@ -515,7 +508,6 @@ class Exp(Transformer):
 @register_pass("validate")
 @register_pass("rewrite")
 @register_pass("fuse_transpose")
-@register_pass("prepare_for_compile")
 @register_transformer("softmax")
 class Softmax(Transformer):
     def calculate_ops(self, op, **kwargs):
@@ -718,7 +710,6 @@ class BroadcastMul(Transformer):
 @register_pass("fuse_transpose")
 @register_pass("rewrite")
 @register_pass("compile")
-@register_pass("prepare_for_compile")
 @register_transformer("broadcast_add")
 class BroadcastAdd(Transformer):
     def quantize(self, op, **kwargs):
@@ -726,28 +717,24 @@ class BroadcastAdd(Transformer):
 
 
 @register_pass("compile")
-@register_pass("prepare_for_compile")
 @register_transformer("broadcast_div")
 class BroadcastDiv(Transformer):
     pass
 
 
 @register_pass("compile")
-@register_pass("prepare_for_compile")
 @register_transformer("broadcast_sub")
 class BroadcastSub(Transformer):
     pass
 
 
 @register_pass("compile")
-@register_pass("prepare_for_compile")
 @register_transformer("broadcast_to")
 class BroadcastTo(Transformer):
     pass
 
 
 @register_pass("compile")
-@register_pass("prepare_for_compile")
 @register_transformer("broadcast_greater")
 class BroadcastGreater(Transformer):
     pass
@@ -756,7 +743,6 @@ class BroadcastGreater(Transformer):
 @register_pass("rewrite")
 @register_pass("validate")
 @register_pass("calculate_ops")
-@register_pass("prepare_for_compile")
 @register_transformer("Concat")
 class Concat(Transformer):
     def fuse_transpose(self, op, **kwargs):
@@ -787,7 +773,6 @@ class Concat(Transformer):
 
 @register_pass('compile')
 @register_pass("rewrite")
-@register_pass("prepare_for_compile")
 @register_transformer("sum")
 class Sum(Transformer):
     def validate(self, op, **kwargs):
@@ -844,7 +829,6 @@ class Sum(Transformer):
 
 @register_pass("validate")
 @register_pass("fuse_transpose")
-@register_pass("prepare_for_compile")
 @register_transformer("BatchNorm")
 class BatchNorm(Transformer):
     def rewrite(self, op, **kwargs):
@@ -992,7 +976,6 @@ class Slice(Transformer):
 @register_pass("fuse_transpose")
 @register_pass("rewrite")
 @register_pass("quantize")
-@register_pass("prepare_for_compile")
 @register_transformer("Reshape")
 class Reshape(Transformer):
     def compile(self, op, **kwargs):
@@ -1041,7 +1024,6 @@ class Custom(Transformer):
 @register_pass("rewrite")
 @register_pass("quantize")
 @register_pass("calculate_ops")
-@register_pass("prepare_for_compile")
 @register_transformer("clip")
 class Clip(Transformer):
     def compile(self, op, **kwargs):
@@ -1053,7 +1035,6 @@ class Clip(Transformer):
         return get_nnvm_op(op_name)(*childs, **new_attrs)
 
 
-@register_pass("prepare_for_compile")
 @register_transformer('_minimum')
 class Minimum(Transformer):
     def compile(self, op, **kwargs):
@@ -1064,7 +1045,6 @@ class Minimum(Transformer):
                 name=N.n('_minimum'), **attrs)
 
 
-@register_pass("prepare_for_compile")
 @register_transformer('_maximum')
 class Maximum(Transformer):
     def compile(self, op, **kwargs):
@@ -1076,20 +1056,17 @@ class Maximum(Transformer):
 
 
 @register_pass('compile')
-@register_pass("prepare_for_compile")
 @register_transformer('max')
 class Max(Transformer):
     pass
 
 
 @register_pass('compile')
-@register_pass("prepare_for_compile")
 @register_transformer('min')
 class Min(Transformer):
     pass
 
 
-@register_pass("prepare_for_compile")
 @register_transformer('argmax')
 class Argmax(Transformer):
     def compile(self, op, **kwargs):
@@ -1103,7 +1080,6 @@ class Argmax(Transformer):
                 name=N.n('_argmax'), **new_attrs)
 
 
-@register_pass("prepare_for_compile")
 @register_transformer('argmin')
 class Argmax(Transformer):
     def compile(self, op, **kwargs):
@@ -1118,7 +1094,6 @@ class Argmax(Transformer):
 
 
 @register_pass("compile")
-@register_pass("prepare_for_compile")
 @register_transformer("abs")
 class Abs(Transformer):
     pass
@@ -1128,7 +1103,6 @@ class Abs(Transformer):
 @register_pass("validate")
 @register_pass("calculate_ops")
 @register_pass("rewrite")
-@register_pass("prepare_for_compile")
 @register_transformer("elemwise_add")
 class ElemwiseAdd(Transformer):
     def fuse_transpose(self, op, **kwargs):
@@ -1142,7 +1116,6 @@ class ElemwiseAdd(Transformer):
 @register_pass("validate")
 @register_pass("calculate_ops")
 @register_pass("rewrite")
-@register_pass("prepare_for_compile")
 @register_transformer("elemwise_sub")
 class ElemwiseSub(Transformer):
     def fuse_transpose(self, op, **kwargs):
@@ -1178,7 +1151,6 @@ class Dropout(Transformer):
 @register_pass("calculate_ops")
 @register_pass("rewrite")
 @register_pass("quantize")
-@register_pass("prepare_for_compile")
 @register_transformer("_arange")
 class Arange(Transformer):
     pass
@@ -1189,7 +1161,6 @@ class Arange(Transformer):
 @register_pass("fuse_transpose")
 @register_pass("rewrite")
 @register_pass("quantize")
-@register_pass("prepare_for_compile")
 @register_transformer("tile")
 class Tile(Transformer):
     pass

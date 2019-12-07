@@ -8,7 +8,6 @@ from mxnet import ndarray as nd
 import nnvm as nnvm
 import tvm
 from tvm import relay
-import transformer as tfm
 from sym_utils import *
 from utils import *
 
