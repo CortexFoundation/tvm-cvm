@@ -384,24 +384,6 @@ class BoxNms(Transformer):
 @register_pass("fuse_transpose")
 @register_transformer('slice_like')
 class SliceLike(Transformer):
-    # def quantize(self, op, **kwargs):
-    #     th_dict, scales = kwargs['th_dict'], kwargs['scales']
-    #     name, op_name = op.attr('name'), op.attr('op_name')
-    #     childs, attr = sym_iter(op.get_children()), op.list_attr()
-    #     cns = [c.attr('name') for c in childs] if childs else []
-
-    #     oprec = kwargs['op_input_precs'][op_name]
-    #     X, _, xs = requant(childs[0], oprec, oname=name, **kwargs)
-    #     oscale = scales[name] = xs
-    #     op = get_mxnet_op(op_name)(X, childs[1], **attr, name=name)
-    #     kwargs['precs'][name][OUT_KEY] = get_bit(th_dict[name] * oscale)
-
-    #     logger = logging.getLogger('log.mrt.realize')
-    #     logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
-    #            op_name, name, scales[name], cns)
-    #     op = requant_output(op, name, **kwargs)
-    #     return op
-
     def compile(self, op, **kwargs):
         childs = kwargs['childs']
         attrs = kwargs['attr']
@@ -1221,6 +1203,24 @@ class Tile(Transformer):
 @register_transformer("negative")
 class Negative(Transformer):
     pass
+
+
+@register_pass("validate")
+@register_pass("calculate_ops")
+@register_pass("fuse_transpose")
+@register_transformer("SwapAxis")
+class SwapAxis(Transformer):
+    def rewrite(self, op, **kwargs):
+        name = op.attr('name')
+        attr, childs = op.list_attr(), sym_iter(op.get_children())
+
+        dim1, dim2 = get_attr(attr, 'dim1', 0), get_attr(attr, 'dim2', 0)
+        if dim1 == dim2:
+            return childs[0]
+        ndims = len(kwargs['infer_shapes'][name][get_entry_id(childs[0])])
+        new_axes = [i for i in range(ndims)]
+        new_axes[dim1], new_axes[dim2] = dim2, dim1
+        return mx.sym.transpose(childs[0], tuple(new_axes), name=name)
 
 
 def _ft_multi_input(op):
