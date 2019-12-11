@@ -207,7 +207,7 @@ def test_sym_nnvm(batch_size, iter_num):
 if __name__ == '__main__':
     utils.log_init()
 
-    zoo.save_model('yolo3_darknet53_voc')
+    # zoo.save_model('yolo3_darknet53_voc')
 
     test_mrt_quant(1, 100)
     # test_sym_nnvm(16, 0)

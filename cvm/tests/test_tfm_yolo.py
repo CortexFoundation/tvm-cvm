@@ -78,8 +78,6 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratch=0):
         sym_file, param_file = load_fname("_darknet53_voc")
         sym, params = mx.sym.load(sym_file), nd.load(param_file)
         mrt = MRT(sym, params, input_shape)
-        mrt.prepare()
-        # print (collect_op_names(mrt._sym, mrt._prm))
         # exit()
         keys = [
           'yolov30_yolooutputv30_expand_dims0',
@@ -93,7 +91,7 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratch=0):
           'yolov30_yolooutputv32_broadcast_add1',
         ]
         base, base_params, top, top_params, top_inputs_ext \
-                = split_model(mrt._sym, mrt._prm, {'data': input_shape}, keys)
+                = split_model(mrt.csym, mrt.cprm, {'data': input_shape}, keys)
         dump_sym, dump_params = load_fname("_darknet53_voc", "mrt.base")
         open(dump_sym, "w").write(base.tojson())
         nd.save(dump_params, base_params)
@@ -148,9 +146,9 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratch=0):
         mrt.set_threshold('yolov30_yolooutputv30_tile0', 416)
         mrt.set_threshold('yolov30_yolooutputv31_tile0', 416)
         mrt.set_threshold('yolov30_yolooutputv32_tile0', 416)
-        mrt.set_fixed('yolov30_yolooutputv30_broadcast_add1')
-        mrt.set_fixed('yolov30_yolooutputv31_broadcast_add1')
-        mrt.set_fixed('yolov30_yolooutputv32_broadcast_add1')
+        # mrt.set_fixed('yolov30_yolooutputv30_broadcast_add1')
+        # mrt.set_fixed('yolov30_yolooutputv31_broadcast_add1')
+        # mrt.set_fixed('yolov30_yolooutputv32_broadcast_add1')
         mrt.set_output_prec(30)
         qbase, qbase_params, qbase_inputs_ext = mrt.quantize()
         oscales = mrt.get_output_scales()
@@ -178,7 +176,7 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratch=0):
             return node
         qsym, qparams = merge_model(qbase, qbase_params,
                 top, top_params, maps, box_nms)
-        oscales2 = [oscales[0], oscales[3], oscales[4]]
+        oscales2 = [oscales[1], oscales[0], oscales[2]]
         sym_file, param_file, ext_file = \
                 load_fname("_darknet53_voc", "mrt.all.quantize", True)
         open(sym_file, "w").write(qsym.tojson())
@@ -234,10 +232,8 @@ def test_sym_nnvm(batch_size, iter_num):
 if __name__ == '__main__':
     utils.log_init()
 
-    zoo.save_model('yolo3_darknet53_voc')
+    # zoo.save_model('yolo3_darknet53_voc')
 
-    from_scratch = 2
-    test_mrt_quant(16, 10, from_scratch) #85% --> 75%
-    # TODO: improve precision
-    # original mrt precision: 85% --> 86%
+    from_scratch = 0
+    test_mrt_quant(16, 10, from_scratch)
     #test_sym_nnvm(16, 0)

@@ -127,17 +127,12 @@ class MulScalar(Transformer):
         infer_shapes = kwargs['infer_shapes']
         name = op.attr('name')
         scalar = get_attr(op.list_attr(), 'scalar')
-        if scalar == 0:
-            shp = infer_shapes[name][get_entry_id(op)]
-            params[name] = nd.zeros(shp)
-            op = mx.sym.var(name, shape=shp)
-        else:
-            X = op.get_children()[0]
-            sname = N.n('scalar')
-            params[sname] = nd.array([scalar])
-            graph[sname] = mx.sym.var(sname, shape=(1,))
-            op = mx.sym.broadcast_mul(X, graph[sname], name=name)
-        return op
+
+        X = op.get_children()[0]
+        sname = N.n('scalar')
+        params[sname] = nd.array([scalar])
+        graph[sname] = mx.sym.var(sname, shape=(1,))
+        return mx.sym.broadcast_mul(X, graph[sname], name=name)
 
 
 @register_pass("validate")
@@ -254,7 +249,6 @@ class Convolution(Transformer):
         return op
 
     def quantize(self, op, **kwargs):
-        # return _restore(op, **kwargs)
         return _quantize_xwb(op, **kwargs)
 
     def calculate_ops(self, op, **kwargs):
@@ -380,10 +374,13 @@ class BoxNms(Transformer):
 @register_pass("validate")
 @register_pass("rewrite")
 @register_pass("calculate_ops")
-@register_pass("quantize")
 @register_pass("fuse_transpose")
 @register_transformer('slice_like')
 class SliceLike(Transformer):
+    def quantize(self, op, **kwargs):
+        # TODO: restore
+        return _quantize_scale(op, **kwargs)
+
     def compile(self, op, **kwargs):
         childs = kwargs['childs']
         attrs = kwargs['attr']
@@ -434,7 +431,6 @@ class FullyConnected(Transformer):
         return op
 
     def quantize(self, op, **kwargs):
-        # return _restore(op, **kwargs)
         return _quantize_xwb(op, **kwargs)
 
     def compile(self, op, **kwargs):
@@ -516,7 +512,6 @@ class FullyConnected(Transformer):
 @register_transformer("sigmoid")
 class Sigmoid(Transformer):
     def quantize(self, op, **kwargs):
-        # return _restore(op, **kwargs)
         return _quantize_table(op, **kwargs)
 
 
@@ -527,7 +522,6 @@ class Sigmoid(Transformer):
 @register_transformer("exp")
 class Exp(Transformer):
     def quantize(self, op, **kwargs):
-        # return _restore(op, **kwargs)
         return _quantize_table(op, **kwargs)
 
 
@@ -610,7 +604,8 @@ class Softmax(Transformer):
 @register_transformer("Pooling")
 class Pooling(Transformer):
     def validate(self, op, **kwargs):
-        name, attr = op.attr('name'), op.list_attr()
+        name, op_name  = op.attr('name'), op.attr('op_name')
+        attr = op.list_attr()
         layout = get_attr(attr, 'layout', 'NCHW')
         assert layout == 'NCHW'
         pool_type = get_attr(attr, 'pool_type', 'max')
@@ -620,11 +615,18 @@ class Pooling(Transformer):
         assert get_attr(attr, 'count_include_pad', True), \
             "Pooling(%s) only supported count_include_pad for True." % name
 
-        global_pool = get_attr(attr, 'global_pool', False)
-        pooling_convention = get_attr(attr, 'pooling_convention', 'valid')
-        assert pooling_convention == 'valid' or global_pool, \
-            "Pooling(%s) only supported convention for valid." % name
-
+        if pool_type == 'avg':
+            global_pool = get_attr(attr, 'global_pool', False)
+            pooling_convention = get_attr(attr, 'pooling_convention', 'valid')
+            if pooling_convention == 'full':
+                msg = "%s(%s attr=%s) not match attribute %s (%s vs. %s)"
+                assert global_pool, msg % (name, op_name, attr,
+                    'pooling_convention&global_pool',
+                    [attr['pooling_convention'], attr['global_pool']],
+                    ['full', 'True'])
+            else:
+                assert pooling_convention == 'valid' or global_pool, \
+                    "Pooling(%s) only supported convention for valid." % name
         return op
 
     def compile(self, op, **kwargs):
@@ -711,18 +713,26 @@ class Pooling(Transformer):
 @register_transformer("broadcast_mul")
 class BroadcastMul(Transformer):
     def quantize(self, op, **kwargs):
-        # return _restore(op, **kwargs)
-        scales = kwargs['scales']
+        params = kwargs['params']
+        th_dict = kwargs['th_dict']
+        precs, scales = kwargs['precs'], kwargs['scales']
         name, op_name = op.attr('name'), op.attr('op_name')
         childs, attr = sym_iter(op.get_children()), op.list_attr()
         cns = [c.attr('name') for c in childs] if childs else []
+
+        if cns[1] in params and params[cns[1]].shape == (1,) and \
+                params[cns[1]].asnumpy().tolist()[0] == 0:
+            scales[name] = 1
+            precs[name][OUT_KEY] = 1
+            th_dict[name] = 0
+            return op
 
         oprec = kwargs['op_input_precs'][op_name]
         X, xprec, xs = requant(childs[0], oprec, oname=name, **kwargs)
         B, bprec, bs = requant(childs[1], oprec, oname=name, **kwargs)
         oscale = scales[name] = xs * bs
         op = get_mxnet_op(op_name)(X, B, **attr, name=name)
-        kwargs['precs'][name][OUT_KEY] = get_bit(kwargs['th_dict'][name]*oscale)
+        precs[name][OUT_KEY] = get_bit(th_dict[name]*oscale)
 
         logger = logging.getLogger('log.mrt.realize')
         logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
@@ -739,7 +749,27 @@ class BroadcastMul(Transformer):
 @register_transformer("broadcast_add")
 class BroadcastAdd(Transformer):
     def quantize(self, op, **kwargs):
-        # return _restore(op, **kwargs)
+        params = kwargs['params']
+        th_dict = kwargs['th_dict']
+        precs = kwargs['precs']
+        scales = kwargs['scales']
+
+        name = op.attr('name')
+        childs = sym_iter(op.get_children())
+        cns = [c.attr('name') for c in childs]
+        ths = [th_dict[cn] for cn in cns]
+
+        if ths[0] == 0 or ths[1] == 0:
+            if ths[0] == 0 and ths[1] == 0:
+                th_dict[name], precs[name], scales[name] = 0, { OUT_KEY: 1 }, 1
+                return op
+            cn = cns[1] if ths[0] == 0 else cns[0]
+            bit = get_bit(params[cn]) if cn in params else precs[cn][OUT_KEY]
+            scales[name] = 1 if cn in params else scales[cn]
+            precs[name] = { OUT_KEY: bit }
+            th_dict[name] = get_range(bit)
+            return op
+
         return _quantize_scale(op, **kwargs)
 
 
@@ -787,7 +817,6 @@ class Concat(Transformer):
         return op
 
     def quantize(self, op, **kwargs):
-        # return _restore(op, **kwargs)
         return _quantize_scale(op, **kwargs)
 
     def compile(self, op, **kwargs):
@@ -1137,7 +1166,6 @@ class ElemwiseAdd(Transformer):
         return _ft_multi_input(op)
 
     def quantize(self, op, **kwargs):
-        # return _restore(op, **kwargs)
         return _quantize_scale(op, **kwargs)
 
 
@@ -1151,7 +1179,6 @@ class ElemwiseSub(Transformer):
         return _ft_multi_input(op)
 
     def quantize(self, op, **kwargs):
-        # return _restore(op, **kwargs)
         return _quantize_scale(op, **kwargs)
 
 

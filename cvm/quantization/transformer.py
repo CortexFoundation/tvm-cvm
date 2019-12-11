@@ -23,26 +23,25 @@ def init(symbol, params, input_shape=None):
 
 class MRT(object):
     def __init__(self, symbol, params, input_shape, input_prec=8):
-        self._sym = symbol
-        self._prm = params
+        self.csym, self.cprm = symbol, params
         self._ishp = input_shape
 
         self._data = None
         self._fixed = set()
 
         self.precs = {}
-        self._update_precs()
-        self.precs['data'][OUT_KEY] = input_prec
+        self.precs['data'] = { OUT_KEY: input_prec }
         self.th_dict = {}
         self.scales = {}
 
-        self._qsym = None
-        self._qprm = None
         self._qext = None
 
         self.op_input_precs = self._op_default_input_precs()
-        self._sym, self._prm = init(self._sym, self._prm, self._ishp)
+        self.csym, self.cprm = init(self.csym, self.cprm, self._ishp)
+        self.csym, self.cprm = self._prepare()
+        self._update_precs()
 
+        self.rsym, self.rprm = self.csym, self.cprm
 
     def compile(self, model_name):
         logger = logging.getLogger('mrt.compile')
@@ -92,23 +91,23 @@ class MRT(object):
                     params[name] = tvm.nd.array(val.astype('int8'), ctx)
         return params
 
-    def prepare(self):
+    def _prepare(self):
         self._lgr = logging.getLogger('mrt')
         self._lgr.info("Graph initialize and reduce...")
 
-        _sym, _prm = self._sym, self._prm
+        _sym, _prm = self.csym, self.cprm
         orig_ops = calculate_ops(_sym, _prm)
         _sym, _prm = fuse_constant(_sym, _prm)
         _sym, _prm = fuse_transpose(_sym, _prm)
         _sym, _prm = rewrite(_sym, _prm)
-        self._sym, self._prm = fuse_constant(_sym, _prm)
+        _sym, _prm = fuse_constant(_sym, _prm)
 
-        self._update_precs()
         self._lgr.info("Original ops[%s] reduced into %s",
                 orig_ops, calculate_ops(_sym, _prm))
+        return _sym, _prm
 
     def calibrate(self, ctx=mx.cpu(), lambd=None, old_ths=None):
-        self.th_dict = sym_calibrate(self._sym, self._prm, self._data,
+        self.th_dict = sym_calibrate(self.csym, self.cprm, self._data,
                 ctx=ctx, lambd=lambd, old_ths=old_ths)
         return self.th_dict
 
@@ -118,10 +117,10 @@ class MRT(object):
             assert False
 
         self._check_fixed()
-        self._qsym, self._qprm = quantize(self._sym, self._prm,
+        self.csym, self.cprm = quantize(self.csym, self.cprm,
                 self.th_dict, self.precs, self.scales, self.op_input_precs)
         self._get_ext()
-        return self._qsym, self._qprm, self._qext
+        return self.csym, self.cprm, self._qext
 
     def set_data(self, data):
         self._data = data
@@ -136,7 +135,7 @@ class MRT(object):
         self.precs['data'][OUT_KEY] = prec
 
     def set_output_prec(self, prec):
-        for sym in self._sym:
+        for sym in self.csym:
             name = sym.attr('name')
             self.precs[name][name] = prec
 
@@ -151,7 +150,7 @@ class MRT(object):
 
     def get_output_scales(self):
         oscales = []
-        for s in self._qsym:
+        for s in self.csym:
             name = s.attr('name')
             if name in self.scales:
                 oscales.append(self.scales[name])
@@ -160,15 +159,15 @@ class MRT(object):
         return oscales
 
     def get_maps(self):
-        return dict(zip([c.attr('name') for c in self._qsym],
-                    [c.attr('name') for c in self._sym]))
+        return dict(zip([c.attr('name') for c in self.csym],
+                    [c.attr('name') for c in self.rsym]))
 
     def _op_default_input_precs(self):
         op_precs = {}
         for n in ['Convolution', 'FullyConnected', 'sigmoid', 'exp', 'softmax']:
             op_precs[n] = 8
         op_precs['sum'] = 8
-        for n in ['broadcast_add', 'broadcast_sub', 'elemwise_add', 'elemwise_sub']:
+        for n in ['broadcast_add', 'broadcast_sub', 'elemwise_add', 'elemwise_sub', 'slice_like']:
             op_precs[n] = 16
         op_precs['broadcast_mul'] = 16
         op_precs['Concat'] = 16
@@ -177,7 +176,7 @@ class MRT(object):
         return op_precs
 
     def _update_precs(self):
-        for sym in topo_sort(self._sym):
+        for sym in topo_sort(self.csym):
             name = sym.attr('name')
             if name not in self.precs:
                 self.precs[name] = {}
@@ -189,13 +188,13 @@ class MRT(object):
             'target_bit': self.precs['data'][OUT_KEY], } }
 
     def _check_fixed(self):
-        for sym in topo_sort(self._sym):
+        for sym in topo_sort(self.csym):
             name, op_name = sym.attr('name'), sym.attr('op_name')
             if name not in self._fixed:
                 continue
-            assert op_name == 'null'
-            if is_params(sym, self._prm):
-                bit = get_bit(self._prm[name])
+            assert op_name == 'null', (op_name, name)
+            if is_params(sym, self.cprm):
+                bit = get_bit(self.cprm[name])
                 self.precs[name] = { OUT_KEY: bit, }
             else:
                 bit = self.precs[name][OUT_KEY]
@@ -245,7 +244,6 @@ def validate_model(sym_path, prm_path, ctx, num_channel=3, input_size=224,
 
     # prepare
     mrt = MRT(sym, params, input_shape)
-    mrt.prepare()
     mrt.set_data(data)
 
     # calibrate

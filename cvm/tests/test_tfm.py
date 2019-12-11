@@ -86,5 +86,5 @@ if __name__ == '__main__':
     # test_densenet161()            # 77% --> 0% # check
     # test_qd10_resnetv1_20()       # 83% --> 36% # check
     # test_shufflenet_v1()          # 64% --> 61%
-    # test_squeezenet()             # not valid: Pooling
+    # test_squeezenet()             # 57% --> 55%
 
