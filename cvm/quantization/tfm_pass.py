@@ -240,6 +240,58 @@ def collect_op_names(symbol, params):
             attr_name='op_name', func=op_names.add)
     return op_names
 
+@N.register_nm("fmo")
+def fuse_multiple_outputs(symbol, params):
+    infer_shapes = infer_shape(symbol, params)
+    channel, graph = {}, {}
+    for sym in topo_sort(symbol):
+        name, op_name = sym.attr('name'), sym.attr('op_name')
+        childs, attr = sym_iter(sym.get_children()), sym.list_attr()
+        if childs is not None:
+            childs = [get_node(c, graph) for c in childs]
+            sym = get_mxnet_op(op_name)(*childs, **attr, name=name)
+        if op_name == 'SliceChannel':
+            # Only designed for special usei, thus
+            # check of "SliceChannel" has not been added to _sym_check
+            assert childs is not None and len(childs) == 1, \
+                "Invalid Layer: %s, the 'SliceChannel' \
+                operator must have exactly one input" % name
+            axis = get_attr(attr, 'axis', 1)
+            num_outputs = get_attr(attr, 'num_outputs')
+            chchild_shape = infer_shapes[childs[0].attr('name')]
+            eid = get_entry_id(childs[0])
+            dim = chchild_shape[eid][axis]
+            assert num_outputs > 0 and dim % num_outputs == 0, \
+                "Invalid Layer: %s, the 'SliceChannel' operator \
+                has a wrong attribute, 'num_outputs': %d" \
+                % (name, num_outputs)
+            stride = int(dim / num_outputs)
+            interval = [(i * stride, (i + 1) * stride) \
+                       for i in range(num_outputs)]
+            channel[name] = [childs, axis, interval]
+        elif childs is not None:
+            is_split = False
+            for i in range(len(childs)):
+                cname = childs[i].attr('name')
+                if cname in channel:
+                    is_split = True
+                    eid = get_entry_id(childs[i])
+                    chchilds, axis, interval = channel[cname]
+                    begin, end = interval[eid]
+                    chattr = {'axis': axis, 'begin': begin, 'end': end}
+                    slp_name = N.n('slice_axis')
+                    if slp_name not in graph:
+                        graph[slp_name] = mx.sym.slice_axis(*chchilds,
+                                **chattr, name=slp_name)
+                    childs[i] = graph[slp_name]
+            if is_split:
+                sym = get_mxnet_op(op_name)(*childs, **attr, name=name)
+        graph[name] = sym
+
+    nodes = [get_node(sym, graph) for sym in symbol]
+    ret = mx.sym.Group(nodes) if len(nodes) > 1 else nodes[0]
+    return ret, params
+
 # === MRT ===
 
 def _get_opt(out, lambd):

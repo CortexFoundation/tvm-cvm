@@ -13,9 +13,9 @@ from transformer import *
 
 import logging
 
-def load_fname(version, suffix=None, with_ext=False):
+def load_fname(suffix=None, with_ext=False):
     suffix = "."+suffix if suffix is not None else ""
-    prefix = "./data/yolo3%s%s"%(version, suffix)
+    prefix = "./data/ssd_512_resnet50_v1_voc%s"%(suffix)
     return utils.extend_fname(prefix, with_ext)
 
 def validate(net, val_data, eval_metric, iter_num, logger=logging):
@@ -53,13 +53,13 @@ def validate_data(net, data, label, eval_metric):
     acc = {k:v for k,v in zip(map_name, mean_ap)}['mAP']
     return acc
 
-def test_mrt_quant(batch_size=1, iter_num=10, from_scratch=0):
+def test_mrt_quant(batch_size=1, iter_num=10, from_scratchi=0):
     logger = logging.getLogger("log.test.mrt.quantize")
     flag = [False]*from_scratch + [True]*(4-from_scratch)
 
-    ctx = mx.gpu(2)
+    ctx = mx.gpu(1)
     qctx = mx.gpu(3)
-    input_size = 416
+    input_size = 512
     input_shape = (batch_size, 3, input_size, input_size)
 
     # define data iter function, get:
@@ -75,35 +75,31 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratch=0):
     base, base_params, top, top_params, top_inputs_ext = \
             None, None, None, None, None
     if flag[0]:
-        sym_file, param_file = load_fname("_darknet53_voc")
+        sym_file, param_file = load_fname()
         sym, params = mx.sym.load(sym_file), nd.load(param_file)
         mrt = MRT(sym, params, input_shape)
         keys = [
-          'yolov30_yolooutputv30_expand_dims0',
-          'yolov30_yolooutputv31_expand_dims0',
-          'yolov30_yolooutputv32_expand_dims0',
-          'yolov30_yolooutputv30_tile0',
-          'yolov30_yolooutputv31_tile0',
-          'yolov30_yolooutputv32_tile0',
-          'yolov30_yolooutputv30_broadcast_add1',
-          'yolov30_yolooutputv31_broadcast_add1',
-          'yolov30_yolooutputv32_broadcast_add1',
+          "ssd0_multiperclassdecoder0_concat0",
+          "ssd0_multiperclassdecoder0__mulscalar0",
+
+          "ssd0_multiperclassdecoder0_slice_axis0",
+          "ssd0_multiperclassdecoder0_zeros_like1",
+
+          "ssd0_normalizedboxcenterdecoder0_concat0",
         ]
         base, base_params, top, top_params, top_inputs_ext \
                 = split_model(mrt.csym, mrt.cprm, {'data': input_shape}, keys)
-        dump_sym, dump_params = load_fname("_darknet53_voc", "mrt.base")
+        dump_sym, dump_params = load_fname("mrt.base")
         open(dump_sym, "w").write(base.tojson())
         nd.save(dump_params, base_params)
-        dump_sym, dump_params, dump_ext = \
-                load_fname("_darknet53_voc", "mrt.top", True)
+        dump_sym, dump_params, dump_ext = load_fname("mrt.top", True)
         open(dump_sym, "w").write(top.tojson())
         nd.save(dump_params, top_params)
         sim.save_ext(dump_ext, top_inputs_ext)
     else:
-        dump_sym, dump_params = load_fname("_darknet53_voc", "mrt.base")
+        dump_sym, dump_params = load_fname("mrt.base")
         base, base_params = mx.sym.load(dump_sym), nd.load(dump_params)
-        dump_sym, dump_params, dump_ext = \
-                load_fname("_darknet53_voc", "mrt.top", True)
+        dump_sym, dump_params, dump_ext = load_fname("mrt.top", True)
         top, top_params = mx.sym.load(dump_sym), nd.load(dump_params)
         (top_inputs_ext,) = sim.load_ext(dump_ext)
 
@@ -119,41 +115,39 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratch=0):
     th_dict = None
     if flag[1]:
         mrt = MRT(base, base_params, input_shape)
-        for i in range(1):
+        for i in range(16):
             data, _ = data_iter_func()
             mrt.set_data(data)
-            mrt.calibrate(ctx=ctx)
-        _, _, dump_ext = load_fname("_darknet53_voc", "mrt.dict", True)
-        th_dict = mrt.th_dict
+            th_dict = mrt.calibrate(ctx=ctx)
+        _, _, dump_ext = load_fname("mrt.dict", True)
         sim.save_ext(dump_ext, th_dict)
     else:
-        _, _, dump_ext = load_fname("_darknet53_voc", "mrt.dict", True)
+        _, _, dump_ext = load_fname("mrt.dict", True)
         (th_dict,) = sim.load_ext(dump_ext)
 
     # quantize split model, get:
     # qbase, qbase_params, qbase_inputs_ext, oscales, maps
     qbase, qbase_params, qbase_inputs_ext, oscales, maps = \
             None, None, None, None, None
-    if flag[2]:
+    if True:
         mrt = MRT(base, base_params, input_shape)
         mrt.set_th_dict(th_dict)
         mrt.set_threshold('data', 2.64)
-        mrt.set_threshold('yolov30_yolooutputv30_expand_dims0', 1)
-        mrt.set_threshold('yolov30_yolooutputv31_expand_dims0', 1)
-        mrt.set_threshold('yolov30_yolooutputv32_expand_dims0', 1)
-        mrt.set_threshold('yolov30_yolooutputv30_tile0', 416)
-        mrt.set_threshold('yolov30_yolooutputv31_tile0', 416)
-        mrt.set_threshold('yolov30_yolooutputv32_tile0', 416)
+        mrt.set_fixed("ssd0_multiperclassdecoder0_concat0")
+        mrt.set_fixed("ssd0_multiperclassdecoder0__mulscalar0")
+        mrt.set_fixed("ssd0_multiperclassdecoder0_zeros_like1")
+        mrt.set_threshold("ssd0_multiperclassdecoder0_slice_axis0", 1)
+        #  mrt.set_threshold("ssd0_normalizedboxcenterdecoder0_concat0", 512)
         mrt.set_output_prec(30)
         qbase, qbase_params, qbase_inputs_ext = mrt.quantize()
         oscales = mrt.get_output_scales()
         maps = mrt.get_maps()
-        dump_sym, dump_params, dump_ext = load_fname("_darknet53_voc", "mrt.quantize", True)
+        dump_sym, dump_params, dump_ext = load_fname("mrt.quantize", True)
         open(dump_sym, "w").write(qbase.tojson())
         nd.save(dump_params, qbase_params)
         sim.save_ext(dump_ext, qbase_inputs_ext, oscales, maps)
     else:
-        qb_sym, qb_params, qb_ext = load_fname("_darknet53_voc", "mrt.quantize", True)
+        qb_sym, qb_params, qb_ext = load_fname("mrt.quantize", True)
         qbase, qbase_params = mx.sym.load(qb_sym), nd.load(qb_params)
         qbase_inputs_ext, oscales, maps = sim.load_ext(qb_ext)
 
@@ -161,25 +155,35 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratch=0):
     # qsym, qparams, oscales2
     qsym, qparams = None, None
     if flag[3]:
+        name_maps = {
+            # "ssd0_slice_axis41": "ssd0_multiperclassdecoder0_concat0",
+            "ssd0_slice_axis41": "ssd0_multiperclassdecoder0_zeros_like1",
+            "ssd0_slice_axis42": "ssd0_multiperclassdecoder0_slice_axis0",
+            "ssd0_slice_axis43": "ssd0_normalizedboxcenterdecoder0_concat0",
+        }
+        oscales_dict = dict(zip([c.attr('name') for c in base], oscales))
+        oscales2 = [oscales_dict[name_maps[c.attr('name')]] for c in top]
+
         def box_nms(node, params, graph):
             name, op_name = node.attr('name'), node.attr('op_name')
             childs, attr = sutils.sym_iter(node.get_children()), node.list_attr()
-            if op_name == '_contrib_box_nms':
+            if op_name == '_greater_scalar':
+                valid_thresh = sutils.get_attr(attr, 'scalar', 0)
+                attr['scalar'] = int(valid_thresh * oscales[1])
+                node = sutils.get_mxnet_op(op_name)(*childs, **attr, name=name)
+            elif op_name == '_contrib_box_nms':
                 valid_thresh = sutils.get_attr(attr, 'valid_thresh', 0)
-                attr['valid_thresh'] = int(valid_thresh * oscales[3])
+                attr['valid_thresh'] = int(valid_thresh * oscales[1])
                 node = sutils.get_mxnet_op(op_name)(*childs, **attr, name=name)
             return node
         qsym, qparams = merge_model(qbase, qbase_params,
                 top, top_params, maps, box_nms)
-        oscales2 = [oscales[1], oscales[0], oscales[2]]
-        sym_file, param_file, ext_file = \
-                load_fname("_darknet53_voc", "mrt.all.quantize", True)
+        sym_file, param_file, ext_file = load_fname("mrt.all.quantize", True)
         open(sym_file, "w").write(qsym.tojson())
         nd.save(param_file, qparams)
         sim.save_ext(ext_file, qbase_inputs_ext, oscales2)
     else:
-        dump_sym, dump_params, dump_ext = \
-                load_fname("_darknet53_voc", "mrt.all.quantize", True)
+        dump_sym, dump_params, dump_ext = load_fname("mrt.all.quantize", True)
         qsym, qparams = mx.sym.load(dump_sym), nd.load(dump_params)
         _, oscales2 = sim.load_ext(dump_ext)
 
@@ -203,7 +207,7 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratch=0):
             data = sim.load_real_data(data, 'data', qbase_inputs_ext)
             outs = net2(data.as_in_context(qctx))
             outs = [o.as_in_context(ctx) / oscales2[i] \
-                    for i, o in enumerate(outs)]
+                   for i, o in enumerate(outs)]
             return outs
         acc = validate_data(net, data, label, net2_metric)
         return "{:6.2%}".format(acc)
@@ -216,17 +220,33 @@ def test_sym_nnvm(batch_size, iter_num):
     logger = logging.getLogger("log.test.nnvm")
     logger.info("=== Log Test NNVM ===")
 
-    sym_file, param_file, ext_file = load_fname("_darknet53_voc", "mrt.all.quantize", True)
+    sym_file, param_file, ext_file = load_fname("mrt.all.quantize", True)
     sym, params = mx.sym.load(sym_file), nd.load(param_file)
     inputs_ext, _ = sim.load_ext(ext_file)
-    nnvm_sym, nnvm_params = spass.mxnet_to_nnvm(sym, params, inputs_ext)
-    spass.cvm_build(nnvm_sym, nnvm_params, inputs_ext, *load_fname("_darknet53_voc", "nnvm"))
+    val_data = dataset.load_voc(1, 512)
+    val_data_iter = iter(val_data)
+    data, _ = next(val_data_iter)
+
+    if False:
+        data = sim.load_real_data(data, 'data', inputs_ext)
+        inputs_ext['data']['data'] = data
+        spass.sym_dump_ops(sym, params, inputs_ext,
+                datadir="/data/wlt", ctx=mx.gpu(1),
+                cleanDir=True, ops=[
+                    "broadcast_div0",
+                ])
+    else:
+        _mrt.std_dump(sym, params, inputs_ext, data, "ssd_ryt", max_num=100)
+
+    #  nnvm_sym, nnvm_params = spass.mxnet_to_nnvm(sym, params, inputs_ext)
+    #  spass.cvm_build(nnvm_sym, nnvm_params, inputs_ext, *load_fname("nnvm"))
 
 if __name__ == '__main__':
     utils.log_init()
 
-    # zoo.save_model('yolo3_darknet53_voc')
+    # zoo.save_model('ssd_512_resnet50_v1_voc')
 
-    from_scratch = 0
-    test_mrt_quant(16, 10, from_scratch) # 0% --> 0%
-    #test_sym_nnvm(16, 0)
+    from_scratch = 2
+    test_mrt_quant(1, 100, from_scratch)
+    # test_sym_nnvm(16, 0)
+

@@ -410,6 +410,12 @@ class SliceAxis(Transformer):
         return get_mxnet_op('slice')(X, begin=begin, end=end, name=name)
 
 
+@register_pass("validate")
+@register_transformer("SliceChannel")
+class SliceChannel(Transformer):
+    pass
+
+
 @register_transformer('UpSampling')
 class UpSampling(Transformer):
     def compile(self, op, **kwargs):
@@ -1248,6 +1254,70 @@ class SwapAxis(Transformer):
         new_axes = [i for i in range(ndims)]
         new_axes[dim1], new_axes[dim2] = dim2, dim1
         return mx.sym.transpose(childs[0], tuple(new_axes), name=name)
+
+
+@register_pass("validate")
+@register_pass("calculate_ops")
+@register_pass("fuse_transpose")
+@register_transformer("_plus_scalar")
+class PlusScalar(Transformer):
+    def rewrite(self, op, **kwargs):
+        name = op.attr('name')
+        attr, childs = op.list_attr(), sym_iter(op.get_children())
+
+        scalar = get_attr(attr, 'scalar')
+        if scalar == 0:
+            return childs[0]
+        sname = N.n('scalar')
+        kwargs['params'][sname] = nd.array([scalar])
+        kwargs['graph'][sname] = offset = mx.sym.var(sname, shape=(1,))
+        return mx.sym.broadcast_add(childs[0], offset, name=name)
+
+
+@register_pass("validate")
+@register_pass("calculate_ops")
+@register_pass("fuse_transpose")
+@register_transformer("zeros_like")
+class ZerosLike(Transformer):
+    def rewrite(self, op, **kwargs):
+        name = op.attr('name')
+        shp = kwargs['infer_shapes'][name][get_entry_id(op)]
+        kwargs['params'][name] = nd.zeros(shp)
+        return mx.sym.var(name, shape=shp)
+
+
+@register_pass("validate")
+@register_pass("calculate_ops")
+@register_pass("fuse_transpose")
+@register_transformer("ones_like")
+class OnesLike(Transformer):
+    def rewrite(self, op, **kwargs):
+        name = op.attr('name')
+        shp = kwargs['infer_shapes'][name][get_entry_id(op)]
+        kwargs['params'][name] = nd.ones(shp)
+        return mx.sym.var(name, shape=shp)
+
+
+@register_pass("validate")
+@register_pass("calculate_ops")
+@register_pass("fuse_transpose")
+@register_transformer("_greater_scalar")
+class GreaterScalar(Transformer):
+    def rewrite(self, op, **kwargs):
+        name = op.attr('name')
+        shp = kwargs['infer_shapes'][name][get_entry_id(op)]
+        kwargs['params'][name] = nd.zeros(shp)
+        return mx.sym.var(name, shape=shp)
+
+
+@register_pass("validate")
+@register_pass("calculate_ops")
+@register_pass("fuse_transpose")
+@register_pass("rewrite")
+@register_pass("quantize")
+@register_transformer("where")
+class Where(Transformer):
+    pass
 
 
 def _ft_multi_input(op):

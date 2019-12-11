@@ -96,6 +96,7 @@ class MRT(object):
         self._lgr.info("Graph initialize and reduce...")
 
         _sym, _prm = self.csym, self.cprm
+        _sym, _prm = fuse_multiple_outputs(_sym, _prm)
         orig_ops = calculate_ops(_sym, _prm)
         _sym, _prm = fuse_constant(_sym, _prm)
         _sym, _prm = fuse_transpose(_sym, _prm)
