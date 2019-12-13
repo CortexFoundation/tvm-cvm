@@ -6,7 +6,7 @@ import nnvm
 import tvm
 from tvm.contrib import graph_runtime
 
-from quant_utils import *
+# from quant_utils import *
 import utils
 import mrt as _mrt
 import sym_annotate as anno
@@ -184,5 +184,5 @@ def test_nnvm_pass(iter_num=10):
 print ("Test mnist", version)
 # train_mnist()
 utils.log_init()
-# test_sym_pass(1000)
-test_nnvm_pass(10)
+test_sym_pass(1000)
+# test_nnvm_pass(10)

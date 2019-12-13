@@ -88,9 +88,11 @@ if __name__ == '__main__':
     # test_resnet("50_v1d_0.86")    # not valid: Pooling count_include_pad:True
     # test_resnet("18_v1b_0.89")    # 68% --> 64%
     # test_resnet("50_v2")          # 77% --> 74%
-    test_densenet161()            # 77% --> 0% # check
+    # test_densenet161()            # 77% --> 0% # check
     # test_qd10_resnetv1_20()       # 83% --> 36% # check
     # test_shufflenet_v1()          # 64% --> 61%
     # test_squeezenet()             # 57% --> 55%
     # test_vgg()                    # 78% --> 78%
+
+    # TODO: mnist, octconv, quickdraw 
 
