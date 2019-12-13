@@ -115,7 +115,7 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratchi=0):
     th_dict = None
     if flag[1]:
         mrt = MRT(base, base_params, input_shape)
-        for i in range(16):
+        for i in range(1):
             data, _ = data_iter_func()
             mrt.set_data(data)
             th_dict = mrt.calibrate(ctx=ctx)
@@ -129,7 +129,7 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratchi=0):
     # qbase, qbase_params, qbase_inputs_ext, oscales, maps
     qbase, qbase_params, qbase_inputs_ext, oscales, maps = \
             None, None, None, None, None
-    if True:
+    if flag[2]:
         mrt = MRT(base, base_params, input_shape)
         mrt.set_th_dict(th_dict)
         mrt.set_threshold('data', 2.64)
@@ -137,7 +137,7 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratchi=0):
         mrt.set_fixed("ssd0_multiperclassdecoder0__mulscalar0")
         mrt.set_fixed("ssd0_multiperclassdecoder0_zeros_like1")
         mrt.set_threshold("ssd0_multiperclassdecoder0_slice_axis0", 1)
-        #  mrt.set_threshold("ssd0_normalizedboxcenterdecoder0_concat0", 512)
+        # mrt.set_threshold("ssd0_normalizedboxcenterdecoder0_concat0", 512)
         mrt.set_output_prec(30)
         qbase, qbase_params, qbase_inputs_ext = mrt.quantize()
         oscales = mrt.get_output_scales()
@@ -156,8 +156,7 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratchi=0):
     qsym, qparams = None, None
     if flag[3]:
         name_maps = {
-            # "ssd0_slice_axis41": "ssd0_multiperclassdecoder0_concat0",
-            "ssd0_slice_axis41": "ssd0_multiperclassdecoder0_zeros_like1",
+            "ssd0_slice_axis41": "ssd0_multiperclassdecoder0_concat0",
             "ssd0_slice_axis42": "ssd0_multiperclassdecoder0_slice_axis0",
             "ssd0_slice_axis43": "ssd0_normalizedboxcenterdecoder0_concat0",
         }
@@ -246,7 +245,7 @@ if __name__ == '__main__':
 
     # zoo.save_model('ssd_512_resnet50_v1_voc')
 
-    from_scratch = 2
-    test_mrt_quant(1, 100, from_scratch)
+    from_scratch = 0
+    test_mrt_quant(16, 100, from_scratch) # 80% -- > 80%
     # test_sym_nnvm(16, 0)
 

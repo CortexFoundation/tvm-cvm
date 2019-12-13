@@ -193,18 +193,21 @@ class Activation(Transformer):
 @register_transformer("Convolution")
 class Convolution(Transformer):
     def validate(self, op, **kwargs):
-        op = self._validate_layout(op)
-        W = sym_iter(op.get_children())[1]
-        W_shp = kwargs['infer_shapes'][W.attr('name')][get_entry_id(W)]
-        I, KH, KW = W_shp[1:]
-        assert I*KH*KW < 65536, "convolution ops overflow"
+        op = self._validate_layout(op, **kwargs)
         return op
 
-    def _validate_layout(self, op):
-        name = op.attr('name')
+    def _validate_overflow(self, op, **kwargs):
+        W = sym_iter(op.get_children())[1]
+        W_shp = kwargs['infer_shapes'][W.attr('name')][get_entry_id(W)]
+        assert np.prod(W_shp[1:]) < 65536, "Convolution ops overflow"
+
+    def _validate_layout(self, op, **kwargs):
+        params = kwargs['params']
+        name, op_name = op.attr('name'), op.attr('op_name')
         childs, attr = sym_iter(op.get_children()), op.list_attr()
         X, W = childs[0], childs[1]
         X_name, W_name = X.attr('name'), W.attr('name')
+
         layout = get_attr(attr, 'layout', "NCHW")
         if layout == "NCW":
             no_bias = get_attr(attr, 'no_bias', False)
@@ -220,13 +223,15 @@ class Convolution(Transformer):
             }
             X = mx.sym.expand_dims(X, axis=3)
             params[W_name] = params[W_name].expand_dims(axis=3)
-            W = graph[W_name] = mx.sym.var(W_name, shape=params[W_name].shape)
+            W = kwargs['graph'][W_name] = mx.sym.var(W_name, shape=params[W_name].shape)
             B = None if no_bias else childs[2]
             op = get_mxnet_op(op_name)(X, W, B, **attr, name=name)
+            self._validate_overflow(op, **kwargs)
             op = mx.sym.squeeze(op, axis=3)
         else:
             assert layout == "NCHW", "Convolution(%s) only supported \
                     NCHW layout vs. %s" % (name, layout)
+            self._validate_overflow(op, **kwargs)
         return op
 
     def rewrite(self, op, **kwargs):
@@ -297,8 +302,31 @@ class ExpandDims(Transformer):
         return get_nnvm_op(op_name)(*childs, **new_attrs)
 
 
+@register_pass("validate")
+@register_pass("calculate_ops")
+@register_pass("fuse_transpose")
+@register_pass("rewrite")
 @register_transformer('Embedding')
 class Embedding(Transformer):
+    def quantize(self, op, **kwargs):
+        th_dict, scales = kwargs['th_dict'], kwargs['scales']
+        name, op_name = op.attr('name'), op.attr('op_name')
+        attr, childs = op.list_attr(), sym_iter(op.get_children())
+        cns = [c.attr('name') for c in childs]
+
+        iprec = kwargs['op_input_precs'][op_name]
+        X, xs = childs[0], scales[cns[0]]
+        if xs != 1:
+            X, _, _ = requant_parameter(X, 32, 1)
+        W, wprec, ws = requant_parameter(cns[1], iprec, oname=name, **kwargs)
+        th_dict[name] = th_dict[cns[1]]
+        scales[name] = ws
+        kwargs['precs'][name][OUT_KEY] = get_bit(th_dict[name]*ws)
+        op  = get_mxnet_op(op_name)(X, W, **attr, name=name)
+
+        op = requant_output(op, name, **kwargs)
+        return op
+
     def compile(self, op, **kwargs):
         childs = kwargs['childs']
         attrs = kwargs['attr']
@@ -1118,7 +1146,11 @@ class Maximum(Transformer):
                 name=N.n('_maximum'), **attrs)
 
 
-@register_pass('compile')
+@register_pass("validate")
+@register_pass("fuse_transpose")
+@register_pass("rewrite")
+@register_pass("quantize")
+@register_pass("calculate_ops")
 @register_transformer('max')
 class Max(Transformer):
     pass
@@ -1280,6 +1312,7 @@ class PlusScalar(Transformer):
 @register_transformer("zeros_like")
 class ZerosLike(Transformer):
     def rewrite(self, op, **kwargs):
+        # TODO: dynamic shape
         name = op.attr('name')
         shp = kwargs['infer_shapes'][name][get_entry_id(op)]
         kwargs['params'][name] = nd.zeros(shp)
@@ -1292,6 +1325,7 @@ class ZerosLike(Transformer):
 @register_transformer("ones_like")
 class OnesLike(Transformer):
     def rewrite(self, op, **kwargs):
+        # TODO: dynamic shape
         name = op.attr('name')
         shp = kwargs['infer_shapes'][name][get_entry_id(op)]
         kwargs['params'][name] = nd.ones(shp)
@@ -1301,13 +1335,10 @@ class OnesLike(Transformer):
 @register_pass("validate")
 @register_pass("calculate_ops")
 @register_pass("fuse_transpose")
+@register_pass("rewrite")
 @register_transformer("_greater_scalar")
 class GreaterScalar(Transformer):
-    def rewrite(self, op, **kwargs):
-        name = op.attr('name')
-        shp = kwargs['infer_shapes'][name][get_entry_id(op)]
-        kwargs['params'][name] = nd.zeros(shp)
-        return mx.sym.var(name, shape=shp)
+    pass
 
 
 @register_pass("validate")
@@ -1319,6 +1350,15 @@ class GreaterScalar(Transformer):
 class Where(Transformer):
     pass
 
+
+@register_pass("validate")
+@register_pass("calculate_ops")
+@register_pass("fuse_transpose")
+@register_pass("rewrite")
+@register_pass("quantize")
+@register_transformer("squeeze")
+class Squeeze(Transformer):
+    pass
 
 def _ft_multi_input(op):
     name, childs = op.attr('name'), sym_iter(op.get_children())
