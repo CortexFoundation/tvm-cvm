@@ -945,7 +945,7 @@ class BatchNorm(Transformer):
             assert axis == 1, "Channel in input must be axis 1"
             cchilds, cattr = sym_iter(X.get_children()), X.list_attr()
 
-            conv_name = X.attr('name')
+            conv_name = N.n(name)
             W_name = cchilds[1].attr('name')
             weight = params[W_name]
             params[W_name] = weight * scale.reshape(*scale.shape, 1, 1, 1)
