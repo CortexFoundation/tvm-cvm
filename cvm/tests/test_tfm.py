@@ -48,7 +48,7 @@ def test_densenet161():
     sym_path = "./data/densenet161.json"
     prm_path = "./data/densenet161.params"
     ctx = [mx.gpu(int(i)) for i in "1,2,3,4,5".split(',') if i.strip()]
-    validate_model(sym_path, prm_path, ctx, batch_size=350, from_scratch=0)
+    validate_model(sym_path, prm_path, ctx, batch_size=16, from_scratch=0)
 
 def test_qd10_resnetv1_20():
     sym_path = "./data/quick_raw_qd_animal10_2_cifar_resnet20_v2.json"
@@ -88,7 +88,7 @@ if __name__ == '__main__':
     # test_resnet("50_v1d_0.86")    # not valid: Pooling count_include_pad:True
     # test_resnet("18_v1b_0.89")    # 68% --> 64%
     # test_resnet("50_v2")          # 77% --> 74%
-    # test_densenet161()            # 77% --> 0% # check
+    # test_densenet161()            # 81% --> 80% # check
     # test_qd10_resnetv1_20()       # 83% --> 80%
     # test_shufflenet_v1()          # 64% --> 61%
     # test_squeezenet()             # 57% --> 55%

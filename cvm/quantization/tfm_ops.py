@@ -948,8 +948,9 @@ class BatchNorm(Transformer):
             conv_name = N.n(name)
             W_name = cchilds[1].attr('name')
             weight = params[W_name]
-            params[W_name] = weight * scale.reshape(*scale.shape, 1, 1, 1)
-            W = mx.sym.var(W_name, shape=params[W_name].shape)
+            wn = N.n(W_name)
+            params[wn] = weight * scale.reshape(*scale.shape, 1, 1, 1)
+            W = mx.sym.var(wn, shape=params[W_name].shape)
 
             B_name = N.n('bias')
             if not get_attr(cattr, 'no_bias', False):
