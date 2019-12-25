@@ -43,9 +43,9 @@ class MRT(object):
 
         self.rsym, self.rprm = self.csym, self.cprm
 
-    def compile(self, model_name):
+    def compile(self, model_name, datadir='/data/std_out'):
         logger = logging.getLogger('mrt.compile')
-        datadir = "/data/std_out/" + model_name
+        datadir = path.join(datadir, model_name)
         sym, params = prepare_for_compile(self._qsym, self._qprm)
         nnvm_sym, _ = compile(sym, params)
         args = nnvm_sym.list_input_names()
@@ -62,7 +62,7 @@ class MRT(object):
             assert all(flat.astype('int32').astype('float32') == flat), msg
             real_params[key] = tvm.nd.array(value.astype(use_dtype).asnumpy(), tvm_ctx)
         return self.cvm_build(nnvm_sym, real_params,
-                datadir+"/symbol", datadir+"/params")
+                path.join(datadir,"symbol"), path.join(datadir,"params"))
 
     def cvm_build(self, nnvm_sym, nnvm_params, dump_sym, dump_params,
             target="cuda", logger=logging, dtype="int32"):

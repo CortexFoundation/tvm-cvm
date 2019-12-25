@@ -2,8 +2,26 @@ import mxnet as mx
 
 import utils
 from transformer import validate_model
+from gluon_zoo import save_mobilenet1_0
+from from_tensorflow import tf_dump_model
 
 from os import path
+
+def test_tf_resnet50_v1():
+    sym_path = "./data/tf_resnet50_v1.json"
+    prm_path = "./data/tf_resnet50_v1.params"
+    if not path.exists(sym_path) or not path.exists(prm_path):
+        tf_dump_model("resnet50_v1")
+    ctx = [mx.gpu(int(i)) for i in "4".split(',') if i.strip()]
+    validate_model(sym_path, prm_path, ctx)
+
+def test_tf_mobilenet():
+    sym_path = "./data/tf_mobilenet.json"
+    prm_path = "./data/tf_mobilenet.params"
+    if not path.exists(sym_path) or not path.exists(prm_path):
+        tf_dump_model("mobilenet")
+    ctx = [mx.gpu(int(i)) for i in "4".split(',') if i.strip()]
+    validate_model(sym_path, prm_path, ctx)
 
 def test_mobilenet1_0():
     sym_path = "./data/mobilenet1_0.json"
@@ -20,8 +38,10 @@ def test_mobilenet_v2_1_0():
     validate_model(sym_path, prm_path, ctx)
 
 def test_tf_inceptionv3():
-    sym_path = "./data/tf_inceptionv3.json"
-    prm_path = "./data/tf_inceptionv3.params"
+    sym_path = "./data/tf_inception_v3.json"
+    prm_path = "./data/tf_inception_v3.params"
+    if not path.exists(sym_path) or not path.exists(prm_path):
+        tf_dump_model("inception_v3")
     ctx = [mx.gpu(int(i)) for i in "4".split(',') if i.strip()]
     validate_model(sym_path, prm_path, ctx, input_size=299)
 
@@ -88,11 +108,16 @@ if __name__ == '__main__':
     # test_resnet("50_v1d_0.86")    # not valid: Pooling count_include_pad:True
     # test_resnet("18_v1b_0.89")    # 68% --> 64%
     # test_resnet("50_v2")          # 77% --> 74%
-    # test_densenet161()            # 81% --> 80% # check
+    # test_densenet161()            # 81% --> 80%
     # test_qd10_resnetv1_20()       # 83% --> 80%
     # test_shufflenet_v1()          # 64% --> 61%
     # test_squeezenet()             # 57% --> 55%
     # test_vgg()                    # 78% --> 78%
 
-    # TODO: mnist, octconv
+    # TODO: test
+    test_tf_mobilenet()
+    # test_tf_resnet50_v1()
+
+    # tf_dump_model("mobilenet")
+
 

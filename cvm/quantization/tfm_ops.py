@@ -286,6 +286,10 @@ class Convolution(Transformer):
         return get_nnvm_op(op_name)(*childs, name=N.n('convolution'),
                                     **new_attrs)
 
+# @register_transformer('Pad')
+# class Pad(Transformer):
+#     pass
+
 
 @register_pass("validate")
 @register_pass("calculate_ops")
@@ -1087,7 +1091,8 @@ class Custom(Transformer):
         attr = op.list_attr()
         op_type = attr['op_type']
         assert op_type in ['cvm_clip', 'cvm_left_shift',
-                        'cvm_right_shift', 'cvm_lut']
+                        'cvm_right_shift', 'cvm_lut'], \
+            "Invalid op_type:%s in Custom operator" % op_type
         return op
 
     def compile(self, op, **kwargs):

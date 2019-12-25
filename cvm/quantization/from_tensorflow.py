@@ -12,6 +12,7 @@ import logging
 import utils
 import cvm_op as cvm
 import numpy as np
+from tfm_pass import infer_shape
 # from python.tvm.relay.op import op as _op
 
 # import heapq
@@ -656,27 +657,77 @@ def convert_model(pbfile, layout="NHWC", outputs=None):
 
     return symbol, params
 
+def _fuse_pad(sym, params):
+    infer_shapes = infer_shape(sym, params)
+
+    def _fuse_custom_pad_transpose(sym, params, **kwargs):
+        name, op_name = sym.attr('name'), sym.attr('op_name')
+        attr, childs = sym.list_attr(), sutils.sym_iter(sym.get_children())
+        cattr = childs[0].list_attr() if childs else None
+
+        ret = sym
+        if op_name != 'transpose' or childs[0].attr('op_name') != 'Custom' or \
+                not cattr or 'op_type' not in cattr or \
+                cattr['op_type'] != 'cvm_pad':
+            return ret, params
+
+        padding = sutils.get_attr(cattr, 'padding')
+        axes = sutils.get_attr(attr, 'axes')
+        cchilds = sutils.sym_iter(childs[0].get_children())
+        X = mx.sym.transpose(*cchilds, axes=axes)
+        ret = mx.sym.Custom(X, padding=[padding[r] for r in axes],
+                op_type="cvm_pad")
+        return ret, params
+
+    def _fuse_custom_pad(sym, params, **kwargs):
+        name, op_name = sym.attr('name'), sym.attr('op_name')
+        attr, childs = sym.list_attr(), sutils.sym_iter(sym.get_children())
+
+        ret = sym
+        if op_name != 'Custom' or 'op_type' not in attr or \
+                attr['op_type'] != 'cvm_pad':
+            return ret, params
+
+        padding = nd.array(sutils.get_attr(attr, 'padding'))
+        padding = padding.reshape((-1,)).asnumpy().astype(np.int32).tolist()
+        ret = mx.sym.pad(*childs, mode='constant',
+                pad_width=tuple(padding))
+
+        return ret, params
+
+    sym, params = sutils.topo_visit_transformer(sym, params,
+            _fuse_custom_pad_transpose, infer_shapes=infer_shapes)
+    return sutils.topo_visit_transformer(sym, params, _fuse_custom_pad,
+            infer_shapes=infer_shapes)
+
 def dump(model, symbol, params):
+    logger = logging.getLogger('model dump')
     prefix = "./data/tf_%s" % (model)
     sym_file, params_file = utils.extend_fname(prefix)
     with open(sym_file, "w") as f:
         f.write(symbol.tojson())
+
+    snames = [s.attr('name') for s in sutils.topo_sort(symbol)]
+    items = dict(params.items())
+    for k, v in items.items():
+        if v.shape == ():
+            print ("%40s \t%s %s" % (k, type(v), v.shape),
+                    k in snames)
+            assert k not in snames
+            del params[k]
     nd.save(params_file, params)
     logger.info("Model successfully dumped to '%s'", sym_file)
 
-modelfile = [
-            # "/tmp/tf/resnet50_v1/model.pb",
-            "/data/tfmodels/inception_v3/model.pb",
-            # "/data/tfmodels/keras/inception_v3/model.pb",
-            "/data/tfmodels/mobilenet/model.pb"
-            ]
-
-if __name__ == '__main__':
+def tf_dump_model(modelname):
     utils.log_init()
-    model_path = modelfile[0]
+    model_path = modelfile[modelname]
     sym, params = convert_model(model_path)
-    dump("inceptionv3", sym, params)
+    sym, params = _fuse_pad(sym, params)
+    dump(modelname, sym, params)
 
-    model_path = modelfile[1]
-    convert_model(model_path)
-    dump("mobilenet", sym, params)
+modelfile = {
+                "resnet50_v1": "/data/tfmodels/resnet50_v1/model.pb",
+                "inception_v3": "/data/tfmodels/inception_v3/model.pb",
+                "mobilenet": "/data/tfmodels/mobilenet/model.pb",
+            }
+
