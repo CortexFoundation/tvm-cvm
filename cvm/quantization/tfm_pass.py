@@ -442,16 +442,26 @@ def requant_parameter(wname, oprec, oscale=None, **kwargs):
     logger = logging.getLogger('log.mrt.realize')
     Wn = N.n(wname)
 
-    oprec = kwargs['precs'][wname].get(kwargs['oname'], oprec)
-    oscale = oscale if oscale else scale(th_dict[wname], oprec)
-    params[Wn] = sim.int_realize(params[wname] * oscale, oprec, logger=logger)
-    attr = { 'precision': str(oprec) }
-    W = mx.sym.var(Wn, shape=params[Wn].shape, attr=attr)
+    W = None
+    if th_dict[wname] == 0:
+        oprec, oscale = 0, 1
+        shp = params[wname].shape
+        params[Wn] = nd.zeros(shp)
+        attr = { 'precision': '0' }
+        W = mx.sym.var(Wn, shape=shp, attr=attr)
+    else:
+        oprec = kwargs['precs'][wname].get(kwargs['oname'], oprec)
+        oscale = oscale if oscale else scale(th_dict[wname], oprec)
+        params[Wn] = sim.int_realize(params[wname] * oscale,
+                oprec, logger=logger)
+        attr = { 'precision': str(oprec) }
+        W = mx.sym.var(Wn, shape=params[Wn].shape, attr=attr)
 
     logger.debug(
-        "Parameter th_dict=%-12.8f name=%-40s requantize with scale=%-16.8f to" +
-        " prec=%s",
+        "Parameter th_dict=%-12.8f name=%-40s " + \
+        "requantize with scale=%-16.8f to prec=%s",
             th_dict[wname], wname, oscale, oprec)
+
     return W, oprec, oscale
 
 def requant(sym, oprec, oscale=None, **kwargs):

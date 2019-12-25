@@ -115,7 +115,7 @@ if __name__ == '__main__':
     # test_vgg()                    # 78% --> 78%
 
     # TODO: test
-    test_tf_mobilenet()
+    # test_tf_mobilenet()
     # test_tf_resnet50_v1()
 
     # tf_dump_model("mobilenet")

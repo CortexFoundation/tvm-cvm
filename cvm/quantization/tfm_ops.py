@@ -758,13 +758,6 @@ class BroadcastMul(Transformer):
         childs, attr = sym_iter(op.get_children()), op.list_attr()
         cns = [c.attr('name') for c in childs] if childs else []
 
-        if cns[1] in params and params[cns[1]].shape == (1,) and \
-                params[cns[1]].asnumpy().tolist()[0] == 0:
-            scales[name] = 1
-            precs[name][OUT_KEY] = 1
-            th_dict[name] = 0
-            return op
-
         oprec = kwargs['op_input_precs'][op_name]
         X, xprec, xs = requant(childs[0], oprec, oname=name, **kwargs)
         B, bprec, bs = requant(childs[1], oprec, oname=name, **kwargs)
