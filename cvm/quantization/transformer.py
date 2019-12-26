@@ -11,16 +11,6 @@ from os import path
 
 #TODO(wlt): control available api for MRT
 
-def init(symbol, params, input_shape=None):
-    if input_shape is not None:
-        symbol, params = attach_input_shape(symbol, params,
-            {'data': input_shape})
-    sym, params = graph_validate(symbol, params)
-    infer_shape(sym, params) # check infer_shape is correct.
-    sym, params = validate(sym, params)
-    return sym, params
-
-
 class MRT(object):
     def __init__(self, symbol, params, input_shape, input_prec=8):
         self.csym, self.cprm = symbol, params
@@ -37,13 +27,13 @@ class MRT(object):
         self._qext = None
 
         self.op_input_precs = self._op_default_input_precs()
-        self.csym, self.cprm = init(self.csym, self.cprm, self._ishp)
         self.csym, self.cprm = self._prepare()
         self._update_precs()
 
         self.rsym, self.rprm = self.csym, self.cprm
 
     def compile(self, model_name, datadir='/data/std_out'):
+        # TODO: change name
         logger = logging.getLogger('mrt.compile')
         datadir = path.join(datadir, model_name)
         sym, params = prepare_for_compile(self._qsym, self._qprm)
@@ -96,6 +86,13 @@ class MRT(object):
         self._lgr.info("Graph initialize and reduce...")
 
         _sym, _prm = self.csym, self.cprm
+        if self._ishp is not None:
+            _sym, _prm = attach_input_shape(_sym, _prm,
+                {'data': self._ishp})
+        _sym, _prms = graph_validate(_sym, _prm)
+        infer_shape(_sym, _prm) # check infer_shape is correct.
+        _sym, _params = validate(_sym, _prm)
+
         _sym, _prm = fuse_multiple_outputs(_sym, _prm)
         orig_ops = calculate_ops(_sym, _prm)
         _sym, _prm = fuse_constant(_sym, _prm)

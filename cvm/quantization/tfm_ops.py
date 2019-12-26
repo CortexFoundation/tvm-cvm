@@ -254,7 +254,25 @@ class Convolution(Transformer):
         return op
 
     def quantize(self, op, **kwargs):
-        return _quantize_xwb(op, **kwargs)
+        infer_prec = self._infer_precision(op, **kwargs)
+        return _quantize_xwb(op, infer_prec=infer_prec, **kwargs)
+
+    def _infer_precision(self, op, **kwargs):
+        precs, params = kwargs['precs'], kwargs['params']
+
+        attr, childs = op.list_attr(), sym_iter(op.get_children())
+        cns = [c.attr('name') for c in childs]
+
+        px = precs[cns[0]][OUT_KEY]
+        pw = get_bit(params[cns[1]])
+        k = nd.prod(nd.array(params[cns[1]].shape[1:])).asscalar()
+        infer_prec = math.ceil(math.log2(k))*(px+pw) + 1
+
+        if not get_attr(attr, 'no_bias', False):
+            infer_prec = max(infer_prec, get_bit(params[cns[2]])+1)
+
+        return infer_prec
+
 
     def calculate_ops(self, op, **kwargs):
         W = sym_iter(op.get_children())[1]
@@ -1416,12 +1434,15 @@ def _quantize_xwb(op, **kwargs):
             oname=name, **kwargs)
     oscale = scales[name] = ws * xs
     op = get_mxnet_op(op_name)(X, W, B, **attr, name=name)
-    kwargs['precs'][name][OUT_KEY] = get_bit(th_dict[name] * oscale)
+
+    # kwargs['precs'][name][OUT_KEY] = get_bit(th_dict[name] * oscale)
+    kwargs['precs'][name][OUT_KEY] = kwargs['infer_prec']
 
     logger = logging.getLogger('log.mrt.realize')
     logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
            op_name, name, scales[name], cns)
-    op = requant_output(op, name, **kwargs)
+    # op = requant_output(op, name, **kwargs)
+    op = requant_output_clip(op, name, **kwargs)
     return op
 
 def _restore(op, **kwargs):

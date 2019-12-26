@@ -391,7 +391,11 @@ def requant_operator(X, oprec, oscale=None, **kwargs):
     logger = logging.getLogger('log.mrt.realize')
     params, graph = kwargs['params'], kwargs['graph']
     th_dict, precs = kwargs['th_dict'], kwargs['precs']
+    scales = kwargs['scales']
     xopn, xn = X.attr('op_name'), X.attr('name')
+
+    if th_dict[xn] == 0:
+        return X, 1, oscale if oscale else 1
 
     exactly = True if oscale else False
     oprec = precs[xn].get(kwargs['oname'], oprec)
@@ -444,10 +448,10 @@ def requant_parameter(wname, oprec, oscale=None, **kwargs):
 
     W = None
     if th_dict[wname] == 0:
-        oprec, oscale = 0, 1
+        oprec, oscale = 1, 1
         shp = params[wname].shape
         params[Wn] = nd.zeros(shp)
-        attr = { 'precision': '0' }
+        attr = { 'precision': '1' }
         W = mx.sym.var(Wn, shape=shp, attr=attr)
     else:
         oprec = kwargs['precs'][wname].get(kwargs['oname'], oprec)
@@ -456,6 +460,15 @@ def requant_parameter(wname, oprec, oscale=None, **kwargs):
                 oprec, logger=logger)
         attr = { 'precision': str(oprec) }
         W = mx.sym.var(Wn, shape=params[Wn].shape, attr=attr)
+
+    '''
+    oprec = kwargs['precs'][wname].get(kwargs['oname'], oprec)
+    oscale = oscale if oscale else scale(th_dict[wname], oprec)
+    params[Wn] = sim.int_realize(params[wname] * oscale,
+            oprec, logger=logger)
+    attr = { 'precision': str(oprec) }
+    W = mx.sym.var(Wn, shape=params[Wn].shape, attr=attr)
+    '''
 
     logger.debug(
         "Parameter th_dict=%-12.8f name=%-40s " + \
@@ -479,5 +492,29 @@ def requant_output(op, name, **kwargs):
     th_dict[oname] = th_dict[name]
     precs[oname] = precs[name]
     scales[oname] = scales[name]
+    return op
+
+def requant_output_clip(op, name, **kwargs):
+    infer_shapes, th_dict = kwargs['infer_shapes'], kwargs['th_dict']
+    precs, scales = kwargs['precs'], kwargs['scales']
+
+    oname = op.attr('name')
+    infer_shapes[oname] = infer_shapes[name]
+    th_dict[oname] = th_dict[name]
+    precs[oname] = precs[name]
+    scales[oname] = scales[name]
+
+    infer_prec = precs[oname][OUT_KEY]
+    tight_prec = get_bit(th_dict[oname] * scales[oname])
+
+    if infer_prec > tight_prec:
+        op = mx.sym.Custom(op, precision=tight_prec,
+                name=N.n('clip'), op_type='cvm_clip')
+        clip_name = op.attr('name')
+        infer_shapes[clip_name] = infer_shapes[oname]
+        th_dict[clip_name] = th_dict[oname]
+        precs[clip_name] = { OUT_KEY: tight_prec }
+        scales[clip_name] = scales[oname]
+
     return op
 
