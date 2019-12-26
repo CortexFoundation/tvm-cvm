@@ -10,7 +10,8 @@ from os import path
 def test_tf_resnet50_v1():
     sym_path = "./data/tf_resnet50_v1.json"
     prm_path = "./data/tf_resnet50_v1.params"
-    if not path.exists(sym_path) or not path.exists(prm_path):
+    # if not path.exists(sym_path) or not path.exists(prm_path):
+    if True:
         tf_dump_model("resnet50_v1")
     ctx = [mx.gpu(int(i)) for i in "4".split(',') if i.strip()]
     validate_model(sym_path, prm_path, ctx)
@@ -18,7 +19,8 @@ def test_tf_resnet50_v1():
 def test_tf_mobilenet():
     sym_path = "./data/tf_mobilenet.json"
     prm_path = "./data/tf_mobilenet.params"
-    if not path.exists(sym_path) or not path.exists(prm_path):
+    # if not path.exists(sym_path) or not path.exists(prm_path):
+    if True:
         tf_dump_model("mobilenet")
     ctx = [mx.gpu(int(i)) for i in "4".split(',') if i.strip()]
     validate_model(sym_path, prm_path, ctx)
@@ -115,9 +117,8 @@ if __name__ == '__main__':
     # test_vgg()                    # 78% --> 78%
 
     # TODO: test
-    # test_tf_mobilenet()
-    # test_tf_resnet50_v1()
+    # test_tf_mobilenet()           # 0% --> 0%, maybe due to pad
+    test_tf_resnet50_v1()
 
-    # tf_dump_model("mobilenet")
 
 

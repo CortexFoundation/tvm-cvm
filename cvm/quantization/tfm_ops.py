@@ -7,6 +7,7 @@ import nnvm
 
 import numpy as np
 
+# TODO(ryt): infer precision for ops
 
 @register_pass("validate")
 @register_pass("rewrite")
@@ -254,25 +255,7 @@ class Convolution(Transformer):
         return op
 
     def quantize(self, op, **kwargs):
-        infer_prec = self._infer_precision(op, **kwargs)
-        return _quantize_xwb(op, infer_prec=infer_prec, **kwargs)
-
-    def _infer_precision(self, op, **kwargs):
-        precs, params = kwargs['precs'], kwargs['params']
-
-        attr, childs = op.list_attr(), sym_iter(op.get_children())
-        cns = [c.attr('name') for c in childs]
-
-        px = precs[cns[0]][OUT_KEY]
-        pw = get_bit(params[cns[1]])
-        k = nd.prod(nd.array(params[cns[1]].shape[1:])).asscalar()
-        infer_prec = math.ceil(math.log2(k))*(px+pw) + 1
-
-        if not get_attr(attr, 'no_bias', False):
-            infer_prec = max(infer_prec, get_bit(params[cns[2]])+1)
-
-        return infer_prec
-
+        return _quantize_xwb(op, **kwargs)
 
     def calculate_ops(self, op, **kwargs):
         W = sym_iter(op.get_children())[1]
@@ -304,9 +287,14 @@ class Convolution(Transformer):
         return get_nnvm_op(op_name)(*childs, name=N.n('convolution'),
                                     **new_attrs)
 
-# @register_transformer('Pad')
-# class Pad(Transformer):
-#     pass
+@register_pass("validate")
+@register_pass("calculate_ops")
+@register_pass("rewrite")
+@register_pass("quantize")
+@register_transformer('Pad')
+class Pad(Transformer):
+    def fuse_transpose(self, op, **kwargs):
+        return op
 
 
 @register_pass("validate")
@@ -1422,6 +1410,7 @@ def _quantize_xwb(op, **kwargs):
     name, op_name = op.attr('name'), op.attr('op_name')
     childs, attr = sym_iter(op.get_children()), op.list_attr()
     cns = [c.attr('name') for c in childs] if childs else []
+    infer_prec = _infer_precision_xwb(op, **kwargs)
 
     oprec = kwargs['op_input_precs'][op_name]
     X, xprec, xs = requant_operator(childs[0], oprec, oname=name, **kwargs)
@@ -1436,7 +1425,7 @@ def _quantize_xwb(op, **kwargs):
     op = get_mxnet_op(op_name)(X, W, B, **attr, name=name)
 
     # kwargs['precs'][name][OUT_KEY] = get_bit(th_dict[name] * oscale)
-    kwargs['precs'][name][OUT_KEY] = kwargs['infer_prec']
+    kwargs['precs'][name][OUT_KEY] = infer_prec
 
     logger = logging.getLogger('log.mrt.realize')
     logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
@@ -1444,6 +1433,22 @@ def _quantize_xwb(op, **kwargs):
     # op = requant_output(op, name, **kwargs)
     op = requant_output_clip(op, name, **kwargs)
     return op
+
+def _infer_precision_xwb(op, **kwargs):
+    precs, params = kwargs['precs'], kwargs['params']
+
+    attr, childs = op.list_attr(), sym_iter(op.get_children())
+    cns = [c.attr('name') for c in childs]
+
+    px = precs[cns[0]][OUT_KEY]
+    pw = get_bit(params[cns[1]])
+    k = nd.prod(nd.array(params[cns[1]].shape[1:])).asscalar()
+    infer_prec = math.ceil(math.log2(k))*(px+pw) + 1
+
+    if not get_attr(attr, 'no_bias', False):
+        infer_prec = max(infer_prec, get_bit(params[cns[2]])+1)
+
+    return infer_prec
 
 def _restore(op, **kwargs):
     params, graph = kwargs['params'], kwargs['graph']

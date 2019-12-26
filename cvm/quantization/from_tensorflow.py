@@ -411,7 +411,7 @@ def _reshape(inputs, attrs, params):
 
 
 _convert_map = {
-    'Add'                               : _elemwise('add'),
+    'Add'                               : _elemwise('elemwise_add'),
     'AvgPool'                           : _pool2d("avg"),
     'BiasAdd'                           : _bias_add,
     'ConcatV2'                          : _concat_v2,
@@ -697,8 +697,9 @@ def _fuse_pad(sym, params):
 
     sym, params = sutils.topo_visit_transformer(sym, params,
             _fuse_custom_pad_transpose, infer_shapes=infer_shapes)
-    return sutils.topo_visit_transformer(sym, params, _fuse_custom_pad,
+    sym, params = sutils.topo_visit_transformer(sym, params, _fuse_custom_pad,
             infer_shapes=infer_shapes)
+    return sym, params
 
 def dump(model, symbol, params):
     logger = logging.getLogger('model dump')
@@ -722,7 +723,7 @@ def tf_dump_model(modelname):
     utils.log_init()
     model_path = modelfile[modelname]
     sym, params = convert_model(model_path)
-    sym, params = _fuse_pad(sym, params)
+    # sym, params = _fuse_pad(sym, params)
     dump(modelname, sym, params)
 
 modelfile = {
