@@ -425,7 +425,7 @@ def requant_operator(X, oprec, oscale=None, **kwargs):
                     xopn, xn, rescale, sim_scale, frac, exp, scale_err)
         oscale = iscale * frac * (2 ** exp)
         if frac > 1:
-            X = realize(X, 0, iprec)
+            # X = realize(X, 0, iprec)
             var = mx_const(frac, graph, params)
             X = mx.sym.broadcast_mul(X, var, name=N.n("mrt_quantize_scale"))
         X = realize(X, -exp, oprec)
@@ -434,7 +434,7 @@ def requant_operator(X, oprec, oscale=None, **kwargs):
             " iprec=%s, iscale=%-10.5f, oprec=%s, oscale=%-10.5f",
                 xopn, xn, rescale, frac, exp, iprec, iscale, oprec, oscale)
     else:
-        X = realize(X, 0, oprec)
+        # X = realize(X, 0, oprec)
         oscale = iscale
         logger.debug(
             "Operator  %-20s name=%-40s clip with iprec=%s, oprec=%s",
