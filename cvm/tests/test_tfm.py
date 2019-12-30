@@ -117,7 +117,7 @@ if __name__ == '__main__':
 
     # TODO: test
     # test_tf_mobilenet()           # 0% --> 0%, maybe due to pad
-    # test_tf_resnet50_v1()
+    test_tf_resnet50_v1()           # 0% --> 0%
 
 
 

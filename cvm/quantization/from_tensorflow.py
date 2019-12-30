@@ -690,14 +690,42 @@ def _fuse_pad(sym, params):
 
         padding = nd.array(sutils.get_attr(attr, 'padding'))
         padding = padding.reshape((-1,)).asnumpy().astype(np.int32).tolist()
+        print(padding)
         ret = mx.sym.pad(*childs, mode='constant',
                 pad_width=tuple(padding))
 
         return ret, params
 
+    def _fuse_pad_eq(sym, params, **kwargs):
+        name, op_name = sym.attr('name'), sym.attr('op_name')
+        attr, childs = sym.list_attr(), sutils.sym_iter(sym.get_children())
+
+        ret = sym
+        if op_name not in ['Convolution', 'Pooling'] or \
+                childs[0].attr('op_name') != 'Pad':
+            return ret, params
+
+        if 'pad' in attr:
+            assert sutils.get_attr(attr, 'pad') == (0, 0)
+
+        cattr = childs[0].list_attr()
+        pad_width = sutils.get_attr(cattr, 'pad_width')
+        if len(pad_width) != 8 or pad_width[4] != pad_width[5] or \
+                pad_width[6] != pad_width[7]:
+            return ret, params
+
+        attr['pad'] = (pad_width[4], pad_width[6])
+        X = sutils.sym_iter(childs[0].get_children()) + childs[1:]
+        ret = sutils.get_mxnet_op(op_name)(*X, **attr)
+
+        return ret, params
+
+
     sym, params = sutils.topo_visit_transformer(sym, params,
             _fuse_custom_pad_transpose, infer_shapes=infer_shapes)
     sym, params = sutils.topo_visit_transformer(sym, params, _fuse_custom_pad,
+            infer_shapes=infer_shapes)
+    sym, params = sutils.topo_visit_transformer(sym, params, _fuse_pad_eq,
             infer_shapes=infer_shapes)
     return sym, params
 
@@ -723,11 +751,11 @@ def tf_dump_model(modelname):
     utils.log_init()
     model_path = modelfile[modelname]
     sym, params = convert_model(model_path)
-    # sym, params = _fuse_pad(sym, params)
+    sym, params = _fuse_pad(sym, params)
     dump(modelname, sym, params)
 
 modelfile = {
-                "resnet50_v1": "/data/tfmodels/resnet50_v1/model.pb",
+                "resnet50_v1": "/data/tfmodels/resnet50_v1_new/model.pb",
                 "inception_v3": "/data/tfmodels/inception_v3/model.pb",
                 "mobilenet": "/data/tfmodels/mobilenet/model.pb",
             }
