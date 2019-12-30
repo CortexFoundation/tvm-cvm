@@ -63,14 +63,13 @@ def test_resnet(suffix):
     sym_path = "./data/resnet" + suffix + ".json"
     prm_path = "./data/resnet" + suffix + ".params"
     ctx = [mx.gpu(int(i)) for i in "4".split(',') if i.strip()]
-    validate_model(sym_path, prm_path, ctx, iter_num=100,
-            from_scratch=0, lambd=16)
+    validate_model(sym_path, prm_path, ctx, iter_num=100, lambd=16)
 
 def test_densenet161():
     sym_path = "./data/densenet161.json"
     prm_path = "./data/densenet161.params"
     ctx = [mx.gpu(int(i)) for i in "1,2,3,4,5".split(',') if i.strip()]
-    validate_model(sym_path, prm_path, ctx, batch_size=16, from_scratch=0)
+    validate_model(sym_path, prm_path, ctx, batch_size=16)
 
 def test_qd10_resnetv1_20():
     sym_path = "./data/quick_raw_qd_animal10_2_cifar_resnet20_v2.json"
@@ -100,25 +99,25 @@ def test_vgg():
 if __name__ == '__main__':
     utils.log_init()
 
-    # test_mobilenet1_0()           # 71% --> 63% # check
+    # test_mobilenet1_0()           # 71% --> 66% # check
     # test_mobilenet_v2_1_0()       # 73% --> 0%
-    # test_tf_inceptionv3()         # 56% --> 55%
+    # test_tf_inceptionv3()         # 56% --> 56%
     # test_alexnet()                # 56% --> 55%
     # test_cifar10_resnet20_v1()    # 91% --> 90%
-    # test_resnet("50_v1")          # 78% --> 75%
+    # test_resnet("50_v1")          # 78% --> 76%
     # test_resnet("18_v1")          # 70% --> 69%
     # test_resnet("50_v1d_0.86")    # not valid: Pooling count_include_pad:True
-    # test_resnet("18_v1b_0.89")    # 68% --> 64%
-    # test_resnet("50_v2")          # 77% --> 74%
+    # test_resnet("18_v1b_0.89")    # 68% --> 65%
+    # test_resnet("50_v2")          # 77% --> 75%
     # test_densenet161()            # 81% --> 80%
-    # test_qd10_resnetv1_20()       # 83% --> 80%
+    # test_qd10_resnetv1_20()       # 83% --> 83%
     # test_shufflenet_v1()          # 64% --> 61%
     # test_squeezenet()             # 57% --> 55%
     # test_vgg()                    # 78% --> 78%
 
     # TODO: test
     # test_tf_mobilenet()           # 0% --> 0%, maybe due to pad
-    test_tf_resnet50_v1()
+    # test_tf_resnet50_v1()
 
 
 

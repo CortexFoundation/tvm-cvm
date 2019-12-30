@@ -89,9 +89,9 @@ class MRT(object):
         if self._ishp is not None:
             _sym, _prm = attach_input_shape(_sym, _prm,
                 {'data': self._ishp})
-        _sym, _prms = graph_validate(_sym, _prm)
+        _sym, _prm = graph_validate(_sym, _prm)
         infer_shape(_sym, _prm) # check infer_shape is correct.
-        _sym, _params = validate(_sym, _prm)
+        _sym, _prm = validate(_sym, _prm)
 
         _sym, _prm = fuse_multiple_outputs(_sym, _prm)
         orig_ops = calculate_ops(_sym, _prm)
@@ -233,9 +233,6 @@ def validate_model(sym_path, prm_path, ctx, num_channel=3, input_size=224,
     sym, params = mx.sym.load(sym_path), mx.nd.load(prm_path)
 
     print (collect_op_names(sym, params))
-    print ("Registered Graph Pass")
-    for k, v in pass_info().items():
-        print ("%20s" % k, v)
 
     data_iter_func = ds.data_iter(ds_name, batch_size, input_size=input_size)
     data, _ = data_iter_func()

@@ -39,6 +39,7 @@ def validate(symbol, params):
     return topo_visit_transformer(symbol, params,
             apply_pass("validate", infer_shapes=infer_shapes))
 
+
 @N.register_nm("rewrite")
 def rewrite(symbol, params):
     infer_shapes = infer_shape(symbol, params)
@@ -320,7 +321,11 @@ def get_bit(opt):
         opt = opt.abs().max().asscalar()
     if opt == 0:
         return 1
-    return math.ceil(math.log2(opt)) + 1
+    return math.ceil(math.log2(opt+1)) + 1
+
+def get_bit_cnt(cnt):
+    assert isinstance(cnt, int) and cnt > 0
+    return math.ceil(math.log2(cnt))
 
 def get_range(prec):
     return (2 ** (prec - 1)) - 1
@@ -415,9 +420,19 @@ def requant_operator(X, oprec, oscale=None, **kwargs):
                     xopn, xn, sb, iscale, iprec)
     if exactly or iprec > oprec:
         rescale = oscale / iscale
-        frac, exp = sim.cvm_float(rescale, MAX_BIT - iprec)
+        # frac, exp = sim.cvm_float(rescale, MAX_BIT - iprec)
+        bits = MAX_BIT - iprec
+        frac, exp = sim.cvm_float(rescale, bits)
         sim_scale = frac * (2 ** exp)
         scale_err = abs((sim_scale - rescale) / rescale)
+        while not exactly and scale_err > 0.0000001:
+            # in order to guarantee that tight_prec <= infer_prec
+            # the precision of rescale must be improved as much as possible
+            bits += 1
+            assert bits < 33
+            frac, exp = sim.cvm_float(rescale, bits)
+            sim_scale = frac * (2 ** exp)
+            scale_err = abs((sim_scale - rescale) / rescale)
         if exactly and scale_err > 0.001:
             logger.warn(
                 "Operator  %-20s name=%-40s requantize to scale=%s " +
@@ -506,6 +521,7 @@ def requant_output_clip(op, name, **kwargs):
 
     infer_prec = precs[oname][OUT_KEY]
     tight_prec = get_bit(th_dict[oname] * scales[oname])
+    assert infer_prec >= tight_prec
 
     if infer_prec > tight_prec:
         op = mx.sym.Custom(op, precision=tight_prec,
@@ -517,4 +533,12 @@ def requant_output_clip(op, name, **kwargs):
         scales[clip_name] = scales[oname]
 
     return op
+
+def get_infer_precision(sym, **kwargs):
+    params = kwargs['params']
+    name = sym.attr('name')
+    if is_params(sym, params):
+        return get_bit(params[name])
+    else:
+        return kwargs['precs'][name][OUT_KEY]
 

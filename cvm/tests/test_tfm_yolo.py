@@ -227,6 +227,6 @@ if __name__ == '__main__':
 
     # zoo.save_model('yolo3_darknet53_voc')
 
-    from_scratch = 2
+    from_scratch = 0
     test_mrt_quant(16, 10, from_scratch) # 87% --> 87%
     #test_sym_nnvm(16, 0)
