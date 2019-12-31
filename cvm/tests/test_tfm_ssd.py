@@ -4,12 +4,12 @@ from mxnet.gluon import nn
 from mxnet import gluon
 
 import utils
-import mrt as _mrt
 import gluon_zoo as zoo
 import sym_pass as spass
 import sym_utils as sutils
 import sim_quant_helper as sim
 import dataset
+from transformer import *
 
 import logging
 
@@ -53,93 +53,91 @@ def validate_data(net, data, label, eval_metric):
     acc = {k:v for k,v in zip(map_name, mean_ap)}['mAP']
     return acc
 
-def test_mrt_quant(batch_size=1, iter_num=10):
+def test_mrt_quant(batch_size=1, iter_num=10, from_scratchi=0):
     logger = logging.getLogger("log.test.mrt.quantize")
+    flag = [False]*from_scratch + [True]*(4-from_scratch)
 
     ctx = mx.gpu(1)
     qctx = mx.gpu(3)
     input_size = 512
-    h, w = input_size, input_size
-    inputs_ext = { 'data': {
-        'shape': (batch_size, 3, h, w),
-    } }
+    input_shape = (batch_size, 3, input_size, input_size)
 
+    # define data iter function, get:
+    # get_iter_func
     val_data = dataset.load_voc(batch_size, input_size)
     val_data_iter = iter(val_data)
     def data_iter_func():
         data, label = next(val_data_iter)
         return data, label
 
-    sym_file, param_file = load_fname()
-    sym, params = mx.sym.load(sym_file), nd.load(param_file)
-    sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
-    keys = [
-      "ssd0_multiperclassdecoder0_concat0",
-      "ssd0_multiperclassdecoder0__mulscalar0",
+    # split model, get:
+    # base, base_params, top, top_params, top_inputs_ext 
+    base, base_params, top, top_params, top_inputs_ext = \
+            None, None, None, None, None
+    if flag[0]:
+        sym_file, param_file = load_fname()
+        sym, params = mx.sym.load(sym_file), nd.load(param_file)
+        mrt = MRT(sym, params, input_shape)
+        keys = [
+          "ssd0_multiperclassdecoder0_concat0",
+          "ssd0_multiperclassdecoder0__mulscalar0",
 
-      "ssd0_multiperclassdecoder0_slice_axis0",
-      "ssd0_multiperclassdecoder0_zeros_like1",
+          "ssd0_multiperclassdecoder0_slice_axis0",
+          "ssd0_multiperclassdecoder0_zeros_like1",
 
-      "ssd0_normalizedboxcenterdecoder0_concat0",
-    ]
-    base, base_params, base_inputs_ext, top, top_params, top_inputs_ext \
-            = _mrt.split_model(sym, params, inputs_ext, keys)
-    dump_sym, dump_params = load_fname("mrt.base")
-    open(dump_sym, "w").write(base.tojson())
-    nd.save(dump_params, base_params)
-    dump_sym, dump_params, dump_ext = load_fname("mrt.top", True)
-    open(dump_sym, "w").write(top.tojson())
-    nd.save(dump_params, top_params)
-    sim.save_ext(dump_ext, top_inputs_ext)
+          "ssd0_normalizedboxcenterdecoder0_concat0",
+        ]
+        base, base_params, top, top_params, top_inputs_ext \
+                = split_model(mrt.csym, mrt.cprm, {'data': input_shape}, keys)
+        dump_sym, dump_params = load_fname("mrt.base")
+        open(dump_sym, "w").write(base.tojson())
+        nd.save(dump_params, base_params)
+        dump_sym, dump_params, dump_ext = load_fname("mrt.top", True)
+        open(dump_sym, "w").write(top.tojson())
+        nd.save(dump_params, top_params)
+        sim.save_ext(dump_ext, top_inputs_ext)
+    else:
+        dump_sym, dump_params = load_fname("mrt.base")
+        base, base_params = mx.sym.load(dump_sym), nd.load(dump_params)
+        dump_sym, dump_params, dump_ext = load_fname("mrt.top", True)
+        top, top_params = mx.sym.load(dump_sym), nd.load(dump_params)
+        (top_inputs_ext,) = sim.load_ext(dump_ext)
 
-    dump_sym, dump_params = load_fname("mrt.base")
-    base, base_params = mx.sym.load(dump_sym), nd.load(dump_params)
-    dump_sym, dump_params, dump_ext = load_fname("mrt.top", True)
-    top, top_params = mx.sym.load(dump_sym), nd.load(dump_params)
-    (top_inputs_ext,) = sim.load_ext(dump_ext)
-
-    base_inputs = [mx.sym.var(n) for n in inputs_ext]
-    base_graph = mx.gluon.nn.SymbolBlock(base, base_inputs)
+    base_graph = mx.gluon.nn.SymbolBlock(base, [mx.sym.var('data')])
     utils.load_parameters(base_graph, base_params, ctx=ctx)
 
-    top_inputs = [mx.sym.var(n) for n in top_inputs_ext]
-    top_graph = mx.gluon.nn.SymbolBlock(top, top_inputs)
+    top_graph = mx.gluon.nn.SymbolBlock(top,
+            [mx.sym.var(n) for n in top_inputs_ext])
     utils.load_parameters(top_graph, top_params, ctx=ctx)
 
-    metric = dataset.load_voc_metric()
-    metric.reset()
-    def yolov3(data, label):
-       def net(data):
-           tmp = base_graph(data.as_in_context(ctx))
-           outs = top_graph(*tmp)
-           return outs
-       acc = validate_data(net, data, label, metric)
-       return "{:6.2%}".format(acc)
-
-    # utils.multi_validate(yolov3, data_iter_func,
-        # iter_num=iter_num, logger=logger)
-    # exit()
-
-    if True:
-        mrt = _mrt.MRT(base, base_params, inputs_ext)
-        for i in range(16):
+    # calibrate split model, get:
+    # th_dict
+    th_dict = None
+    if flag[1]:
+        mrt = MRT(base, base_params, input_shape)
+        for i in range(1):
             data, _ = data_iter_func()
-            mrt.set_data('data', data)
+            mrt.set_data(data)
             th_dict = mrt.calibrate(ctx=ctx)
         _, _, dump_ext = load_fname("mrt.dict", True)
         sim.save_ext(dump_ext, th_dict)
+    else:
+        _, _, dump_ext = load_fname("mrt.dict", True)
+        (th_dict,) = sim.load_ext(dump_ext)
 
-    _, _, dump_ext = load_fname("mrt.dict", True)
-    (th_dict,) = sim.load_ext(dump_ext)
-    if True:
-        mrt = _mrt.MRT(base, base_params, base_inputs_ext)
+    # quantize split model, get:
+    # qbase, qbase_params, qbase_inputs_ext, oscales, maps
+    qbase, qbase_params, qbase_inputs_ext, oscales, maps = \
+            None, None, None, None, None
+    if flag[2]:
+        mrt = MRT(base, base_params, input_shape)
         mrt.set_th_dict(th_dict)
         mrt.set_threshold('data', 2.64)
         mrt.set_fixed("ssd0_multiperclassdecoder0_concat0")
         mrt.set_fixed("ssd0_multiperclassdecoder0__mulscalar0")
         mrt.set_fixed("ssd0_multiperclassdecoder0_zeros_like1")
         mrt.set_threshold("ssd0_multiperclassdecoder0_slice_axis0", 1)
-        #  mrt.set_threshold("ssd0_normalizedboxcenterdecoder0_concat0", 512)
+        # mrt.set_threshold("ssd0_normalizedboxcenterdecoder0_concat0", 512)
         mrt.set_output_prec(30)
         qbase, qbase_params, qbase_inputs_ext = mrt.quantize()
         oscales = mrt.get_output_scales()
@@ -148,20 +146,22 @@ def test_mrt_quant(batch_size=1, iter_num=10):
         open(dump_sym, "w").write(qbase.tojson())
         nd.save(dump_params, qbase_params)
         sim.save_ext(dump_ext, qbase_inputs_ext, oscales, maps)
-
-    # merge quantize model
-    if True:
+    else:
         qb_sym, qb_params, qb_ext = load_fname("mrt.quantize", True)
         qbase, qbase_params = mx.sym.load(qb_sym), nd.load(qb_params)
         qbase_inputs_ext, oscales, maps = sim.load_ext(qb_ext)
 
+    # merge quantized split model, get:
+    # qsym, qparams, oscales2
+    qsym, qparams = None, None
+    if flag[3]:
         name_maps = {
             "ssd0_slice_axis41": "ssd0_multiperclassdecoder0_concat0",
             "ssd0_slice_axis42": "ssd0_multiperclassdecoder0_slice_axis0",
             "ssd0_slice_axis43": "ssd0_normalizedboxcenterdecoder0_concat0",
         }
         oscales_dict = dict(zip([c.attr('name') for c in base], oscales))
-        oscales = [oscales_dict[name_maps[c.attr('name')]] for c in top]
+        oscales2 = [oscales_dict[name_maps[c.attr('name')]] for c in top]
 
         def box_nms(node, params, graph):
             name, op_name = node.attr('name'), node.attr('op_name')
@@ -175,28 +175,41 @@ def test_mrt_quant(batch_size=1, iter_num=10):
                 attr['valid_thresh'] = int(valid_thresh * oscales[1])
                 node = sutils.get_mxnet_op(op_name)(*childs, **attr, name=name)
             return node
-        qsym, qparams = _mrt.merge_model(qbase, qbase_params,
+        qsym, qparams = merge_model(qbase, qbase_params,
                 top, top_params, maps, box_nms)
         sym_file, param_file, ext_file = load_fname("mrt.all.quantize", True)
         open(sym_file, "w").write(qsym.tojson())
         nd.save(param_file, qparams)
-        sim.save_ext(ext_file, qbase_inputs_ext, oscales)
-
-    if True:
+        sim.save_ext(ext_file, qbase_inputs_ext, oscales2)
+    else:
         dump_sym, dump_params, dump_ext = load_fname("mrt.all.quantize", True)
-        net2_inputs_ext, oscales = sim.load_ext(dump_ext)
-        inputs = [mx.sym.var(n) for n in net2_inputs_ext]
-        net2 = utils.load_model(dump_sym, dump_params, inputs, ctx=qctx)
-        net2_metric = dataset.load_voc_metric()
-        net2_metric.reset()
-        def mrt_quantize(data, label):
-            def net(data):
-                data = sim.load_real_data(data, 'data', net2_inputs_ext)
-                outs = net2(data.as_in_context(qctx))
-                outs = [o.as_in_context(ctx) / oscales[i] for i, o in enumerate(outs)]
-                return outs
-            acc = validate_data(net, data, label, net2_metric)
-            return "{:6.2%}".format(acc)
+        qsym, qparams = mx.sym.load(dump_sym), nd.load(dump_params)
+        _, oscales2 = sim.load_ext(dump_ext)
+
+    metric = dataset.load_voc_metric()
+    metric.reset()
+    def yolov3(data, label):
+       def net(data):
+           tmp = base_graph(data.as_in_context(ctx))
+           outs = top_graph(*tmp)
+           return outs
+       acc = validate_data(net, data, label, metric)
+       return "{:6.2%}".format(acc)
+
+    net2 = mx.gluon.nn.SymbolBlock(qsym,
+            [mx.sym.var(n) for n in qbase_inputs_ext])
+    utils.load_parameters(net2, qparams, ctx=qctx)
+    net2_metric = dataset.load_voc_metric()
+    net2_metric.reset()
+    def mrt_quantize(data, label):
+        def net(data):
+            data = sim.load_real_data(data, 'data', qbase_inputs_ext)
+            outs = net2(data.as_in_context(qctx))
+            outs = [o.as_in_context(ctx) / oscales2[i] \
+                   for i, o in enumerate(outs)]
+            return outs
+        acc = validate_data(net, data, label, net2_metric)
+        return "{:6.2%}".format(acc)
 
     utils.multi_validate(yolov3, data_iter_func,
             mrt_quantize,
@@ -232,6 +245,7 @@ if __name__ == '__main__':
 
     # zoo.save_model('ssd_512_resnet50_v1_voc')
 
-    test_mrt_quant(1, 100)
+    from_scratch = 0
+    test_mrt_quant(16, 100, from_scratch) # 80% -- > 80%
     # test_sym_nnvm(16, 0)
 

@@ -1,11 +1,13 @@
 from tfm_pass import *
 from sym_utils import *
 
+from mxnet import ndarray as nd
 import mxnet as mx
 import nnvm
 
 import numpy as np
 
+# TODO(ryt): infer precision for ops
 
 @register_pass("validate")
 @register_pass("rewrite")
@@ -79,12 +81,16 @@ class Relu(Transformer):
         return sym
 
 
-@register_pass("validate")
-@register_pass("rewrite")
 @register_pass("calculate_ops")
-@register_pass("quantize")
 @register_transformer("LeakyReLU")
 class LeakyReLU(Transformer):
+    def validate(self, op, **kwargs):
+        name, attr = op.attr('name'), op.list_attr()
+        act = get_attr(attr, 'act_type', 'leaky')
+        assert act == 'leaky', "Unsupported LeakyReLU %s for act_type: %s" \
+                % (name, act)
+        return op
+
     def fuse_transpose(self, op, **kwargs):
         X, name = op.get_children()[0], op.attr('name')
         if X.attr('op_name') == Transpose.op_name:
@@ -94,25 +100,57 @@ class LeakyReLU(Transformer):
             op = mx.sym.transpose(op, name=t_name, **t_attr)
         return op
 
+    def rewrite(self, op, **kwargs):
+        name, op_name = op.attr('name'), op.attr('op_name')
+        childs, attr = sym_iter(op.get_children()), op.list_attr()
+
+        slope = get_attr(attr, 'slope', 0.25)
+        X = childs[0]
+        posi_X = mx.sym.relu(X)
+        nega_X = mx.sym.negative(X)
+        nega_X = mx.sym.relu(nega_X)
+        slope_name = N.n('slope')
+        kwargs['params'][slope_name] = nd.array([slope])
+        kwargs['graph'][slope_name] = slope_sym = \
+                mx.sym.var(slope_name, shape=(1,))
+        scale_X = mx.sym.broadcast_mul(nega_X, slope_sym)
+        op = posi_X - scale_X
+        return op
+
 
 @register_pass("validate")
-@register_pass("rewrite")
 @register_pass("calculate_ops")
 @register_pass("fuse_transpose")
-@register_pass("quantize")
 @register_transformer("_mul_scalar")
 class MulScalar(Transformer):
-    pass
+    def rewrite(self, op, **kwargs):
+        params, graph = kwargs['params'], kwargs['graph']
+        infer_shapes = kwargs['infer_shapes']
+        name = op.attr('name')
+        scalar = get_attr(op.list_attr(), 'scalar')
+
+        X = op.get_children()[0]
+        sname = N.n('scalar')
+        params[sname] = nd.array([scalar])
+        graph[sname] = mx.sym.var(sname, shape=(1,))
+        return mx.sym.broadcast_mul(X, graph[sname], name=name)
 
 
 @register_pass("validate")
-@register_pass("rewrite")
 @register_pass("calculate_ops")
 @register_pass("fuse_transpose")
-@register_pass("quantize")
 @register_transformer("_div_scalar")
 class DivScalar(Transformer):
-    pass
+    def rewrite(self, op, **kwargs):
+        graph = kwargs['graph']
+        name = op.attr('name')
+        attr, childs = op.list_attr(), sym_iter(op.get_children())
+
+        scalar = get_attr(attr, 'scalar')
+        sname = N.n('scalar')
+        kwargs['params'][sname] = nd.array([1/scalar])
+        graph[sname] = mx.sym.var(sname, shape=(1,))
+        return mx.sym.broadcast_mul(childs[0], graph[sname], name=name)
 
 
 @register_pass("quantize")
@@ -156,18 +194,23 @@ class Activation(Transformer):
 @register_transformer("Convolution")
 class Convolution(Transformer):
     def validate(self, op, **kwargs):
-        op = self._validate_layout(op)
-        W = sym_iter(op.get_children())[1]
-        W_shp = kwargs['infer_shapes'][W.attr('name')][get_entry_id(W)]
-        I, KH, KW = W_shp[1:]
-        assert I*KH*KW < 65536, "convolution ops overflow"
+        childs = sym_iter(op.get_children())
+        W_name = childs[1].attr('name')
+        op = self._validate_layout(op, **kwargs)
         return op
 
-    def _validate_layout(self, op):
-        name = op.attr('name')
+    def _validate_overflow(self, op, **kwargs):
+        W = sym_iter(op.get_children())[1]
+        W_shp = kwargs['infer_shapes'][W.attr('name')][get_entry_id(W)]
+        assert np.prod(W_shp[1:]) < 65536, "Convolution ops overflow"
+
+    def _validate_layout(self, op, **kwargs):
+        params = kwargs['params']
+        name, op_name = op.attr('name'), op.attr('op_name')
         childs, attr = sym_iter(op.get_children()), op.list_attr()
         X, W = childs[0], childs[1]
         X_name, W_name = X.attr('name'), W.attr('name')
+
         layout = get_attr(attr, 'layout', "NCHW")
         if layout == "NCW":
             no_bias = get_attr(attr, 'no_bias', False)
@@ -183,13 +226,15 @@ class Convolution(Transformer):
             }
             X = mx.sym.expand_dims(X, axis=3)
             params[W_name] = params[W_name].expand_dims(axis=3)
-            W = graph[W_name] = mx.sym.var(W_name, shape=params[W_name].shape)
+            W = kwargs['graph'][W_name] = mx.sym.var(W_name, shape=params[W_name].shape)
             B = None if no_bias else childs[2]
             op = get_mxnet_op(op_name)(X, W, B, **attr, name=name)
+            self._validate_overflow(op, **kwargs)
             op = mx.sym.squeeze(op, axis=3)
         else:
             assert layout == "NCHW", "Convolution(%s) only supported \
                     NCHW layout vs. %s" % (name, layout)
+            self._validate_overflow(op, **kwargs)
         return op
 
     def rewrite(self, op, **kwargs):
@@ -244,6 +289,15 @@ class Convolution(Transformer):
         return get_nnvm_op(op_name)(*childs, name=N.n('convolution'),
                                     **new_attrs)
 
+@register_pass("validate")
+@register_pass("calculate_ops")
+@register_pass("rewrite")
+@register_pass("quantize")
+@register_transformer('Pad')
+class Pad(Transformer):
+    def fuse_transpose(self, op, **kwargs):
+        return op
+
 
 @register_pass("validate")
 @register_pass("calculate_ops")
@@ -260,8 +314,31 @@ class ExpandDims(Transformer):
         return get_nnvm_op(op_name)(*childs, **new_attrs)
 
 
+@register_pass("validate")
+@register_pass("calculate_ops")
+@register_pass("fuse_transpose")
+@register_pass("rewrite")
 @register_transformer('Embedding')
 class Embedding(Transformer):
+    def quantize(self, op, **kwargs):
+        th_dict, scales = kwargs['th_dict'], kwargs['scales']
+        name, op_name = op.attr('name'), op.attr('op_name')
+        attr, childs = op.list_attr(), sym_iter(op.get_children())
+        cns = [c.attr('name') for c in childs]
+
+        iprec = kwargs['op_input_precs'][op_name]
+        X, xs = childs[0], scales[cns[0]]
+        if xs != 1:
+            X, _, _ = requant_parameter(X, 32, 1)
+        W, wprec, ws = requant_parameter(cns[1], iprec, oname=name, **kwargs)
+        th_dict[name] = th_dict[cns[1]]
+        scales[name] = ws
+        kwargs['precs'][name][OUT_KEY] = get_bit(th_dict[name]*ws)
+        op  = get_mxnet_op(op_name)(X, W, **attr, name=name)
+
+        op = requant_output(op, name, **kwargs)
+        return op
+
     def compile(self, op, **kwargs):
         childs = kwargs['childs']
         attrs = kwargs['attr']
@@ -341,22 +418,8 @@ class BoxNms(Transformer):
 @register_transformer('slice_like')
 class SliceLike(Transformer):
     def quantize(self, op, **kwargs):
-        th_dict, scales = kwargs['th_dict'], kwargs['scales']
-        name, op_name = op.attr('name'), op.attr('op_name')
-        childs, attr = sym_iter(op.get_children()), op.list_attr()
-        cns = [c.attr('name') for c in childs] if childs else []
-
-        oprec = kwargs['op_input_precs'][op_name]
-        X, _, xs = requant(childs[0], oprec, oname=name, **kwargs)
-        oscale = scales[name] = xs
-        op = get_mxnet_op(op_name)(X, childs[1], **attr, name=name)
-        kwargs['precs'][name][OUT_KEY] = get_bit(th_dict[name] * oscale)
-
-        logger = logging.getLogger('log.mrt.realize')
-        logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
-               op_name, name, scales[name], cns)
-        op = requant_output(op, name, **kwargs)
-        return op
+        # TODO: restore
+        return _quantize_scale(op, **kwargs)
 
     def compile(self, op, **kwargs):
         childs = kwargs['childs']
@@ -385,6 +448,12 @@ class SliceAxis(Transformer):
         end = [s for s in cshape]
         begin[axis], end[axis] = axis_begin, axis_end
         return get_mxnet_op('slice')(X, begin=begin, end=end, name=name)
+
+
+@register_pass("validate")
+@register_transformer("SliceChannel")
+class SliceChannel(Transformer):
+    pass
 
 
 @register_transformer('UpSampling')
@@ -581,7 +650,8 @@ class Softmax(Transformer):
 @register_transformer("Pooling")
 class Pooling(Transformer):
     def validate(self, op, **kwargs):
-        name, attr = op.attr('name'), op.list_attr()
+        name, op_name  = op.attr('name'), op.attr('op_name')
+        attr = op.list_attr()
         layout = get_attr(attr, 'layout', 'NCHW')
         assert layout == 'NCHW'
         pool_type = get_attr(attr, 'pool_type', 'max')
@@ -591,11 +661,18 @@ class Pooling(Transformer):
         assert get_attr(attr, 'count_include_pad', True), \
             "Pooling(%s) only supported count_include_pad for True." % name
 
-        global_pool = get_attr(attr, 'global_pool', False)
-        pooling_convention = get_attr(attr, 'pooling_convention', 'valid')
-        assert pooling_convention == 'valid' or global_pool, \
-            "Pooling(%s) only supported convention for valid." % name
-
+        if pool_type == 'avg':
+            global_pool = get_attr(attr, 'global_pool', False)
+            pooling_convention = get_attr(attr, 'pooling_convention', 'valid')
+            if pooling_convention == 'full':
+                msg = "%s(%s attr=%s) not match attribute %s (%s vs. %s)"
+                assert global_pool, msg % (name, op_name, attr,
+                    'pooling_convention&global_pool',
+                    [attr['pooling_convention'], attr['global_pool']],
+                    ['full', 'True'])
+            else:
+                assert pooling_convention == 'valid' or global_pool, \
+                    "Pooling(%s) only supported convention for valid." % name
         return op
 
     def compile(self, op, **kwargs):
@@ -659,7 +736,6 @@ class Pooling(Transformer):
             op = mx.sym.Convolution(X, W, **conv_attr, name=conv_name)
         return op
 
-
     def calculate_ops(self, op, **kwargs):
         X, attr = sym_iter(op.get_children())[0], op.list_attr()
         pool_type = get_attr(attr, 'pool_type', 'max')
@@ -683,7 +759,9 @@ class Pooling(Transformer):
 @register_transformer("broadcast_mul")
 class BroadcastMul(Transformer):
     def quantize(self, op, **kwargs):
-        scales = kwargs['scales']
+        params = kwargs['params']
+        th_dict = kwargs['th_dict']
+        precs, scales = kwargs['precs'], kwargs['scales']
         name, op_name = op.attr('name'), op.attr('op_name')
         childs, attr = sym_iter(op.get_children()), op.list_attr()
         cns = [c.attr('name') for c in childs] if childs else []
@@ -691,14 +769,19 @@ class BroadcastMul(Transformer):
         oprec = kwargs['op_input_precs'][op_name]
         X, xprec, xs = requant(childs[0], oprec, oname=name, **kwargs)
         B, bprec, bs = requant(childs[1], oprec, oname=name, **kwargs)
+
         oscale = scales[name] = xs * bs
         op = get_mxnet_op(op_name)(X, B, **attr, name=name)
-        kwargs['precs'][name][OUT_KEY] = get_bit(kwargs['th_dict'][name]*oscale)
+
+        # precs[name][OUT_KEY] = get_bit(th_dict[name]*oscale)
+        infer_prec = xprec + bprec - 1
+        precs[name][OUT_KEY] = infer_prec
 
         logger = logging.getLogger('log.mrt.realize')
         logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
                op_name, name, scales[name], cns)
-        op = requant_output(op, name, **kwargs)
+        # op = requant_output(op, name, **kwargs)
+        op = requant_output_clip(op, name, **kwargs)
         return op
 
 
@@ -710,6 +793,27 @@ class BroadcastMul(Transformer):
 @register_transformer("broadcast_add")
 class BroadcastAdd(Transformer):
     def quantize(self, op, **kwargs):
+        params = kwargs['params']
+        th_dict = kwargs['th_dict']
+        precs = kwargs['precs']
+        scales = kwargs['scales']
+
+        name = op.attr('name')
+        childs = sym_iter(op.get_children())
+        cns = [c.attr('name') for c in childs]
+        ths = [th_dict[cn] for cn in cns]
+
+        if ths[0] == 0 or ths[1] == 0:
+            if ths[0] == 0 and ths[1] == 0:
+                th_dict[name], precs[name], scales[name] = 0, { OUT_KEY: 1 }, 1
+                return op
+            cn = cns[1] if ths[0] == 0 else cns[0]
+            bit = get_bit(params[cn]) if cn in params else precs[cn][OUT_KEY]
+            scales[name] = 1 if cn in params else scales[cn]
+            precs[name] = { OUT_KEY: bit }
+            th_dict[name] = get_range(bit)
+            return op
+
         return _quantize_scale(op, **kwargs)
 
 
@@ -806,21 +910,31 @@ class Sum(Transformer):
         return super().calculate_ops(op, **kwargs)
 
     def quantize(self, op, **kwargs):
-        scales = kwargs['scales']
+        infer_shapes = kwargs['infer_shapes']
+        th_dict, scales = kwargs['th_dict'], kwargs['scales']
         name, op_name = op.attr('name'), op.attr('op_name')
         childs, attr = sym_iter(op.get_children()), op.list_attr()
         cns = [c.attr('name') for c in childs] if childs else []
+        oshp = infer_shapes[name][get_entry_id(op)]
 
         oprec = kwargs['op_input_precs'][op_name]
         X, xprec, xs = requant_operator(childs[0], oprec, oname=name, **kwargs)
         oscale = scales[name] = xs
         op = get_mxnet_op(op_name)(X, **attr, name=name)
-        kwargs['precs'][name][OUT_KEY] = get_bit(kwargs['th_dict'][name]*oscale)
+
+        ishp = infer_shapes[cns[0]][get_entry_id(childs[0])]
+        k = int(nd.prod(nd.array(ishp)).asscalar() / \
+            nd.prod(nd.array(oshp)).asscalar())
+        kprec = get_bit_cnt(k)
+        infer_prec = kprec + xprec
+        kwargs['precs'][name][OUT_KEY] = infer_prec
+        # kwargs['precs'][name][OUT_KEY] = get_bit(th_dict[name] * scales[name])
 
         logger = logging.getLogger('log.mrt.realize')
         logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
                op_name, name, scales[name], cns)
-        op = requant_output(op, name, **kwargs)
+        op = requant_output_clip(op, name, **kwargs)
+        # op = requant_output(op, name, **kwargs)
         return op
 
 
@@ -851,11 +965,12 @@ class BatchNorm(Transformer):
             assert axis == 1, "Channel in input must be axis 1"
             cchilds, cattr = sym_iter(X.get_children()), X.list_attr()
 
-            conv_name = X.attr('name')
+            conv_name = N.n(name)
             W_name = cchilds[1].attr('name')
             weight = params[W_name]
-            params[W_name] = weight * scale.reshape(*scale.shape, 1, 1, 1)
-            W = mx.sym.var(W_name, shape=params[W_name].shape)
+            wn = N.n(W_name)
+            params[wn] = weight * scale.reshape(*scale.shape, 1, 1, 1)
+            W = mx.sym.var(wn, shape=params[W_name].shape)
 
             B_name = N.n('bias')
             if not get_attr(cattr, 'no_bias', False):
@@ -877,7 +992,7 @@ class BatchNorm(Transformer):
             bias_name = N.n('bias')
             params[bias_name] = bias.reshape(reshp)
             B = mx.sym.var(bias_name, shape=reshp)
-            op = mx.sym.broadcast_add(op, B, name=N.n("broadcast_add"))
+            op = mx.sym.broadcast_add(node, B, name=N.n("broadcast_add"))
         return op
 
     def calculate_ops(self, op, **kwargs):
@@ -992,7 +1107,8 @@ class Custom(Transformer):
         attr = op.list_attr()
         op_type = attr['op_type']
         assert op_type in ['cvm_clip', 'cvm_left_shift',
-                        'cvm_right_shift', 'cvm_lut']
+                        'cvm_right_shift', 'cvm_lut'], \
+            "Invalid op_type:%s in Custom operator" % op_type
         return op
 
     def compile(self, op, **kwargs):
@@ -1052,7 +1168,11 @@ class Maximum(Transformer):
                 name=N.n('_maximum'), **attrs)
 
 
-@register_pass('compile')
+@register_pass("validate")
+@register_pass("fuse_transpose")
+@register_pass("rewrite")
+@register_pass("quantize")
+@register_pass("calculate_ops")
 @register_transformer('max')
 class Max(Transformer):
     pass
@@ -1162,6 +1282,105 @@ class Arange(Transformer):
 class Tile(Transformer):
     pass
 
+@register_pass("validate")
+@register_pass("calculate_ops")
+@register_pass("fuse_transpose")
+@register_pass("rewrite")
+@register_pass("quantize")
+@register_transformer("negative")
+class Negative(Transformer):
+    pass
+
+
+@register_pass("validate")
+@register_pass("calculate_ops")
+@register_pass("fuse_transpose")
+@register_transformer("SwapAxis")
+class SwapAxis(Transformer):
+    def rewrite(self, op, **kwargs):
+        name = op.attr('name')
+        attr, childs = op.list_attr(), sym_iter(op.get_children())
+
+        dim1, dim2 = get_attr(attr, 'dim1', 0), get_attr(attr, 'dim2', 0)
+        if dim1 == dim2:
+            return childs[0]
+        ndims = len(kwargs['infer_shapes'][name][get_entry_id(childs[0])])
+        new_axes = [i for i in range(ndims)]
+        new_axes[dim1], new_axes[dim2] = dim2, dim1
+        return mx.sym.transpose(childs[0], tuple(new_axes), name=name)
+
+
+@register_pass("validate")
+@register_pass("calculate_ops")
+@register_pass("fuse_transpose")
+@register_transformer("_plus_scalar")
+class PlusScalar(Transformer):
+    def rewrite(self, op, **kwargs):
+        name = op.attr('name')
+        attr, childs = op.list_attr(), sym_iter(op.get_children())
+
+        scalar = get_attr(attr, 'scalar')
+        if scalar == 0:
+            return childs[0]
+        sname = N.n('scalar')
+        kwargs['params'][sname] = nd.array([scalar])
+        kwargs['graph'][sname] = offset = mx.sym.var(sname, shape=(1,))
+        return mx.sym.broadcast_add(childs[0], offset, name=name)
+
+
+@register_pass("validate")
+@register_pass("calculate_ops")
+@register_pass("fuse_transpose")
+@register_transformer("zeros_like")
+class ZerosLike(Transformer):
+    def rewrite(self, op, **kwargs):
+        # TODO: dynamic shape
+        name = op.attr('name')
+        shp = kwargs['infer_shapes'][name][get_entry_id(op)]
+        kwargs['params'][name] = nd.zeros(shp)
+        return mx.sym.var(name, shape=shp)
+
+
+@register_pass("validate")
+@register_pass("calculate_ops")
+@register_pass("fuse_transpose")
+@register_transformer("ones_like")
+class OnesLike(Transformer):
+    def rewrite(self, op, **kwargs):
+        # TODO: dynamic shape
+        name = op.attr('name')
+        shp = kwargs['infer_shapes'][name][get_entry_id(op)]
+        kwargs['params'][name] = nd.ones(shp)
+        return mx.sym.var(name, shape=shp)
+
+
+@register_pass("validate")
+@register_pass("calculate_ops")
+@register_pass("fuse_transpose")
+@register_pass("rewrite")
+@register_transformer("_greater_scalar")
+class GreaterScalar(Transformer):
+    pass
+
+
+@register_pass("validate")
+@register_pass("calculate_ops")
+@register_pass("fuse_transpose")
+@register_pass("rewrite")
+@register_pass("quantize")
+@register_transformer("where")
+class Where(Transformer):
+    pass
+
+
+@register_pass("validate")
+@register_pass("calculate_ops")
+@register_pass("fuse_transpose")
+@register_pass("rewrite")
+@register_pass("quantize")
+@register_transformer("squeeze")
+class Squeeze(Transformer):
+    pass
 
 def _ft_multi_input(op):
     name, childs = op.attr('name'), sym_iter(op.get_children())
@@ -1191,17 +1410,35 @@ def _quantize_scale(op, **kwargs):
     in_th = max([th_dict[n] for n in cns])
     oscale = scales[name] = scale(in_th, oprec)
     new_childs = []
+    cprecs = []
     for c in childs:
         c, cprec, _ = requant(c, oprec, oscale=oscale, oname=name, **kwargs)
+        cprecs.append(cprec)
         new_childs.append(c)
     op = get_mxnet_op(op_name)(*new_childs, **attr, name=name)
-    precs[name][OUT_KEY] = get_bit(th_dict[name] * oscale)
+    # precs[name][OUT_KEY] = get_bit(th_dict[name]*oscale)
+    infer_prec = max(cprecs) if op_name in ['Concat'] else max(cprecs)+1
+    precs[name][OUT_KEY] = infer_prec
 
     logger = logging.getLogger('log.mrt.realize')
     logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
            op_name, name, scales[name], cns)
-    op = requant_output(op, name, **kwargs)
+    op = requant_output_clip(op, name, **kwargs)
+    # op = requant_output(op, name, **kwargs)
     return op
+
+def _infer_precision_scale(op, **kwargs):
+    op_name = op.attr('op_name')
+    childs = sym_iter(op.get_children())
+
+    p1 = get_infer_precision(childs[0], **kwargs)
+    p2 = get_infer_precision(childs[1], **kwargs)
+    infer_prec = max(p1, p2)
+    if op_name in ['elemwise_add', 'elemwise_sub', \
+        'broadcast_add', 'broadcast_add']:
+        infer_prec += 1
+
+    return infer_prec
 
 def _quantize_xwb(op, **kwargs):
     th_dict, scales = kwargs['th_dict'], kwargs['scales']
@@ -1220,13 +1457,45 @@ def _quantize_xwb(op, **kwargs):
             oname=name, **kwargs)
     oscale = scales[name] = ws * xs
     op = get_mxnet_op(op_name)(X, W, B, **attr, name=name)
-    kwargs['precs'][name][OUT_KEY] = get_bit(th_dict[name] * oscale)
+
+    # kwargs['precs'][name][OUT_KEY] = get_bit(th_dict[name] * oscale)
+    shp = kwargs['params'][childs[1].attr('name')].shape
+    k = int(nd.prod(nd.array(shp[1:])).asscalar())
+    kprec = get_bit_cnt(k)
+    infer_prec = kprec + (xprec+wprec-1)
+    if not get_attr(attr, 'no_bias', False):
+        infer_prec = max(infer_prec, bprec) + 1
+    kwargs['precs'][name][OUT_KEY] = infer_prec
 
     logger = logging.getLogger('log.mrt.realize')
     logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
            op_name, name, scales[name], cns)
-    op = requant_output(op, name, **kwargs)
+    # op = requant_output(op, name, **kwargs)
+    op = requant_output_clip(op, name, **kwargs)
     return op
+
+def _restore(op, **kwargs):
+    params, graph = kwargs['params'], kwargs['graph']
+    th_dict, precs, scales = kwargs['th_dict'], kwargs['precs'], kwargs['scales']
+    name, op_name = op.attr('name'), op.attr('op_name')
+    childs, attr = sym_iter(op.get_children()), op.list_attr()
+    cns = [c.attr('name') for c in childs] if childs else []
+
+    childs = [] if childs is None else childs
+    new_childs = [c / scales[c.attr('name')] \
+        if scales.get(c.attr('name'), 1) != 1 else c \
+                 for c in childs]
+
+    out = get_mxnet_op(op_name)(*new_childs, **attr, name=name)
+
+    oprec = precs[name].get(OUT_KEY, 16)
+    oscale = scales[name] = 1
+    oscale = scales[name] = scale(th_dict[name], oprec)
+    out = (out * oscale)
+    precs[name][OUT_KEY] = oprec
+
+    out = requant_output(out, name, **kwargs)
+    return out
 
 def _quantize_table(op, **kwargs):
     params, graph = kwargs['params'], kwargs['graph']
@@ -1235,10 +1504,11 @@ def _quantize_table(op, **kwargs):
     childs, attr = sym_iter(op.get_children()), op.list_attr()
     cns = [c.attr('name') for c in childs] if childs else []
 
-    oprec = kwargs['op_input_precs'][op_name]
-    oscale = scale(th_dict[cns[0]], oprec)
-    X, xprec, xs = requant_operator(childs[0], oprec, \
-            oscale=oscale, oname=name, **kwargs)
+    iprec = kwargs['op_input_precs'][op_name]
+    xs = scale(th_dict[cns[0]], iprec)
+    # xs= scales[cns[0]]
+    X, xprec, xs = requant_operator(childs[0], iprec, \
+            oscale=xs, oname=name, **kwargs)
     alpha = get_range(xprec)
     var = mx_const(alpha, graph, params)
     X = mx.sym.broadcast_add(X, var, name=N.n(op_name+'_offset'))

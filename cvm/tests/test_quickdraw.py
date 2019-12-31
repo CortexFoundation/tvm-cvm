@@ -57,7 +57,7 @@ if True:
         qacc.update(label, res)
         return "accuracy={:6.2%}".format(qacc.get()[1])
 
-if True:
+if False:
     _mrt.std_dump(qsym, qparams, inputs_ext, data, "wlt_animal10")
     exit()
 

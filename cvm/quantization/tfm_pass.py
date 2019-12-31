@@ -39,6 +39,7 @@ def validate(symbol, params):
     return topo_visit_transformer(symbol, params,
             apply_pass("validate", infer_shapes=infer_shapes))
 
+
 @N.register_nm("rewrite")
 def rewrite(symbol, params):
     infer_shapes = infer_shape(symbol, params)
@@ -48,15 +49,34 @@ def rewrite(symbol, params):
 @N.register_nm("quantize")
 def quantize(symbol, params, th_dict, precs, scales, op_input_precs):
     infer_shapes = infer_shape(symbol, params)
-    return topo_visit_transformer(symbol, params,
+    sym, params = topo_visit_transformer(symbol, params,
             apply_pass(
                 "quantize",
                 infer_shapes=infer_shapes,
-                # th_dict=th_dict,
             ),
             th_dict=th_dict,
             precs=precs, scales=scales,
             op_input_precs=op_input_precs)
+
+    def quantize_output(op, **kwargs):
+        name = op.attr('name')
+        th_dict = kwargs['th_dict']
+        precs, scales = kwargs['precs'], kwargs['scales']
+
+        # Requantize output symbol
+        if name in precs and name in precs[name]:
+            oprec = precs[name][name]
+            os = scale(th_dict[name], oprec)
+            op, oprec, os = requant(op, oprec, os, oname=name, **kwargs)
+
+            oname = op.attr('name')
+            th_dict[oname] = th_dict[name]
+            precs[oname] = oprec
+            scales[oname] = os
+        return op
+    return topo_visit_transformer(sym, params,
+            quantize_output, th_dict=th_dict,
+            precs=precs, scales=scales)
 
 @N.register_nm("prepare_for_cvm")
 def prepare_for_compile(symbol, params):
@@ -181,6 +201,10 @@ def attach_input_shape(symbol, params, input_shapes):
         return op
     return topo_visit_transformer(symbol, params, _impl)
 
+# TODO: reduce graph for adjacent broadcast_mul
+def reduce_graph(symbol, params):
+    pass
+
 def infer_shape(symbol, params, input_shape=None):
     infer_shapes = {}
     def _impl(op, params, graph):
@@ -217,6 +241,58 @@ def collect_op_names(symbol, params):
             attr_name='op_name', func=op_names.add)
     return op_names
 
+@N.register_nm("fmo")
+def fuse_multiple_outputs(symbol, params):
+    infer_shapes = infer_shape(symbol, params)
+    channel, graph = {}, {}
+    for sym in topo_sort(symbol):
+        name, op_name = sym.attr('name'), sym.attr('op_name')
+        childs, attr = sym_iter(sym.get_children()), sym.list_attr()
+        if childs is not None:
+            childs = [get_node(c, graph) for c in childs]
+            sym = get_mxnet_op(op_name)(*childs, **attr, name=name)
+        if op_name == 'SliceChannel':
+            # Only designed for special usei, thus
+            # check of "SliceChannel" has not been added to _sym_check
+            assert childs is not None and len(childs) == 1, \
+                "Invalid Layer: %s, the 'SliceChannel' \
+                operator must have exactly one input" % name
+            axis = get_attr(attr, 'axis', 1)
+            num_outputs = get_attr(attr, 'num_outputs')
+            chchild_shape = infer_shapes[childs[0].attr('name')]
+            eid = get_entry_id(childs[0])
+            dim = chchild_shape[eid][axis]
+            assert num_outputs > 0 and dim % num_outputs == 0, \
+                "Invalid Layer: %s, the 'SliceChannel' operator \
+                has a wrong attribute, 'num_outputs': %d" \
+                % (name, num_outputs)
+            stride = int(dim / num_outputs)
+            interval = [(i * stride, (i + 1) * stride) \
+                       for i in range(num_outputs)]
+            channel[name] = [childs, axis, interval]
+        elif childs is not None:
+            is_split = False
+            for i in range(len(childs)):
+                cname = childs[i].attr('name')
+                if cname in channel:
+                    is_split = True
+                    eid = get_entry_id(childs[i])
+                    chchilds, axis, interval = channel[cname]
+                    begin, end = interval[eid]
+                    chattr = {'axis': axis, 'begin': begin, 'end': end}
+                    slp_name = N.n('slice_axis')
+                    if slp_name not in graph:
+                        graph[slp_name] = mx.sym.slice_axis(*chchilds,
+                                **chattr, name=slp_name)
+                    childs[i] = graph[slp_name]
+            if is_split:
+                sym = get_mxnet_op(op_name)(*childs, **attr, name=name)
+        graph[name] = sym
+
+    nodes = [get_node(sym, graph) for sym in symbol]
+    ret = mx.sym.Group(nodes) if len(nodes) > 1 else nodes[0]
+    return ret, params
+
 # === MRT ===
 
 def _get_opt(out, lambd):
@@ -245,7 +321,11 @@ def get_bit(opt):
         opt = opt.abs().max().asscalar()
     if opt == 0:
         return 1
-    return math.ceil(math.log2(opt)) + 1
+    return math.ceil(math.log2(opt+1)) + 1
+
+def get_bit_cnt(cnt):
+    assert isinstance(cnt, int) and cnt > 0
+    return math.ceil(math.log2(cnt))
 
 def get_range(prec):
     return (2 ** (prec - 1)) - 1
@@ -316,7 +396,11 @@ def requant_operator(X, oprec, oscale=None, **kwargs):
     logger = logging.getLogger('log.mrt.realize')
     params, graph = kwargs['params'], kwargs['graph']
     th_dict, precs = kwargs['th_dict'], kwargs['precs']
+    scales = kwargs['scales']
     xopn, xn = X.attr('op_name'), X.attr('name')
+
+    if th_dict[xn] == 0:
+        return X, 1, oscale if oscale else 1
 
     exactly = True if oscale else False
     oprec = precs[xn].get(kwargs['oname'], oprec)
@@ -336,9 +420,19 @@ def requant_operator(X, oprec, oscale=None, **kwargs):
                     xopn, xn, sb, iscale, iprec)
     if exactly or iprec > oprec:
         rescale = oscale / iscale
-        frac, exp = sim.cvm_float(rescale, MAX_BIT - iprec)
+        # frac, exp = sim.cvm_float(rescale, MAX_BIT - iprec)
+        bits = MAX_BIT - iprec
+        frac, exp = sim.cvm_float(rescale, bits)
         sim_scale = frac * (2 ** exp)
         scale_err = abs((sim_scale - rescale) / rescale)
+        while not exactly and scale_err > 0.0000001:
+            # in order to guarantee that tight_prec <= infer_prec
+            # the precision of rescale must be improved as much as possible
+            bits += 1
+            assert bits < 33
+            frac, exp = sim.cvm_float(rescale, bits)
+            sim_scale = frac * (2 ** exp)
+            scale_err = abs((sim_scale - rescale) / rescale)
         if exactly and scale_err > 0.001:
             logger.warn(
                 "Operator  %-20s name=%-40s requantize to scale=%s " +
@@ -346,7 +440,7 @@ def requant_operator(X, oprec, oscale=None, **kwargs):
                     xopn, xn, rescale, sim_scale, frac, exp, scale_err)
         oscale = iscale * frac * (2 ** exp)
         if frac > 1:
-            X = realize(X, 0, iprec)
+            # X = realize(X, 0, iprec)
             var = mx_const(frac, graph, params)
             X = mx.sym.broadcast_mul(X, var, name=N.n("mrt_quantize_scale"))
         X = realize(X, -exp, oprec)
@@ -355,7 +449,7 @@ def requant_operator(X, oprec, oscale=None, **kwargs):
             " iprec=%s, iscale=%-10.5f, oprec=%s, oscale=%-10.5f",
                 xopn, xn, rescale, frac, exp, iprec, iscale, oprec, oscale)
     else:
-        X = realize(X, 0, oprec)
+        # X = realize(X, 0, oprec)
         oscale = iscale
         logger.debug(
             "Operator  %-20s name=%-40s clip with iprec=%s, oprec=%s",
@@ -367,16 +461,35 @@ def requant_parameter(wname, oprec, oscale=None, **kwargs):
     logger = logging.getLogger('log.mrt.realize')
     Wn = N.n(wname)
 
+    W = None
+    if th_dict[wname] == 0:
+        oprec, oscale = 1, 1
+        shp = params[wname].shape
+        params[Wn] = nd.zeros(shp)
+        attr = { 'precision': '1' }
+        W = mx.sym.var(Wn, shape=shp, attr=attr)
+    else:
+        oprec = kwargs['precs'][wname].get(kwargs['oname'], oprec)
+        oscale = oscale if oscale else scale(th_dict[wname], oprec)
+        params[Wn] = sim.int_realize(params[wname] * oscale,
+                oprec, logger=logger)
+        attr = { 'precision': str(oprec) }
+        W = mx.sym.var(Wn, shape=params[Wn].shape, attr=attr)
+
+    '''
     oprec = kwargs['precs'][wname].get(kwargs['oname'], oprec)
     oscale = oscale if oscale else scale(th_dict[wname], oprec)
-    params[Wn] = sim.int_realize(params[wname] * oscale, oprec, logger=logger)
+    params[Wn] = sim.int_realize(params[wname] * oscale,
+            oprec, logger=logger)
     attr = { 'precision': str(oprec) }
     W = mx.sym.var(Wn, shape=params[Wn].shape, attr=attr)
+    '''
 
     logger.debug(
-        "Parameter th_dict=%-12.8f name=%-40s requantize with scale=%-16.8f to" +
-        " prec=%s",
+        "Parameter th_dict=%-12.8f name=%-40s " + \
+        "requantize with scale=%-16.8f to prec=%s",
             th_dict[wname], wname, oscale, oprec)
+
     return W, oprec, oscale
 
 def requant(sym, oprec, oscale=None, **kwargs):
@@ -394,17 +507,38 @@ def requant_output(op, name, **kwargs):
     th_dict[oname] = th_dict[name]
     precs[oname] = precs[name]
     scales[oname] = scales[name]
-
-    # Requantize output symbol
-    if name in precs[name]:
-        oprec = precs[name][name]
-        os = scale(th_dict[name], oprec)
-        op, oprec, os = requant_operator(op, oprec, os, oname=name, **kwargs)
-
-        oname = op.attr('name')
-        infer_shapes[oname] = infer_shapes[name]
-        th_dict[oname] = th_dict[name]
-        precs[oname] = oprec
-        scales[oname] = os
     return op
+
+def requant_output_clip(op, name, **kwargs):
+    infer_shapes, th_dict = kwargs['infer_shapes'], kwargs['th_dict']
+    precs, scales = kwargs['precs'], kwargs['scales']
+
+    oname = op.attr('name')
+    infer_shapes[oname] = infer_shapes[name]
+    th_dict[oname] = th_dict[name]
+    precs[oname] = precs[name]
+    scales[oname] = scales[name]
+
+    infer_prec = precs[oname][OUT_KEY]
+    tight_prec = get_bit(th_dict[oname] * scales[oname])
+    assert infer_prec >= tight_prec
+
+    if infer_prec > tight_prec:
+        op = mx.sym.Custom(op, precision=tight_prec,
+                name=N.n('clip'), op_type='cvm_clip')
+        clip_name = op.attr('name')
+        infer_shapes[clip_name] = infer_shapes[oname]
+        th_dict[clip_name] = th_dict[oname]
+        precs[clip_name] = { OUT_KEY: tight_prec }
+        scales[clip_name] = scales[oname]
+
+    return op
+
+def get_infer_precision(sym, **kwargs):
+    params = kwargs['params']
+    name = sym.attr('name')
+    if is_params(sym, params):
+        return get_bit(params[name])
+    else:
+        return kwargs['precs'][name][OUT_KEY]
 

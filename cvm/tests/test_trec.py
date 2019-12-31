@@ -42,7 +42,7 @@ def trec(data):
 
 sym, params = mx.sym.load(sym_file), nd.load(param_file)
 sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
-if False:
+if True:
     mrt = _mrt.MRT(sym, params, inputs_ext)
     mrt.set_data('data', data)
     mrt.calibrate(ctx=ctx)
@@ -65,7 +65,7 @@ quant_sym, quant_params, quant_ext = load_fname("sym.quantize", with_ext=True)
 open(quant_sym, "w").write(qsym.tojson())
 
 
-if True:
+if False:
     inputs_ext['data']['shape'] = (38, 1)
     data = data[:, 0].reshape(38, 1)
     _mrt.std_dump(qsym, qparams, inputs_ext, data, "trec",

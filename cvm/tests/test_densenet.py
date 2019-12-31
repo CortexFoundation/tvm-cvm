@@ -54,14 +54,20 @@ def densenet(data, label):
     _, top5 = acc_top5.get()
     return "top1={:6.2%} top5={:6.2%}".format(top1, top5)
 
-# sym, params = mx.sym.load(sym_file), nd.load(param_file)
-# sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
-# qsym, qparams, precs, _ = calib.sym_simulate(sym, params, inputs_ext, data, calib_ctx)
-# qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, precs, "tvm")
-# dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
-# sim.save_ext(dump_ext, inputs_ext)
-# nd.save(dump_params, qparams)
-# open(dump_sym, "w").write(qsym.tojson())
+if True:
+    sym, params = mx.sym.load(sym_file), nd.load(param_file)
+    sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
+
+    import os
+    open(os.path.expanduser('~/tvm-cvm/data/test_ryt2.json'), 'w').write(sym.tojson())
+    exit()
+
+    qsym, qparams, precs, _ = calib.sym_simulate(sym, params, inputs_ext, data, calib_ctx)
+    qsym, qparams = calib.sym_realize(qsym, qparams, inputs_ext, precs, "tvm")
+    dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
+    sim.save_ext(dump_ext, inputs_ext)
+    nd.save(dump_params, qparams)
+    open(dump_sym, "w").write(qsym.tojson())
 
 dump_sym, dump_params, dump_ext = load_fname(version, "sym.quantize", True)
 sym, params = mx.sym.load(dump_sym), nd.load(dump_params)

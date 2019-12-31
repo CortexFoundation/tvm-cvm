@@ -25,7 +25,7 @@ def extract_file(tar_path, target_path):
     tar.extractall(target_path)
     tar.close()
 
-def download_files(category, files, baseUrl=src, root=dataset_dir):
+def download_files(category, files, baseUrl=src, root=dataset_dir, **kwargs):
     logger = logging.getLogger("dataset")
     root_dir = os.path.join(root, category)
     os.makedirs(root_dir, exist_ok=True)
@@ -182,6 +182,11 @@ def data_iter(dataset, batch_size, **kwargs):
             return next(data_iter)
     elif dataset == "quickdraw":
         val_data = load_quickdraw10(batch_size, **kwargs)
+        data_iter = iter(val_data)
+        def data_iter_func():
+            return next(data_iter)
+    elif dataset == "cifar10":
+        val_data = load_cifar10(batch_size, **kwargs)
         data_iter = iter(val_data)
         def data_iter_func():
             return next(data_iter)
