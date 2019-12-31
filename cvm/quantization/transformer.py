@@ -7,6 +7,7 @@ from gluon_zoo import *
 import sym_utils as sutils
 import cvm_op
 import logging
+import os
 from os import path
 
 #TODO(wlt): control available api for MRT
@@ -33,10 +34,12 @@ class MRT(object):
         self.rsym, self.rprm = self.csym, self.cprm
 
     def compile(self, model_name, datadir='/data/std_out'):
-        # TODO: change name
         logger = logging.getLogger('mrt.compile')
+
         datadir = path.join(datadir, model_name)
-        sym, params = prepare_for_compile(self._qsym, self._qprm)
+        os.makedirs(datadir, exist_ok=True)
+
+        sym, params = prepare_for_compile(self.csym, self.cprm)
         nnvm_sym, _ = compile(sym, params)
         args = nnvm_sym.list_input_names()
         real_params = {}

@@ -34,6 +34,7 @@ class Null(Transformer):
 @register_pass("rewrite")
 @register_pass("quantize")
 @register_pass("calculate_ops")
+@register_pass("prepare_for_compile")
 @register_pass('compile')
 @register_transformer("transpose")
 class Transpose(Transformer):
@@ -304,6 +305,7 @@ class Pad(Transformer):
 @register_pass("fuse_transpose")
 @register_pass("rewrite")
 @register_pass("quantize")
+@register_pass("prepare_for_compile")
 @register_transformer('expand_dims')
 class ExpandDims(Transformer):
     def compile(self, op, **kwargs):
@@ -318,6 +320,7 @@ class ExpandDims(Transformer):
 @register_pass("calculate_ops")
 @register_pass("fuse_transpose")
 @register_pass("rewrite")
+@register_pass("prepare_for_compile")
 @register_transformer('Embedding')
 class Embedding(Transformer):
     def quantize(self, op, **kwargs):
@@ -844,6 +847,7 @@ class BroadcastGreater(Transformer):
 @register_pass("rewrite")
 @register_pass("validate")
 @register_pass("calculate_ops")
+@register_pass("prepare_for_compile")
 @register_transformer("Concat")
 class Concat(Transformer):
     def fuse_transpose(self, op, **kwargs):
@@ -1148,7 +1152,7 @@ class Clip(Transformer):
         return get_nnvm_op(op_name)(*childs, **new_attrs)
 
 
-@register_transformer('_minimum')
+@register_transformer("_minimum")
 class Minimum(Transformer):
     def compile(self, op, **kwargs):
         childs = kwargs['childs']
@@ -1158,7 +1162,7 @@ class Minimum(Transformer):
                 name=N.n('_minimum'), **attrs)
 
 
-@register_transformer('_maximum')
+@register_transformer("_maximum")
 class Maximum(Transformer):
     def compile(self, op, **kwargs):
         childs = kwargs['childs']
@@ -1173,18 +1177,20 @@ class Maximum(Transformer):
 @register_pass("rewrite")
 @register_pass("quantize")
 @register_pass("calculate_ops")
-@register_transformer('max')
+@register_pass("prepare_for_compile")
+@register_pass("compile")
+@register_transformer("max")
 class Max(Transformer):
     pass
 
 
-@register_pass('compile')
-@register_transformer('min')
+@register_pass("compile")
+@register_transformer("min")
 class Min(Transformer):
     pass
 
 
-@register_transformer('argmax')
+@register_transformer("argmax")
 class Argmax(Transformer):
     def compile(self, op, **kwargs):
         childs = kwargs['childs']
@@ -1197,7 +1203,7 @@ class Argmax(Transformer):
                 name=N.n('_argmax'), **new_attrs)
 
 
-@register_transformer('argmin')
+@register_transformer("argmin")
 class Argmax(Transformer):
     def compile(self, op, **kwargs):
         childs = kwargs['childs']
@@ -1378,6 +1384,8 @@ class Where(Transformer):
 @register_pass("fuse_transpose")
 @register_pass("rewrite")
 @register_pass("quantize")
+@register_pass("prepare_for_compile")
+@register_pass("compile")
 @register_transformer("squeeze")
 class Squeeze(Transformer):
     pass
