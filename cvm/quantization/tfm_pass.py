@@ -210,7 +210,6 @@ def infer_shape(symbol, params, input_shape=None):
     def _impl(op, params, graph):
         name, op_name = op.attr('name'), op.attr('op_name')
         _, oshp, _ = op.infer_shape()
-
         if is_params(op, params):
             if oshp is None:
                 oshp = [params[name].shape]
@@ -405,42 +404,31 @@ def requant_operator(X, oprec, oscale=None, **kwargs):
     exactly = True if oscale else False
     oprec = precs[xn].get(kwargs['oname'], oprec)
     oscale = oscale if oscale else scale(th_dict[xn], oprec)
-    iprec = precs[xn][OUT_KEY]
     iscale = kwargs['scales'][xn]
+    # OUT_KEY may not by tight:
+    # exp, sigmoid, softmax, and other default quantized op
+    # use get_bit to acquire tight prec
+    iprec = get_bit(th_dict[xn]*iscale)
 
-    if exactly:
-        sb = get_bit(th_dict[xn]*iscale) - oprec
-        if sb > 1:
-            iprec -= sb
-            X = realize(X, sb, iprec)
-            iscale = iscale / (2**sb)
-            logger.debug(
-                "Operator  %-20s name=%-40s exactly quantize with sb=%s" +
-                " scale=%s, prec=%s",
-                    xopn, xn, sb, iscale, iprec)
+    sb = get_bit(th_dict[xn]*iscale) - oprec
+    if sb > 5:
+        iprec -= sb
+        X = realize(X, sb, iprec)
+        iscale = iscale / (2**sb)
+
     if exactly or iprec > oprec:
         rescale = oscale / iscale
-        # frac, exp = sim.cvm_float(rescale, MAX_BIT - iprec)
         bits = MAX_BIT - iprec
         frac, exp = sim.cvm_float(rescale, bits)
         sim_scale = frac * (2 ** exp)
         scale_err = abs((sim_scale - rescale) / rescale)
-        while not exactly and scale_err > 0.0000001:
-            # in order to guarantee that tight_prec <= infer_prec
-            # the precision of rescale must be improved as much as possible
-            bits += 1
-            assert bits < 33
-            frac, exp = sim.cvm_float(rescale, bits)
-            sim_scale = frac * (2 ** exp)
-            scale_err = abs((sim_scale - rescale) / rescale)
-        if exactly and scale_err > 0.001:
+        if scale_err > 0.001:
             logger.warn(
-                "Operator  %-20s name=%-40s requantize to scale=%s " +
-                "with <%s, %d, %d>, error=%s",
-                    xopn, xn, rescale, sim_scale, frac, exp, scale_err)
+                "Operator  %-20s name=%-40s quantize with sb=%s" +
+                " scale=%s, error=%s",
+                    xopn, xn, sb, iscale, scale_err)
         oscale = iscale * frac * (2 ** exp)
         if frac > 1:
-            # X = realize(X, 0, iprec)
             var = mx_const(frac, graph, params)
             X = mx.sym.broadcast_mul(X, var, name=N.n("mrt_quantize_scale"))
         X = realize(X, -exp, oprec)
@@ -449,7 +437,6 @@ def requant_operator(X, oprec, oscale=None, **kwargs):
             " iprec=%s, iscale=%-10.5f, oprec=%s, oscale=%-10.5f",
                 xopn, xn, rescale, frac, exp, iprec, iscale, oprec, oscale)
     else:
-        # X = realize(X, 0, oprec)
         oscale = iscale
         logger.debug(
             "Operator  %-20s name=%-40s clip with iprec=%s, oprec=%s",
@@ -521,7 +508,9 @@ def requant_output_clip(op, name, **kwargs):
 
     infer_prec = precs[oname][OUT_KEY]
     tight_prec = get_bit(th_dict[oname] * scales[oname])
-    assert infer_prec >= tight_prec
+    assert infer_prec >= tight_prec, \
+        "infer_prec:%s, tight_prec:%s, name:%s, op:%s"%\
+        (infer_prec, tight_prec, name, op_name)
 
     if infer_prec > tight_prec:
         op = mx.sym.Custom(op, precision=tight_prec,

@@ -65,6 +65,7 @@ class Transpose(Transformer):
 @register_pass("rewrite")
 @register_pass("calculate_ops")
 @register_pass("quantize")
+@register_pass("compile")
 @register_transformer("relu")
 class Relu(Transformer):
     def fuse_transpose(self, op, **kwargs):
@@ -75,11 +76,6 @@ class Relu(Transformer):
             op = mx.sym.relu(X, name=name)
             op = mx.sym.transpose(op, name=t_name, **t_attr)
         return op
-
-    def compile(self, op, **kwargs):
-        childs = kwargs['childs']
-        sym = get_nnvm_op(self.op_name)(*childs, name=N.n('relu'))
-        return sym
 
 
 @register_pass("calculate_ops")
@@ -381,7 +377,7 @@ class Repeat(Transformer):
 class BoxNms(Transformer):
     def prepare_for_compile(self, op, **kwargs):
         attrs = op.list_attr()
-        iou_thresh = get_attr(attrs, ' overlap_thresh', 0.5) * 100
+        iou_thresh = get_attr(attrs, 'overlap_thresh', 0.5) * 100
         iou_thresh = int(iou_thresh)
         attrs['overlap_thresh'] = iou_thresh
         assert attrs['valid_thresh'] == int(attrs['valid_thresh'])
@@ -393,7 +389,7 @@ class BoxNms(Transformer):
         childs = kwargs['childs']
         attrs = kwargs['attr']
         force_suppress = get_attr(attrs, 'force_suppress', False)
-        iou_thresh = get_attr(attrs, ' overlap_thresh')
+        iou_thresh = get_attr(attrs, 'overlap_thresh')
         top_k = get_attr(attrs, 'topk', -1)
         valid_thresh = get_attr(attrs, 'valid_thresh', 0)
         coord_start = get_attr(attrs, 'coord_start', 2)
@@ -418,7 +414,7 @@ class BoxNms(Transformer):
 @register_pass("rewrite")
 @register_pass("calculate_ops")
 @register_pass("fuse_transpose")
-@register_transformer('slice_like')
+@register_transformer("slice_like")
 class SliceLike(Transformer):
     def quantize(self, op, **kwargs):
         # TODO: restore
@@ -433,24 +429,28 @@ class SliceLike(Transformer):
 
 
 @register_pass("validate")
-@register_pass("rewrite")
 @register_pass("calculate_ops")
 @register_pass("fuse_transpose")
-@register_pass("quantize")
-@register_transformer('slice_axis')
+@register_transformer("slice_axis")
 class SliceAxis(Transformer):
-    def prepare_for_compile(self, op, **kwargs):
+    def rewrite(self, op, **kwargs):
+        name = op.attr('name')
         childs, attr = sym_iter(op.get_children()), op.list_attr()
         X = childs[0]
-        cshape = infer_shapes[X.attr('name')]
+        cshape = kwargs['infer_shapes'][X.attr('name')][get_entry_id(X)]
+        ndims = len(cshape)
+
         axis = get_attr(attr, 'axis')
+        assert axis in range(-ndims, ndims)
+        axis = axis if axis >= 0 else axis+ndims
         axis_begin = get_attr(attr, 'begin')
-        axis_end = get_attr(attr, 'end', None)
-        axis_end = cshape[axis]
-        begin = [0 for s in cshape]
-        end = [s for s in cshape]
-        begin[axis], end[axis] = axis_begin, axis_end
-        return get_mxnet_op('slice')(X, begin=begin, end=end, name=name)
+        axis_end = get_attr(attr, 'end')
+        axis_end = axis_end if axis_end else cshape[axis]
+
+        begin = [0 if i != axis else axis_begin for i in range(len(cshape))]
+        end = [cshape[i] if i != axis else axis_end for i in range(len(cshape))]
+        op = get_mxnet_op('slice')(X, begin=begin, end=end, name=name)
+        return op
 
 
 @register_pass("validate")
@@ -776,14 +776,12 @@ class BroadcastMul(Transformer):
         oscale = scales[name] = xs * bs
         op = get_mxnet_op(op_name)(X, B, **attr, name=name)
 
-        # precs[name][OUT_KEY] = get_bit(th_dict[name]*oscale)
         infer_prec = xprec + bprec - 1
         precs[name][OUT_KEY] = infer_prec
 
         logger = logging.getLogger('log.mrt.realize')
         logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
                op_name, name, scales[name], cns)
-        # op = requant_output(op, name, **kwargs)
         op = requant_output_clip(op, name, **kwargs)
         return op
 
@@ -1061,13 +1059,16 @@ class Cast(Transformer):
         return node
 
 
+@register_pass("calculate_ops")
+@register_pass("fuse_transpose")
 @register_pass("validate")
+@register_pass("quantize")
 @register_transformer("slice")
 class Slice(Transformer):
-    def prepare_for_compile(self, op, **kwargs):
+    def rewrite(self, op, **kwargs):
         childs, attr = sym_iter(op.get_children()), op.list_attr()
         X = childs[0]
-        cshape = infer_shapes[X.attr('name')]
+        cshape = infer_shapes[X.attr('name')][get_entry_id(X)]
         begin = get_attr(attr, 'begin')
         end = get_attr(attr, 'end')
         begin = [0 if s is None else s for s in begin]
