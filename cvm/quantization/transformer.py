@@ -87,9 +87,8 @@ class MRT(object):
     def _prepare(self):
         self._lgr = logging.getLogger('mrt')
         self._lgr.info("Graph initialize and reduce...")
-
         _sym, _prm = self.csym, self.cprm
-        orig_ops = calculate_ops(_sym, _prm)
+
         if self._ishp is not None:
             _sym, _prm = attach_input_shape(_sym, _prm,
                 {'data': self._ishp})
@@ -97,6 +96,7 @@ class MRT(object):
         infer_shape(_sym, _prm) # check infer_shape is correct.
         _sym, _prm = validate(_sym, _prm)
 
+        orig_ops = calculate_ops(_sym, _prm)
         _sym, _prm = fuse_multiple_outputs(_sym, _prm)
         _sym, _prm = fuse_constant(_sym, _prm)
         _sym, _prm = fuse_transpose(_sym, _prm)

@@ -449,7 +449,7 @@ class SliceAxis(Transformer):
 
         begin = [0 if i != axis else axis_begin for i in range(len(cshape))]
         end = [cshape[i] if i != axis else axis_end for i in range(len(cshape))]
-        op = get_mxnet_op('slice')(X, begin=begin, end=end, name=name)
+        op = mx.sym.slice(X, begin=begin, end=end, name=name)
         return op
 
 
@@ -1066,6 +1066,8 @@ class Cast(Transformer):
 @register_transformer("slice")
 class Slice(Transformer):
     def rewrite(self, op, **kwargs):
+        infer_shapes = kwargs['infer_shapes']
+        name = op.attr('name')
         childs, attr = sym_iter(op.get_children()), op.list_attr()
         X = childs[0]
         cshape = infer_shapes[X.attr('name')][get_entry_id(X)]
@@ -1073,7 +1075,7 @@ class Slice(Transformer):
         end = get_attr(attr, 'end')
         begin = [0 if s is None else s for s in begin]
         end = [cshape[i] if s is None else s for i,s in enumerate(end)]
-        return get_mxnet_op('slice')(X, begin=begin, end=end, name=name)
+        return mx.sym.slice(X, begin=begin, end=end, name=name)
 
     def compile(self, op, **kwargs):
         childs = kwargs['childs']
