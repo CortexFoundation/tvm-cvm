@@ -78,15 +78,6 @@ def quantize(symbol, params, th_dict, precs, scales, op_input_precs):
             quantize_output, th_dict=th_dict,
             precs=precs, scales=scales)
 
-@N.register_nm("prepare_for_cvm")
-def prepare_for_compile(symbol, params):
-    infer_shapes = infer_shape(symbol, params)
-    return topo_visit_transformer(symbol, params,
-            apply_pass(
-                "prepare_for_compile",
-                infer_shapes=infer_shapes,
-            ))
-
 @N.register_nm("cvm")
 def compile(symbol, params):
     def _as_list(arr):
@@ -509,6 +500,9 @@ def requant_output_clip(op, name, **kwargs):
     scales[oname] = scales[name]
 
     infer_prec = precs[oname][OUT_KEY]
+    assert infer_prec <= 32, \
+        "infer_prec:%s, tight_prec:%s, name:%s, op:%s"%\
+        (infer_prec, tight_prec, name, op_name)
     tight_prec = get_bit(th_dict[oname] * scales[oname])
     assert infer_prec >= tight_prec, \
         "infer_prec:%s, tight_prec:%s, name:%s, op:%s"%\
@@ -524,12 +518,4 @@ def requant_output_clip(op, name, **kwargs):
         scales[clip_name] = scales[oname]
 
     return op
-
-def get_infer_precision(sym, **kwargs):
-    params = kwargs['params']
-    name = sym.attr('name')
-    if is_params(sym, params):
-        return get_bit(params[name])
-    else:
-        return kwargs['precs'][name][OUT_KEY]
 

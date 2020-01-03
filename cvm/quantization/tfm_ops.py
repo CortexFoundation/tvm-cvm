@@ -923,13 +923,11 @@ class Sum(Transformer):
         kprec = get_bit_cnt(k)
         infer_prec = kprec + xprec
         kwargs['precs'][name][OUT_KEY] = infer_prec
-        # kwargs['precs'][name][OUT_KEY] = get_bit(th_dict[name] * scales[name])
 
         logger = logging.getLogger('log.mrt.realize')
         logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
                op_name, name, scales[name], cns)
         op = requant_output_clip(op, name, **kwargs)
-        # op = requant_output(op, name, **kwargs)
         return op
 
 
@@ -1406,7 +1404,6 @@ def _quantize_scale(op, **kwargs):
         cprecs.append(cprec)
         new_childs.append(c)
     op = get_mxnet_op(op_name)(*new_childs, **attr, name=name)
-    # precs[name][OUT_KEY] = get_bit(th_dict[name]*oscale)
     infer_prec = max(cprecs) if op_name in ['Concat'] else max(cprecs)+1
     precs[name][OUT_KEY] = infer_prec
 
@@ -1414,21 +1411,7 @@ def _quantize_scale(op, **kwargs):
     logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
            op_name, name, scales[name], cns)
     op = requant_output_clip(op, name, **kwargs)
-    # op = requant_output(op, name, **kwargs)
     return op
-
-def _infer_precision_scale(op, **kwargs):
-    op_name = op.attr('op_name')
-    childs = sym_iter(op.get_children())
-
-    p1 = get_infer_precision(childs[0], **kwargs)
-    p2 = get_infer_precision(childs[1], **kwargs)
-    infer_prec = max(p1, p2)
-    if op_name in ['elemwise_add', 'elemwise_sub', \
-        'broadcast_add', 'broadcast_add']:
-        infer_prec += 1
-
-    return infer_prec
 
 def _quantize_xwb(op, **kwargs):
     th_dict, scales = kwargs['th_dict'], kwargs['scales']
@@ -1448,7 +1431,6 @@ def _quantize_xwb(op, **kwargs):
     oscale = scales[name] = ws * xs
     op = get_mxnet_op(op_name)(X, W, B, **attr, name=name)
 
-    # kwargs['precs'][name][OUT_KEY] = get_bit(th_dict[name] * oscale)
     shp = kwargs['params'][childs[1].attr('name')].shape
     k = int(nd.prod(nd.array(shp[1:])).asscalar())
     kprec = get_bit_cnt(k)
@@ -1460,7 +1442,6 @@ def _quantize_xwb(op, **kwargs):
     logger = logging.getLogger('log.mrt.realize')
     logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
            op_name, name, scales[name], cns)
-    # op = requant_output(op, name, **kwargs)
     op = requant_output_clip(op, name, **kwargs)
     return op
 
