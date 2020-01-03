@@ -12,7 +12,6 @@ import numpy as np
 @register_pass("validate")
 @register_pass("rewrite")
 @register_pass("fuse_transpose")
-@register_pass("prepare_for_compile")
 @register_transformer("null")
 class Null(Transformer):
     def quantize(self, op, **kwargs):
@@ -34,7 +33,6 @@ class Null(Transformer):
 @register_pass("rewrite")
 @register_pass("quantize")
 @register_pass("calculate_ops")
-@register_pass("prepare_for_compile")
 @register_pass('compile')
 @register_transformer("transpose")
 class Transpose(Transformer):
@@ -151,7 +149,6 @@ class DivScalar(Transformer):
 
 
 @register_pass("quantize")
-@register_pass("prepare_for_compile")
 @register_transformer("Activation")
 class Activation(Transformer):
     def validate(self, op, **kwargs):
@@ -187,7 +184,6 @@ class Activation(Transformer):
 
 
 @register_pass("fuse_transpose")
-@register_pass("prepare_for_compile")
 @register_transformer("Convolution")
 class Convolution(Transformer):
     def validate(self, op, **kwargs):
@@ -301,7 +297,6 @@ class Pad(Transformer):
 @register_pass("fuse_transpose")
 @register_pass("rewrite")
 @register_pass("quantize")
-@register_pass("prepare_for_compile")
 @register_transformer('expand_dims')
 class ExpandDims(Transformer):
     def compile(self, op, **kwargs):
@@ -316,7 +311,6 @@ class ExpandDims(Transformer):
 @register_pass("calculate_ops")
 @register_pass("fuse_transpose")
 @register_pass("rewrite")
-@register_pass("prepare_for_compile")
 @register_transformer('Embedding')
 class Embedding(Transformer):
     def quantize(self, op, **kwargs):
@@ -375,17 +369,20 @@ class Repeat(Transformer):
 @register_pass("quantize")
 @register_transformer('_contrib_box_nms')
 class BoxNms(Transformer):
-    def prepare_for_compile(self, op, **kwargs):
-        attrs = op.list_attr()
+    def _revise_attr(self, op, **kwargs):
+        childs = kwargs['childs']
+        attrs = kwargs['attr']
         iou_thresh = get_attr(attrs, 'overlap_thresh', 0.5) * 100
         iou_thresh = int(iou_thresh)
         attrs['overlap_thresh'] = iou_thresh
-        assert attrs['valid_thresh'] == int(attrs['valid_thresh'])
-        attrs['valid_thresh'] = int(attrs['valid_thresh'])
+        # assert attrs['valid_thresh'] == int(attrs['valid_thresh'])
+        valid_thresh = get_attr(attrs, 'valid_thresh')
+        attrs['valid_thresh'] = int(valid_thresh)
         return get_mxnet_op(self.op_name)(
-                sym_iter(op.get_children()), **attrs, name=op.attr('name'))
+                *childs, **attrs, name=op.attr('name'))
 
     def compile(self, op, **kwargs):
+        op = _revise_attr(op, **kwargs)
         childs = kwargs['childs']
         attrs = kwargs['attr']
         force_suppress = get_attr(attrs, 'force_suppress', False)
@@ -471,7 +468,6 @@ class UpSampling(Transformer):
 
 @register_pass("validate")
 @register_pass("fuse_transpose")
-@register_pass("prepare_for_compile")
 @register_transformer("FullyConnected")
 class FullyConnected(Transformer):
     def rewrite(self, op, **kwargs):
@@ -649,7 +645,6 @@ class Softmax(Transformer):
 
 @register_pass("fuse_transpose")
 @register_pass("quantize")
-@register_pass("prepare_for_compile")
 @register_transformer("Pooling")
 class Pooling(Transformer):
     def validate(self, op, **kwargs):
@@ -758,7 +753,6 @@ class Pooling(Transformer):
 @register_pass("fuse_transpose")
 @register_pass("rewrite")
 @register_pass("compile")
-@register_pass("prepare_for_compile")
 @register_transformer("broadcast_mul")
 class BroadcastMul(Transformer):
     def quantize(self, op, **kwargs):
@@ -845,7 +839,6 @@ class BroadcastGreater(Transformer):
 @register_pass("rewrite")
 @register_pass("validate")
 @register_pass("calculate_ops")
-@register_pass("prepare_for_compile")
 @register_transformer("Concat")
 class Concat(Transformer):
     def fuse_transpose(self, op, **kwargs):
@@ -1007,56 +1000,44 @@ class BatchNorm(Transformer):
 @register_pass("rewrite")
 @register_pass("quantize")
 @register_pass("calculate_ops")
-@register_pass("prepare_for_compile")
 @register_transformer("Flatten")
 class Flatten(Transformer):
     def compile(self, op, **kwargs):
         childs = kwargs['childs']
         attrs = kwargs['attr']
-        op_name = 'flatten'
-        sym = get_nnvm_op(op_name)(*childs, name=N.n(),
-                                        **attrs)
+        sym = get_nnvm_op(Flatten.op_name)(*childs,
+                name=N.n(), **attrs)
         return sym
 
 
 @register_transformer('floor')
 class Floor(Transformer):
-    def prepare_for_compile(self, op, **kwargs):
-        childs, attr = sym_iter(op.get_children()), op.list_attr()
-        node = childs[0]
-        return node
+    def compile(self, op, **kwargs):
+        return _compile_child(op, **kwargs)
 
 
 @register_transformer('ceil')
 class Ceil(Transformer):
-    def prepare_for_compile(self, op, **kwargs):
-        childs, attr = sym_iter(op.get_children()), op.list_attr()
-        node = childs[0]
-        return node
+    def compile(self, op, **kwargs):
+        return _compile_child(op, **kwargs)
 
 
 @register_transformer('round')
 class Round(Transformer):
-    def prepare_for_compile(self, op, **kwargs):
-        childs, attr = sym_iter(op.get_children()), op.list_attr()
-        node = childs[0]
-        return node
+    def compile(self, op, **kwargs):
+        return _compile_child(op, **kwargs)
 
 
 @register_transformer('fix')
 class Fix(Transformer):
-    def prepare_for_compile(self, op, **kwargs):
-        childs, attr = sym_iter(op.get_children()), op.list_attr()
-        node = childs[0]
-        return node
+    def compile(self, op, **kwargs):
+        return _compile_child(op, **kwargs)
 
 
 @register_transformer('Cast')
 class Cast(Transformer):
-    def prepare_for_compile(self, op, **kwargs):
-        childs, attr = sym_iter(op.get_children()), op.list_attr()
-        node = childs[0]
-        return node
+    def compile(self, op, **kwargs):
+        return _compile_child(op, **kwargs)
 
 
 @register_pass("calculate_ops")
@@ -1107,7 +1088,6 @@ class Reshape(Transformer):
                 name=N.n('reshape'), **new_attrs)
 
 
-@register_pass("prepare_for_compile")
 @register_transformer("Custom")
 class Custom(Transformer):
     def validate(self, op, **kwargs):
@@ -1180,7 +1160,6 @@ class Maximum(Transformer):
 @register_pass("rewrite")
 @register_pass("quantize")
 @register_pass("calculate_ops")
-@register_pass("prepare_for_compile")
 @register_pass("compile")
 @register_transformer("max")
 class Max(Transformer):
@@ -1255,7 +1234,6 @@ class ElemwiseSub(Transformer):
 @register_pass("calculate_ops")
 @register_pass("rewrite")
 @register_pass("quantize")
-@register_pass("prepare_for_compile")
 @register_transformer("Dropout")
 class Dropout(Transformer):
     def compile(self, op, **kwargs):
@@ -1287,6 +1265,7 @@ class Arange(Transformer):
 @register_pass("fuse_transpose")
 @register_pass("rewrite")
 @register_pass("quantize")
+@register_pass("compile")
 @register_transformer("tile")
 class Tile(Transformer):
     pass
@@ -1296,6 +1275,7 @@ class Tile(Transformer):
 @register_pass("fuse_transpose")
 @register_pass("rewrite")
 @register_pass("quantize")
+@register_pass("compile")
 @register_transformer("negative")
 class Negative(Transformer):
     pass
@@ -1387,7 +1367,6 @@ class Where(Transformer):
 @register_pass("fuse_transpose")
 @register_pass("rewrite")
 @register_pass("quantize")
-@register_pass("prepare_for_compile")
 @register_pass("compile")
 @register_transformer("squeeze")
 class Squeeze(Transformer):
@@ -1540,4 +1519,12 @@ def _quantize_table(op, **kwargs):
            op_name, name, scales[name], cns)
     op = requant_output(op, name, **kwargs)
     return op
+
+def _compile_child(op, **kwargs):
+    graph = kwargs['graph']
+
+    childs = sym_iter(op.get_children())
+    cname = childs[0].attr('name')
+
+    return graph[cname]
 

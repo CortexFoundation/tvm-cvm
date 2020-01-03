@@ -68,9 +68,6 @@ class Transformer(object):
                op_name, name, scales[name], scales[cname])
         return op
 
-    def prepare_for_compile(self, op, **kwargs):
-        return op
-
     def compile(self, op, **kwargs):
         """ Compile mxnet symbol into nnvm symbol.
 

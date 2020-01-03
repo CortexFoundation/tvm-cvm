@@ -101,7 +101,7 @@ def compile(symbol, params):
         childs = [get_node(c, graph) for c in childs]
         childs = [x for y in childs for x in _as_list(y)]
         op = apply_pass("compile", infer_shapes=infer_shapes)(
-                op, childs=childs, attr=attr)
+                op, childs=childs, attr=attr, graph=graph)
         graph[name] = op
 
     nodes = []
@@ -184,11 +184,13 @@ def fuse_constant(symbol, params):
             pass
         elif childs is None:
             params[name] = get_nd_op(op_name)(**attr)
-            op = mx.sym.var(name, shape=params[name].shape)
+            attr = { 'precision': str(get_bit(params[name])) }
+            op = mx.sym.var(name, shape=params[name].shape, attr=attr)
         elif all([is_params(c, params) for c in childs]):
             in_params = [params[c.attr('name')] for c in childs]
             params[name] = get_nd_op(op_name)(*in_params, **attr)
-            op = mx.sym.var(name, shape=params[name].shape)
+            attr = { 'precision': str(get_bit(params[name])) }
+            op = mx.sym.var(name, shape=params[name].shape, attr=attr)
         return op
     return topo_visit_transformer(symbol, params, _impl)
 

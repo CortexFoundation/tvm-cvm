@@ -39,7 +39,8 @@ class MRT(object):
         datadir = path.join(datadir, model_name)
         os.makedirs(datadir, exist_ok=True)
 
-        sym, params = prepare_for_compile(self.csym, self.cprm)
+        # sym, params = prepare_for_compile(self.csym, self.cprm)
+        sym, params = self.csym, self.cprm
         nnvm_sym, _ = compile(sym, params)
         args = nnvm_sym.list_input_names()
         real_params = {}
@@ -96,8 +97,8 @@ class MRT(object):
         infer_shape(_sym, _prm) # check infer_shape is correct.
         _sym, _prm = validate(_sym, _prm)
 
-        orig_ops = calculate_ops(_sym, _prm)
         _sym, _prm = fuse_multiple_outputs(_sym, _prm)
+        orig_ops = calculate_ops(_sym, _prm)
         _sym, _prm = fuse_constant(_sym, _prm)
         _sym, _prm = fuse_transpose(_sym, _prm)
         _sym, _prm = rewrite(_sym, _prm)

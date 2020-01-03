@@ -146,6 +146,13 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratch=0):
         mrt.set_threshold('yolov30_yolooutputv32_tile0', 416)
         mrt.set_output_prec(30)
         qbase, qbase_params, qbase_inputs_ext = mrt.quantize()
+        if True:
+            mrt.compile("yolo_tfm", datadir="/data/ryt")
+            data = sim.load_real_data(data, 'data', qbase_inputs_ext)
+            np.save("/data/ryt/yolo_tfm/data.npy",
+                    sim.load_real_data(data, 'data',
+                        qbase_inputs_ext).asnumpy().astype('int32'))
+
         oscales = mrt.get_output_scales()
         maps = mrt.get_maps()
         dump_sym, dump_params, dump_ext = load_fname("_darknet53_voc", "mrt.quantize", True)
@@ -229,4 +236,3 @@ if __name__ == '__main__':
 
     from_scratch = 0
     test_mrt_quant(16, 10, from_scratch) # 87% --> 87%
-    #test_sym_nnvm(16, 0)
