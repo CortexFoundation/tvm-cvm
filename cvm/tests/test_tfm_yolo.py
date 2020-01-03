@@ -145,13 +145,11 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratch=0):
         mrt.set_threshold('yolov30_yolooutputv31_tile0', 416)
         mrt.set_threshold('yolov30_yolooutputv32_tile0', 416)
         mrt.set_output_prec(30)
+
         qbase, qbase_params, qbase_inputs_ext = mrt.quantize()
         if True:
-            mrt.compile("yolo_tfm", datadir="/data/ryt")
-            data = sim.load_real_data(data, 'data', qbase_inputs_ext)
-            np.save("/data/ryt/yolo_tfm/data.npy",
-                    sim.load_real_data(data, 'data',
-                        qbase_inputs_ext).asnumpy().astype('int32'))
+            mrt.compile("yolo_tfm", datadir="/data/ryt", input_shape=(1, 3, 416, 416))
+            exit()
 
         oscales = mrt.get_output_scales()
         maps = mrt.get_maps()
@@ -177,7 +175,7 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratch=0):
                 node = sutils.get_mxnet_op(op_name)(*childs, **attr, name=name)
             return node
         qsym, qparams = merge_model(qbase, qbase_params,
-                top, top_params, maps, box_nms)
+                top, top_params, maps, None)
         oscales2 = [oscales[1], oscales[0], oscales[2]]
         sym_file, param_file, ext_file = \
                 load_fname("_darknet53_voc", "mrt.all.quantize", True)
@@ -234,5 +232,5 @@ if __name__ == '__main__':
 
     # zoo.save_model('yolo3_darknet53_voc')
 
-    from_scratch = 0
+    from_scratch = 2
     test_mrt_quant(16, 10, from_scratch) # 87% --> 87%

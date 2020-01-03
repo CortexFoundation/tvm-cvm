@@ -33,8 +33,12 @@ class MRT(object):
 
         self.rsym, self.rprm = self.csym, self.cprm
 
-    def compile(self, model_name, datadir='/data/std_out'):
+    def compile(self, model_name, datadir='/data/std_out', input_shape=None):
         logger = logging.getLogger('mrt.compile')
+        if input_shape is not None:
+            self.csym, self.cprm = \
+                    attach_input_shape(self.csym, self.cprm,
+                    {'data': input_shape})
 
         datadir = path.join(datadir, model_name)
         os.makedirs(datadir, exist_ok=True)
@@ -53,7 +57,7 @@ class MRT(object):
             msg = "key:%s value:%s"%(key, value)
             flat = value.asnumpy().flatten()
             assert all(flat >= INT32_MIN) and all(flat <= INT32_MAX), msg
-            assert all(flat.astype('int32').astype('float32') == flat), msg
+            assert all(flat.astype('int32').astype('float64') == flat), msg
             real_params[key] = tvm.nd.array(value.astype(use_dtype).asnumpy(), tvm_ctx)
         return self.cvm_build(nnvm_sym, real_params,
                 path.join(datadir,"symbol"), path.join(datadir,"params"))

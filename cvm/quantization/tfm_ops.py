@@ -245,7 +245,6 @@ class Convolution(Transformer):
         oshp = infer_shapes[op.attr('name')][0]
         op = mx.sym.Convolution(X, W, **attr, name=name)
         B = mx.sym.reshape(B, (1, oshp[1], 1, 1), name=N.n('reshape'))
-        print (B.infer_shape())
         op = mx.sym.broadcast_add(op, B, name=N.n('broadcast_add'))
         return op
 
@@ -329,7 +328,6 @@ class Embedding(Transformer):
         kwargs['precs'][name][OUT_KEY] = get_bit(th_dict[name]*ws)
         op  = get_mxnet_op(op_name)(X, W, **attr, name=name)
 
-        op = requant_output(op, name, **kwargs)
         return op
 
     def compile(self, op, **kwargs):
@@ -444,8 +442,8 @@ class SliceAxis(Transformer):
         axis_end = get_attr(attr, 'end')
         axis_end = axis_end if axis_end else cshape[axis]
 
-        begin = [0 if i != axis else axis_begin for i in range(len(cshape))]
-        end = [cshape[i] if i != axis else axis_end for i in range(len(cshape))]
+        begin = [None if i != axis else axis_begin for i in range(len(cshape))]
+        end = [None if i != axis else axis_end for i in range(len(cshape))]
         op = mx.sym.slice(X, begin=begin, end=end, name=name)
         return op
 
@@ -639,7 +637,6 @@ class Softmax(Transformer):
         logger = logging.getLogger('log.mrt.realize')
         logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
                op_name, name, scales[name], cns)
-        op = requant_output(op, name, **kwargs)
         return op
 
 
@@ -770,13 +767,12 @@ class BroadcastMul(Transformer):
         oscale = scales[name] = xs * bs
         op = get_mxnet_op(op_name)(X, B, **attr, name=name)
 
-        infer_prec = xprec + bprec - 1
+        infer_prec = xprec + bprec
         precs[name][OUT_KEY] = infer_prec
 
         logger = logging.getLogger('log.mrt.realize')
         logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
                op_name, name, scales[name], cns)
-        op = requant_output_clip(op, name, **kwargs)
         return op
 
 
@@ -927,7 +923,6 @@ class Sum(Transformer):
         logger = logging.getLogger('log.mrt.realize')
         logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
                op_name, name, scales[name], cns)
-        op = requant_output_clip(op, name, **kwargs)
         return op
 
 
@@ -1041,26 +1036,27 @@ class Cast(Transformer):
 @register_pass("calculate_ops")
 @register_pass("fuse_transpose")
 @register_pass("validate")
+@register_pass("rewrite")
 @register_pass("quantize")
 @register_transformer("slice")
 class Slice(Transformer):
-    def rewrite(self, op, **kwargs):
+    def _fix_attr(self, op, **kwargs):
         infer_shapes = kwargs['infer_shapes']
-        name = op.attr('name')
-        childs, attr = sym_iter(op.get_children()), op.list_attr()
+        childs, attr = kwargs['childs'], kwargs['attr']
         X = childs[0]
-        cshape = infer_shapes[X.attr('name')][get_entry_id(X)]
+        cshape = infer_shapes[X.attr('name')][0]
         begin = get_attr(attr, 'begin')
         end = get_attr(attr, 'end')
-        begin = [0 if s is None else s for s in begin]
-        end = [cshape[i] if s is None else s for i,s in enumerate(end)]
-        return mx.sym.slice(X, begin=begin, end=end, name=name)
+        attr['begin'] = [0 if s is None else s for s in begin]
+        attr['end'] = [cshape[i] if s is None else s for i,s in enumerate(end)]
+        return attr
 
     def compile(self, op, **kwargs):
+        attrs = self._fix_attr(op, **kwargs)
         childs = kwargs['childs']
-        attrs = kwargs['attr']
-        begin = get_attr(attrs, 'begin', None)
-        end = get_attr(attrs, 'end', None)
+        # TODO: check default value
+        begin = attrs['begin']
+        end = attrs['end']
         stride = get_attr(attrs, 'step', None)
         new_attrs = {'begin': begin, 'end': end}
         if stride is not None:
@@ -1410,7 +1406,6 @@ def _quantize_scale(op, **kwargs):
     logger = logging.getLogger('log.mrt.realize')
     logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
            op_name, name, scales[name], cns)
-    op = requant_output_clip(op, name, **kwargs)
     return op
 
 def _quantize_xwb(op, **kwargs):
@@ -1442,7 +1437,6 @@ def _quantize_xwb(op, **kwargs):
     logger = logging.getLogger('log.mrt.realize')
     logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
            op_name, name, scales[name], cns)
-    op = requant_output_clip(op, name, **kwargs)
     return op
 
 def _restore(op, **kwargs):
@@ -1465,7 +1459,6 @@ def _restore(op, **kwargs):
     out = (out * oscale)
     precs[name][OUT_KEY] = oprec
 
-    out = requant_output(out, name, **kwargs)
     return out
 
 def _quantize_table(op, **kwargs):
@@ -1498,7 +1491,6 @@ def _quantize_table(op, **kwargs):
     logger = logging.getLogger('log.mrt.realize')
     logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
            op_name, name, scales[name], cns)
-    op = requant_output(op, name, **kwargs)
     return op
 
 def _compile_child(op, **kwargs):

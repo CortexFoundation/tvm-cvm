@@ -49,12 +49,36 @@ def rewrite(symbol, params):
 @N.register_nm("quantize")
 def quantize(symbol, params, th_dict, precs, scales, op_input_precs):
     infer_shapes = infer_shape(symbol, params)
+
+    def _quant(op, **kwargs):
+        op = apply_pass("quantize",
+            infer_shapes=kwargs['infer_shapes'],
+            th_dict=kwargs['th_dict'],
+        )(op, **kwargs)
+
+        if is_var(op, kwargs['params']):
+            return op
+
+        name = op.attr('name')
+        th_dict, scales = kwargs['th_dict'], kwargs['scales']
+        precs = kwargs['precs']
+        th = th_dict[name]
+        scale = scales[name]
+        tight_prec = get_bit(th_dict[name] * scales[name])
+        if precs[name][OUT_KEY] > tight_prec:
+            op = mx.sym.Custom(op, precision=tight_prec,
+                    name=N.n('clip'), op_type='cvm_clip')
+            clip_name = op.attr('name')
+            infer_shapes[clip_name] = infer_shapes[name]
+            th_dict[clip_name] = th_dict[name]
+            precs[clip_name] = { OUT_KEY: tight_prec }
+            scales[clip_name] = scales[name]
+
+        return op
+
     sym, params = topo_visit_transformer(symbol, params,
-            apply_pass(
-                "quantize",
-                infer_shapes=infer_shapes,
-            ),
-            th_dict=th_dict,
+            _quant,
+            infer_shapes=infer_shapes, th_dict=th_dict,
             precs=precs, scales=scales,
             op_input_precs=op_input_precs)
 
@@ -301,7 +325,8 @@ def _get_opt(out, lambd):
 
 def mx_const(number, graph, params):
     name = N.n('const_var')
-    prec = math.ceil(math.log2(number)) + 1
+    # prec = math.ceil(math.log2(number)) + 1
+    prec = math.ceil(math.log2(number+1)) + 1
     if name not in graph:
         attr = { 'precision': str(prec) }
         graph[name] = mx.sym.var(name, shape=(1,), attr=attr)
@@ -401,7 +426,8 @@ def requant_operator(X, oprec, oscale=None, **kwargs):
     # OUT_KEY may not by tight:
     # exp, sigmoid, softmax, and other default quantized op
     # use get_bit to acquire tight prec
-    iprec = get_bit(th_dict[xn]*iscale)
+    # iprec = get_bit(th_dict[xn]*iscale)
+    iprec = precs[xn][OUT_KEY]
 
     sb = get_bit(th_dict[xn]*iscale) - oprec
     if sb > 5:
@@ -451,19 +477,20 @@ def requant_parameter(wname, oprec, oscale=None, **kwargs):
     else:
         oprec = kwargs['precs'][wname].get(kwargs['oname'], oprec)
         oscale = oscale if oscale else scale(th_dict[wname], oprec)
-        params[Wn] = sim.int_realize(params[wname] * oscale,
+        params[Wn] = sim.int_realize(
+                params[wname].astype('float64') * oscale,
                 oprec, logger=logger)
         attr = { 'precision': str(oprec) }
+        max_v = params[wname].astype('float64').abs().max().asscalar()*oscale
+        max_v = params[Wn].astype('float64').abs().max().asscalar()
+        range_v = (2**(oprec-1)-1)
+        assert max_v <= range_v,\
+            "name:%s, max_v:%s, range_v:%s, oprec:%s"%\
+            (wname, max_v, range_v, oprec)
+        if Wn == 'mrt_quantize_const_var_166':
+            print(params[Wn].abs().max().asscalar())
+            exit()
         W = mx.sym.var(Wn, shape=params[Wn].shape, attr=attr)
-
-    '''
-    oprec = kwargs['precs'][wname].get(kwargs['oname'], oprec)
-    oscale = oscale if oscale else scale(th_dict[wname], oprec)
-    params[Wn] = sim.int_realize(params[wname] * oscale,
-            oprec, logger=logger)
-    attr = { 'precision': str(oprec) }
-    W = mx.sym.var(Wn, shape=params[Wn].shape, attr=attr)
-    '''
 
     logger.debug(
         "Parameter th_dict=%-12.8f name=%-40s " + \
