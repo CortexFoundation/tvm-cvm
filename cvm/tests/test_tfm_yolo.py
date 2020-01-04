@@ -57,7 +57,7 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratch=0):
     logger = logging.getLogger("log.test.mrt.quantize")
     flag = [False]*from_scratch + [True]*(4-from_scratch)
 
-    ctx = mx.gpu(2)
+    ctx = mx.gpu(4)
     qctx = mx.gpu(3)
     input_size = 416
     input_shape = (batch_size, 3, input_size, input_size)
@@ -147,9 +147,6 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratch=0):
         mrt.set_output_prec(30)
 
         qbase, qbase_params, qbase_inputs_ext = mrt.quantize()
-        if True:
-            mrt.compile("yolo_tfm", datadir="/data/ryt", input_shape=(1, 3, 416, 416))
-            exit()
 
         oscales = mrt.get_output_scales()
         maps = mrt.get_maps()
@@ -175,7 +172,7 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratch=0):
                 node = sutils.get_mxnet_op(op_name)(*childs, **attr, name=name)
             return node
         qsym, qparams = merge_model(qbase, qbase_params,
-                top, top_params, maps, None)
+                top, top_params, maps, box_nms)
         oscales2 = [oscales[1], oscales[0], oscales[2]]
         sym_file, param_file, ext_file = \
                 load_fname("_darknet53_voc", "mrt.all.quantize", True)
@@ -187,6 +184,11 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratch=0):
                 load_fname("_darknet53_voc", "mrt.all.quantize", True)
         qsym, qparams = mx.sym.load(dump_sym), nd.load(dump_params)
         _, oscales2 = sim.load_ext(dump_ext)
+
+    if False:
+        compile_to_cvm(qsym, qparams, "yolo_tfm",
+                datadir="/data/wlt", input_shape=(1, 3, 416, 416))
+        exit()
 
     metric = dataset.load_voc_metric()
     metric.reset()
@@ -206,7 +208,7 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratch=0):
     def mrt_quantize(data, label):
         def net(data):
             data = sim.load_real_data(data, 'data', qbase_inputs_ext)
-            outs = net2(data.as_in_context(qctx))
+            outs = net2(data.astype("float64").as_in_context(qctx))
             outs = [o.as_in_context(ctx) / oscales2[i] \
                     for i, o in enumerate(outs)]
             return outs
@@ -232,5 +234,5 @@ if __name__ == '__main__':
 
     # zoo.save_model('yolo3_darknet53_voc')
 
-    from_scratch = 2
+    from_scratch = 0
     test_mrt_quant(16, 10, from_scratch) # 87% --> 87%

@@ -105,7 +105,7 @@ class LeakyReLU(Transformer):
         nega_X = mx.sym.negative(X)
         nega_X = mx.sym.relu(nega_X)
         slope_name = N.n('slope')
-        kwargs['params'][slope_name] = nd.array([slope])
+        kwargs['params'][slope_name] = nd_array([slope])
         kwargs['graph'][slope_name] = slope_sym = \
                 mx.sym.var(slope_name, shape=(1,))
         scale_X = mx.sym.broadcast_mul(nega_X, slope_sym)
@@ -126,7 +126,7 @@ class MulScalar(Transformer):
 
         X = op.get_children()[0]
         sname = N.n('scalar')
-        params[sname] = nd.array([scalar])
+        params[sname] = nd_array([scalar])
         graph[sname] = mx.sym.var(sname, shape=(1,))
         return mx.sym.broadcast_mul(X, graph[sname], name=name)
 
@@ -143,7 +143,7 @@ class DivScalar(Transformer):
 
         scalar = get_attr(attr, 'scalar')
         sname = N.n('scalar')
-        kwargs['params'][sname] = nd.array([1/scalar])
+        kwargs['params'][sname] = nd_array([1/scalar])
         graph[sname] = mx.sym.var(sname, shape=(1,))
         return mx.sym.broadcast_mul(childs[0], graph[sname], name=name)
 
@@ -367,26 +367,19 @@ class Repeat(Transformer):
 @register_pass("quantize")
 @register_transformer('_contrib_box_nms')
 class BoxNms(Transformer):
-    def _revise_attr(self, op, **kwargs):
-        childs = kwargs['childs']
-        attrs = kwargs['attr']
-        iou_thresh = get_attr(attrs, 'overlap_thresh', 0.5) * 100
-        iou_thresh = int(iou_thresh)
-        attrs['overlap_thresh'] = iou_thresh
-        # assert attrs['valid_thresh'] == int(attrs['valid_thresh'])
-        valid_thresh = get_attr(attrs, 'valid_thresh')
-        attrs['valid_thresh'] = int(valid_thresh)
-        return get_mxnet_op(self.op_name)(
-                *childs, **attrs, name=op.attr('name'))
-
     def compile(self, op, **kwargs):
-        op = _revise_attr(op, **kwargs)
         childs = kwargs['childs']
         attrs = kwargs['attr']
         force_suppress = get_attr(attrs, 'force_suppress', False)
-        iou_thresh = get_attr(attrs, 'overlap_thresh')
+
+        iou_thresh = get_attr(attrs, 'overlap_thresh', 0.5) * 100
+        iou_thresh = int(iou_thresh)
+
         top_k = get_attr(attrs, 'topk', -1)
+
         valid_thresh = get_attr(attrs, 'valid_thresh', 0)
+        valid_thresh = int(valid_thresh)
+
         coord_start = get_attr(attrs, 'coord_start', 2)
         score_index = get_attr(attrs, 'score_index', 1)
         id_index = get_attr(attrs, 'id_index', -1)
@@ -595,7 +588,7 @@ class Softmax(Transformer):
         axis = get_attr(attr, 'axis', -1)
         lambd = 10
         alpha = int(lambd*xs)
-        var = mx_const(alpha, graph, params)
+        var = nd_const(alpha, graph, params)
         max_axis = mx.sym.max(X, axis=axis, keepdims=True)
         offset = mx.sym.broadcast_sub(max_axis, var, name=N.n('softmax_offset'))
         offset = realize(offset, 0, xprec)
@@ -603,7 +596,7 @@ class Softmax(Transformer):
         norm = mx.sym.relu(norm, name=N.n('Softmax_filter'))
         norm = realize(norm, 0, xprec)
 
-        data = nd.arange(0, alpha+1)
+        data = nd_arange(0, alpha+1)
         table = nd.exp(data/xs)
 
         tprec = get_bit(math.exp(lambd))
@@ -621,10 +614,10 @@ class Softmax(Transformer):
         assert oprec > 8, "operator softmax(%s) lambda(%d) is too large" \
                 % (name, lambd)
         oscale = get_range(oprec)
-        var_scale = mx_const(oscale, graph, params)
+        var_scale = nd_const(oscale, graph, params)
         prob = mx.sym.broadcast_mul(lut, var_scale,
                 name=N.n("softmax_output_scale"))
-        var_one = mx_const(1, graph, params)
+        var_one = nd_const(1, graph, params)
         half_lut = realize(sum_lut, 1, 31)
         prob = mx.sym.broadcast_add(prob, half_lut, name=N.n("softmax_round"))
         op = mx.sym.broadcast_div(prob, sum_lut, name=N.n("softmax_prob"))
@@ -703,7 +696,7 @@ class Pooling(Transformer):
             X_shape = infer_shapes[X_name][get_entry_id(X)]
             scale_name = N.n('avg_scale')
             graph[scale_name] = scale_sym = mx.sym.var(scale_name, shape=(1,))
-            params[scale_name] = nd.array([1. / (X_shape[2] * X_shape[3])])
+            params[scale_name] = nd_array([1. / (X_shape[2] * X_shape[3])])
             op = mx.sym.sum(childs[0], axis=(2, 3), name=N.n('sum'), keepdims=True)
             op = mx.sym.broadcast_mul(op, scale_sym, name=N.n('braodcast_mul'))
         elif pool_type == 'avg':
@@ -727,7 +720,7 @@ class Pooling(Transformer):
             W_name = N.n('weight')
             W_shape = (in_channel, 1, *kernel)
             graph[W_name] = W = mx.sym.var(W_name, shape=W_shape)
-            params[W_name] = nd.full(shape=W_shape, val=(1/np.product(kernel)))
+            params[W_name] = nd_full(shape=W_shape, val=(1/np.product(kernel)))
             op = mx.sym.Convolution(X, W, **conv_attr, name=conv_name)
         return op
 
@@ -914,8 +907,8 @@ class Sum(Transformer):
         op = get_mxnet_op(op_name)(X, **attr, name=name)
 
         ishp = infer_shapes[cns[0]][get_entry_id(childs[0])]
-        k = int(nd.prod(nd.array(ishp)).asscalar() / \
-            nd.prod(nd.array(oshp)).asscalar())
+        k = int(nd.prod(nd_array(ishp)).asscalar() / \
+            nd.prod(nd_array(oshp)).asscalar())
         kprec = get_bit_cnt(k)
         infer_prec = kprec + xprec
         kwargs['precs'][name][OUT_KEY] = infer_prec
@@ -1306,7 +1299,7 @@ class PlusScalar(Transformer):
         if scalar == 0:
             return childs[0]
         sname = N.n('scalar')
-        kwargs['params'][sname] = nd.array([scalar])
+        kwargs['params'][sname] = nd_array([scalar])
         kwargs['graph'][sname] = offset = mx.sym.var(sname, shape=(1,))
         return mx.sym.broadcast_add(childs[0], offset, name=name)
 
@@ -1320,7 +1313,7 @@ class ZerosLike(Transformer):
         # TODO: dynamic shape
         name = op.attr('name')
         shp = kwargs['infer_shapes'][name][get_entry_id(op)]
-        kwargs['params'][name] = nd.zeros(shp)
+        kwargs['params'][name] = nd_zeros(shp)
         return mx.sym.var(name, shape=shp)
 
 
@@ -1333,7 +1326,7 @@ class OnesLike(Transformer):
         # TODO: dynamic shape
         name = op.attr('name')
         shp = kwargs['infer_shapes'][name][get_entry_id(op)]
-        kwargs['params'][name] = nd.ones(shp)
+        kwargs['params'][name] = nd_ones(shp)
         return mx.sym.var(name, shape=shp)
 
 
@@ -1427,7 +1420,7 @@ def _quantize_xwb(op, **kwargs):
     op = get_mxnet_op(op_name)(X, W, B, **attr, name=name)
 
     shp = kwargs['params'][childs[1].attr('name')].shape
-    k = int(nd.prod(nd.array(shp[1:])).asscalar())
+    k = int(nd.prod(nd_array(shp[1:])).asscalar())
     kprec = get_bit_cnt(k)
     infer_prec = kprec + (xprec+wprec-1)
     if not get_attr(attr, 'no_bias', False):
@@ -1474,10 +1467,10 @@ def _quantize_table(op, **kwargs):
     X, xprec, xs = requant_operator(childs[0], iprec, \
             oscale=xs, oname=name, **kwargs)
     alpha = get_range(xprec)
-    var = mx_const(alpha, graph, params)
+    var = nd_const(alpha, graph, params)
     X = mx.sym.broadcast_add(X, var, name=N.n(op_name+'_offset'))
 
-    out = get_nd_op(op_name)(nd.arange(-alpha, alpha+1) / xs)
+    out = get_nd_op(op_name)(nd_arange(-alpha, alpha+1) / xs)
     oprec = precs[name].get(OUT_KEY, 16)
     oscale = scales[name] = scale(out.abs().max().asscalar(), oprec)
 

@@ -323,22 +323,10 @@ def _get_opt(out, lambd):
         return alpha
     return absmax
 
-def mx_const(number, graph, params):
-    name = N.n('const_var')
-    # prec = math.ceil(math.log2(number)) + 1
-    prec = math.ceil(math.log2(number+1)) + 1
-    if name not in graph:
-        attr = { 'precision': str(prec) }
-        graph[name] = mx.sym.var(name, shape=(1,), attr=attr)
-        params[name] = nd.array([number])
-    return graph[name]
-
 def get_bit(opt):
     if isinstance(opt, nd.NDArray):
         opt = opt.abs().max().asscalar()
-    if opt == 0:
-        return 1
-    return math.ceil(math.log2(opt+1)) + 1
+    return math.ceil(math.log2(math.fabs(opt)+1)) + 1
 
 def get_bit_cnt(cnt):
     assert isinstance(cnt, int) and cnt > 0
@@ -448,7 +436,7 @@ def requant_operator(X, oprec, oscale=None, **kwargs):
                     xopn, xn, sb, iscale, scale_err)
         oscale = iscale * frac * (2 ** exp)
         if frac > 1:
-            var = mx_const(frac, graph, params)
+            var = nd_const(frac, graph, params)
             X = mx.sym.broadcast_mul(X, var, name=N.n("mrt_quantize_scale"))
         X = realize(X, -exp, oprec)
         logger.debug(
@@ -471,25 +459,21 @@ def requant_parameter(wname, oprec, oscale=None, **kwargs):
     if th_dict[wname] == 0:
         oprec, oscale = 1, 1
         shp = params[wname].shape
-        params[Wn] = nd.zeros(shp)
+        params[Wn] = nd_zeros(shp)
         attr = { 'precision': '1' }
         W = mx.sym.var(Wn, shape=shp, attr=attr)
     else:
         oprec = kwargs['precs'][wname].get(kwargs['oname'], oprec)
         oscale = oscale if oscale else scale(th_dict[wname], oprec)
         params[Wn] = sim.int_realize(
-                params[wname].astype('float64') * oscale,
+                params[wname].astype("float64") * oscale,
                 oprec, logger=logger)
         attr = { 'precision': str(oprec) }
-        max_v = params[wname].astype('float64').abs().max().asscalar()*oscale
-        max_v = params[Wn].astype('float64').abs().max().asscalar()
+        max_v = params[Wn].abs().max().asscalar()
         range_v = (2**(oprec-1)-1)
         assert max_v <= range_v,\
             "name:%s, max_v:%s, range_v:%s, oprec:%s"%\
             (wname, max_v, range_v, oprec)
-        if Wn == 'mrt_quantize_const_var_166':
-            print(params[Wn].abs().max().asscalar())
-            exit()
         W = mx.sym.var(Wn, shape=params[Wn].shape, attr=attr)
 
     logger.debug(
