@@ -168,7 +168,7 @@ def load_model(model_name, sym_path, prm_path, ctx, inputs_qext=None):
     acc_top1.reset()
     acc_top5.reset()
     def model_func(data, label):
-        data = sim.load_real_data(data, 'data', inputs_qext) \
+        data = sim.load_real_data(data.astype("float64"), 'data', inputs_qext) \
                if inputs_qext else data
         data = gluon.utils.split_and_load(data, ctx_list=ctx,
             batch_axis=0, even_split=False)
@@ -182,7 +182,8 @@ def load_model(model_name, sym_path, prm_path, ctx, inputs_qext=None):
     return model_func
 
 def validate_model(sym_path, prm_path, ctx, num_channel=3, input_size=224,
-        batch_size=16, iter_num=10, ds_name='imagenet', from_scratch=0, lambd=None):
+        batch_size=16, iter_num=10, ds_name='imagenet', from_scratch=0,
+        lambd=None, dump_model=False):
     flag = [False]*from_scratch + [True]*(2-from_scratch)
     model_name, _ = path.splitext(path.basename(sym_path))
     model_dir = path.dirname(sym_path)
@@ -230,6 +231,12 @@ def validate_model(sym_path, prm_path, ctx, num_channel=3, input_size=224,
 
     inputs = [mx.sym.var('data')]
     inputs_ext = { 'data': { 'shape': input_shape } }
+
+    # dump model
+    if dump_model:
+        compile_to_cvm(qsym, qprm, model_name+"_tfm", datadir="/data/ryt",
+                input_shape=(1, num_channel, input_size, input_size))
+        exit()
 
     # validate
     org_model = load_model(model_name, sym_path, prm_path, ctx)

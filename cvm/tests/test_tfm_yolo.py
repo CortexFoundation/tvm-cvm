@@ -189,7 +189,7 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratch=0):
         qsym, qparams = mx.sym.load(dump_sym), nd.load(dump_params)
         _, oscales2 = sim.load_ext(dump_ext)
 
-    if True:
+    if False:
         compile_to_cvm(qsym, qparams, "yolo_tfm",
                 datadir="/data/ryt", input_shape=(1, 3, 416, 416))
         exit()

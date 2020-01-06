@@ -179,7 +179,10 @@ class Activation(Transformer):
         attrs = kwargs['attr']
         act_type = attrs['act_type']
         if act_type == Relu.op_name:
-            sym = Relu().compile(op, **kwargs)
+            nkwargs = { k: v for k, v in kwargs.items() if k != 'attr' }
+            nattrs = { k: v for k, v in attrs.items() if k != 'act_type' }
+            nkwargs['attr'] = nattrs
+            sym = Relu().compile(op, **nkwargs)
         return sym
 
 
@@ -991,7 +994,7 @@ class Flatten(Transformer):
     def compile(self, op, **kwargs):
         childs = kwargs['childs']
         attrs = kwargs['attr']
-        sym = get_nnvm_op(Flatten.op_name)(*childs,
+        sym = get_nnvm_op("flatten")(*childs,
                 name=N.n(), **attrs)
         return sym
 
