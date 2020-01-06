@@ -16,7 +16,8 @@ import numpy as np
 
 class MRT(object):
     def __init__(self, symbol, params, input_shape, input_prec=8):
-        self.csym, self.cprm = symbol, params
+        self.csym = symbol
+        self.cprm = convert_params_dtype(params)
         self._ishp = input_shape
 
         self._data = None
@@ -100,6 +101,7 @@ class MRT(object):
     def set_threshold(self, name, threshold):
         self.th_dict[name] = threshold
 
+
     def get_output_scales(self):
         oscales = []
         for s in self.csym:
@@ -155,7 +157,12 @@ class MRT(object):
 
 def load_model(model_name, sym_path, prm_path, ctx, inputs_qext=None):
     inputs = [mx.sym.var('data')]
-    net = utils.load_model(sym_path, prm_path, inputs, ctx=ctx)
+    sym, params = mx.sym.load(sym_path), nd.load(prm_path)
+    net = mx.gluon.nn.SymbolBlock(sym, inputs)
+    nparams = params if inputs_qext else \
+            convert_params_dtype(params, src_dtypes="float64",
+            dest_dtype="float32")
+    utils.load_parameters(net, nparams, ctx=ctx)
     acc_top1 = mx.metric.Accuracy()
     acc_top5 = mx.metric.TopKAccuracy(5)
     acc_top1.reset()

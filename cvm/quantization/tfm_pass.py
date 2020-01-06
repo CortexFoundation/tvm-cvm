@@ -192,6 +192,8 @@ def graph_validate(symbol, params):
 
 @N.register_nm("fc")
 def fuse_constant(symbol, params):
+    nparams = convert_params_dtype(params, src_dtypes="float64", dest_dtype="float32")
+
     def _impl(op, params, graph):
         name, op_name = op.attr('name'), op.attr('op_name')
         childs, attr = sym_iter(op.get_children()), op.list_attr()
@@ -207,7 +209,10 @@ def fuse_constant(symbol, params):
             attr = { 'precision': str(get_bit(params[name])) }
             op = mx.sym.var(name, shape=params[name].shape, attr=attr)
         return op
-    return topo_visit_transformer(symbol, params, _impl)
+
+    sym, params = topo_visit_transformer(symbol, nparams, _impl)
+    params = convert_params_dtype(params)
+    return sym, params
 
 @N.register_nm("ais")
 def attach_input_shape(symbol, params, input_shapes):
@@ -310,6 +315,20 @@ def fuse_multiple_outputs(symbol, params):
     return ret, params
 
 # === MRT ===
+def convert_params_dtype(params, src_dtypes=["float32"],
+        dest_dtype="float64"):
+    if not params:
+        return {}
+    if isinstance(src_dtypes, str):
+        src_dtypes = [src_dtypes]
+    nparams = {}
+    for k, v in params.items():
+        dtype = v.dtype.__name__
+        if dtype != dest_dtype and dtype in src_dtypes:
+            nparams[k] = v.astype(dest_dtype)
+        else:
+            nparams[k] = v
+    return nparams
 
 def _get_opt(out, lambd):
     absmax = out.abs().max().asscalar()
@@ -348,6 +367,8 @@ def sym_calibrate(symbol, params, data, **kwargs):
     th_dict, out_cache = {}, {}
     ctx = kwargs.get('ctx', mx.cpu())
     logger.info("calibrate model outputs")
+    nparams = convert_params_dtype(params, src_dtypes="float64",
+            dest_dtype="float32")
 
     def _impl(op, params, graph, **kwargs):
         deps, old_ths = kwargs['deps'], kwargs['old_ths']
@@ -378,7 +399,7 @@ def sym_calibrate(symbol, params, data, **kwargs):
             p("collect symbol %-40s out_shape=%-20s th_dict: (%s)",
                     name, [o.shape for o in out], th_dict[name])
 
-    topo_visit_transformer(symbol, params, _impl, logger=logger,
+    topo_visit_transformer(symbol, nparams, _impl, logger=logger,
             deps=deps, data=data, **kwargs)
     out_cache.clear()
 
