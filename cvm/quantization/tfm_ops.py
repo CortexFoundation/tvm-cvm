@@ -579,7 +579,7 @@ class Softmax(Transformer):
 
     def quantize(self, op, **kwargs):
         params, graph = kwargs['params'], kwargs['graph']
-        scales = kwargs['scales']
+        scales, precs = kwargs['scales'], kwargs['precs']
         name, op_name = op.attr('name'), op.attr('op_name')
         childs, attr = sym_iter(op.get_children()), op.list_attr()
         cns = [c.attr('name') for c in childs] if childs else []
@@ -627,8 +627,10 @@ class Softmax(Transformer):
         op = op.astype('int32').astype('float32')
         # op = mx.sym.floor(op) # simulate integer division
         op = realize(op, 0, oprec)
-        kwargs['precs'][name][OUT_KEY] = oprec
-        scales[name]= oscale
+        oname = op.attr('name')
+        precs[name][OUT_KEY] = oprec
+        precs[oname] = { OUT_KEY: oprec }
+        scales[oname] = scales[name]= oscale
 
         logger = logging.getLogger('log.mrt.realize')
         logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",

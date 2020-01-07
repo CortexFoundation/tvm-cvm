@@ -63,11 +63,6 @@ def quantize(symbol, params, th_dict, precs, scales, op_input_precs):
         th_dict, scales = kwargs['th_dict'], kwargs['scales']
         precs = kwargs['precs']
         th = th_dict[name]
-        if name == 'mrt_quantize_realize_160':
-            import os
-            open(os.path.expanduser('~/tvm-cvm/data/test_ryt.json'), 'w').write(op.tojson())
-            print('hi')
-            exit()
         scale = scales[name]
         tight_prec = get_bit(th_dict[name] * scales[name])
         if precs[name][OUT_KEY] > tight_prec:

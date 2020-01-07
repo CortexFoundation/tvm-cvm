@@ -234,8 +234,14 @@ def validate_model(sym_path, prm_path, ctx, num_channel=3, input_size=224,
 
     # dump model
     if dump_model:
-        compile_to_cvm(qsym, qprm, model_name+"_tfm", datadir="/data/ryt",
-                input_shape=(1, num_channel, input_size, input_size))
+        datadir = "/data/ryt"
+        model_name = model_name + "_tfm"
+        dump_shape = (1, num_channel, input_size, input_size)
+        compile_to_cvm(qsym, qprm, model_name, datadir=datadir,
+                input_shape=dump_shape)
+        data = data[0].reshape(dump_shape)
+        data = sim.load_real_data(data.astype("float64"), 'data', inputs_qext)
+        np.save(datadir+"/"+model_name+"/data.npy", data.astype('int8').asnumpy())
         exit()
 
     # validate
