@@ -33,13 +33,6 @@ def fuse_transpose(symbol, params):
     return topo_visit_transformer(symbol, params,
             apply_pass("fuse_transpose", infer_shapes=infer_shapes))
 
-@N.register_nm("validate")
-def validate(symbol, params):
-    infer_shapes = infer_shape(symbol, params)
-    return topo_visit_transformer(symbol, params,
-            apply_pass("validate", infer_shapes=infer_shapes))
-
-
 @N.register_nm("rewrite")
 def rewrite(symbol, params):
     infer_shapes = infer_shape(symbol, params)
@@ -188,6 +181,8 @@ def graph_validate(symbol, params):
 
     new_params = {s.attr('name'):params[s.attr('name')] \
             for s in topo_sort(sym) if is_params(s, params)}
+
+    infer_shape(sym, new_params) # check infer_shape is correct
     return sym, new_params
 
 @N.register_nm("fc")
