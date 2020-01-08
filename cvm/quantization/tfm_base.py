@@ -148,6 +148,7 @@ def apply_pass(pass_t, **updates):
         kwargs.update(updates)
         ret = getattr(tfm, pass_t)(op, **kwargs)
         for n in updates:
+            assert op.attr('name') in kwargs[n], "%s %s %s"%(n, op.attr('name'), ret.attr('name'))
             kwargs[n][ret.attr('name')] = kwargs[n][op.attr('name')]
         return ret
     return wrapper

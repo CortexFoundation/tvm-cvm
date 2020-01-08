@@ -101,7 +101,6 @@ class MRT(object):
     def set_threshold(self, name, threshold):
         self.th_dict[name] = threshold
 
-
     def get_output_scales(self):
         oscales = []
         for s in self.csym:
@@ -267,7 +266,8 @@ def split_model(symbol, params, input_shapes, keys):
         childs, attr = sym_iter(sym.get_children()), sym.list_attr()
         node = sym
         if childs is not None:
-            childs = [graph[c.attr('name')] for c in childs]
+            childs = [get_node(c, graph) for c in childs]
+            # childs = [graph[c.attr('name')] for c in childs]
             node = get_mxnet_op(op_name)(*childs, **attr, name=name)
         if name in keys:
             node = mx.sym.var(name)
