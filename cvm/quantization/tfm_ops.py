@@ -264,8 +264,6 @@ class Convolution(Transformer):
         return super().calculate_ops(op, **kwargs)
 
     def compile(self, op, **kwargs):
-        op.attr('name'), op.attr('op_name')
-        op.get_children(), op.list_attr()
         childs = kwargs['childs']
         attrs = kwargs['attr']
         kernel = get_attr(attrs, 'kernel')
@@ -419,11 +417,21 @@ class SliceLike(Transformer):
         return get_nnvm_op(op_name)(*childs, **new_attrs)
 
 
-@register_pass("validate")
 @register_pass("calculate_ops")
 @register_pass("fuse_transpose")
 @register_transformer("slice_axis")
 class SliceAxis(Transformer):
+    def validate(self, op, **kwargs):
+        childs, attr = sym_iter(op.get_children()), op.list_attr()
+        axis = get_attr(attr, 'axis')
+        X = childs[0]
+        cshape = kwargs['infer_shapes'][X.attr('name')][get_entry_id(X)]
+        ndims = len(cshape)
+
+        axis = get_attr(attr, 'axis')
+        assert axis in range(-ndims, ndims)
+        return op
+
     def rewrite(self, op, **kwargs):
         name = op.attr('name')
         childs, attr = sym_iter(op.get_children()), op.list_attr()
@@ -432,7 +440,6 @@ class SliceAxis(Transformer):
         ndims = len(cshape)
 
         axis = get_attr(attr, 'axis')
-        assert axis in range(-ndims, ndims)
         axis = axis if axis >= 0 else axis+ndims
         axis_begin = get_attr(attr, 'begin')
         axis_end = get_attr(attr, 'end')
@@ -1427,7 +1434,7 @@ def _quantize_xwb(op, **kwargs):
     shp = kwargs['params'][childs[1].attr('name')].shape
     k = int(nd.prod(nd_array(shp[1:])).asscalar())
     kprec = get_bit_cnt(k)
-    infer_prec = kprec + (xprec+wprec-1)
+    infer_prec = kprec + xprec + wprec
     if not get_attr(attr, 'no_bias', False):
         infer_prec = max(infer_prec, bprec) + 1
     kwargs['precs'][name][OUT_KEY] = infer_prec
@@ -1492,10 +1499,5 @@ def _quantize_table(op, **kwargs):
     return op
 
 def _compile_child(op, **kwargs):
-    graph = kwargs['graph']
-
-    childs = sym_iter(op.get_children())
-    cname = childs[0].attr('name')
-
-    return graph[cname]
+    return kwargs['childs'][0]
 

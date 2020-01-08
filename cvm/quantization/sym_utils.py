@@ -273,7 +273,6 @@ def get_node(sym, graph):
     if name not in graph:
         assert False, "Unrecognized layer:%s in graph keys:%s" \
             % (name, graph.keys())
-    mx.sym.Symbol
     return graph[name][get_entry_id(sym)]
 
 def topo_visit(symbol, params, inputs_ext, callback,

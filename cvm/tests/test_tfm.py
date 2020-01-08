@@ -70,7 +70,7 @@ def test_densenet161():
     sym_path = "./data/densenet161.json"
     prm_path = "./data/densenet161.params"
     ctx = [mx.gpu(int(i)) for i in "1,2,3,4,5".split(',') if i.strip()]
-    validate_model(sym_path, prm_path, ctx, batch_size=16, dump_model=True)
+    validate_model(sym_path, prm_path, ctx, batch_size=16, dump_model=True, from_scratch=1)
 
 def test_qd10_resnetv1_20():
     sym_path = "./data/quick_raw_qd_animal10_2_cifar_resnet20_v2.json"
