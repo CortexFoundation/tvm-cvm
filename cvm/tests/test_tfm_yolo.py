@@ -108,11 +108,15 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratch=0):
         (top_inputs_ext,) = sim.load_ext(dump_ext)
 
     base_graph = mx.gluon.nn.SymbolBlock(base, [mx.sym.var('data')])
-    utils.load_parameters(base_graph, base_params, ctx=ctx)
+    nbase_params = convert_params_dtype(base_params, src_dtypes="float64",
+            dest_dtype="float32")
+    utils.load_parameters(base_graph, nbase_params, ctx=ctx)
 
     top_graph = mx.gluon.nn.SymbolBlock(top,
             [mx.sym.var(n) for n in top_inputs_ext])
-    utils.load_parameters(top_graph, top_params, ctx=ctx)
+    ntop_params = convert_params_dtype(top_params, src_dtypes="float64",
+            dest_dtype="float32")
+    utils.load_parameters(top_graph, ntop_params, ctx=ctx)
 
     # calibrate split model, get:
     # th_dict
@@ -187,7 +191,7 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratch=0):
 
     if False:
         compile_to_cvm(qsym, qparams, "yolo_tfm",
-                datadir="/data/wlt", input_shape=(1, 3, 416, 416))
+                datadir="/data/ryt", input_shape=(1, 3, 416, 416))
         exit()
 
     metric = dataset.load_voc_metric()
@@ -234,5 +238,5 @@ if __name__ == '__main__':
 
     # zoo.save_model('yolo3_darknet53_voc')
 
-    from_scratch = 0
+    from_scratch = 2
     test_mrt_quant(16, 10, from_scratch) # 87% --> 87%

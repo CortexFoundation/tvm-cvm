@@ -90,6 +90,7 @@ class MRT:
         self._lgr.info("Graph initialize and reduce...")
         _sym, _prm = self.csym, self.cprm
 
+        _prm = convert_params_dtype(_prm)
         if self._ishp is not None:
             _sym, _prm = attach_input_shape(_sym, _prm,
                                             {'data': self._ishp})
@@ -202,13 +203,18 @@ class MRT:
 
 def load_model(model_name, sym_path, prm_path, ctx, inputs_qext=None):
     inputs = [mx.sym.var('data')]
-    net = utils.load_model(sym_path, prm_path, inputs, ctx=ctx)
+    sym, params = mx.sym.load(sym_path), nd.load(prm_path)
+    net = mx.gluon.nn.SymbolBlock(sym, inputs)
+    nparams = params if inputs_qext else \
+            convert_params_dtype(params, src_dtypes="float64",
+            dest_dtype="float32")
+    utils.load_parameters(net, nparams, ctx=ctx)
     acc_top1 = mx.metric.Accuracy()
     acc_top5 = mx.metric.TopKAccuracy(5)
     acc_top1.reset()
     acc_top5.reset()
     def model_func(data, label):
-        data = sim.load_real_data(data, 'data', inputs_qext) \
+        data = sim.load_real_data(data.astype("float64"), 'data', inputs_qext) \
                if inputs_qext else data
         data = gluon.utils.split_and_load(data, ctx_list=ctx,
                                           batch_axis=0, even_split=False)
@@ -223,7 +229,8 @@ def load_model(model_name, sym_path, prm_path, ctx, inputs_qext=None):
 
 def validate_model(sym_path, prm_path, ctx, num_channel=3,
                    input_size=224, batch_size=16, iter_num=10,
-                   ds_name='imagenet', from_scratch=0, lambd=None):
+                   ds_name='imagenet', from_scratch=0, lambd=None,
+                   dump_model=False):
     flag = [False]*from_scratch + [True]*(2-from_scratch)
     model_name, _ = path.splitext(path.basename(sym_path))
     model_dir = path.dirname(sym_path)
@@ -268,6 +275,18 @@ def validate_model(sym_path, prm_path, ctx, num_channel=3,
     else:
         qsym, qprm = mx.sym.load(qsym_path), nd.load(qprm_path)
         (inputs_qext, ) = sim.load_ext(qext_path)
+
+    # dump model
+    if dump_model:
+        datadir = "/data/ryt"
+        model_name = model_name + "_tfm"
+        dump_shape = (1, num_channel, input_size, input_size)
+        compile_to_cvm(qsym, qprm, model_name, datadir=datadir,
+                input_shape=dump_shape)
+        data = data[0].reshape(dump_shape)
+        data = sim.load_real_data(data.astype("float64"), 'data', inputs_qext)
+        np.save(datadir+"/"+model_name+"/data.npy", data.astype('int8').asnumpy())
+        exit()
 
     # validate
     org_model = load_model(model_name, sym_path, prm_path, ctx)

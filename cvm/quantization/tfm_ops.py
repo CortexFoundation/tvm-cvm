@@ -179,7 +179,10 @@ class Activation(Transformer):
         attrs = kwargs['attr']
         act_type = attrs['act_type']
         if act_type == Relu.op_name:
-            sym = Relu().compile(op, **kwargs)
+            nkwargs = { k: v for k, v in kwargs.items() if k != 'attr' }
+            nattrs = { k: v for k, v in attrs.items() if k != 'act_type' }
+            nkwargs['attr'] = nattrs
+            sym = Relu().compile(op, **nkwargs)
         return sym
 
 
@@ -261,8 +264,6 @@ class Convolution(Transformer):
         return super().calculate_ops(op, **kwargs)
 
     def compile(self, op, **kwargs):
-        op.attr('name'), op.attr('op_name')
-        op.get_children(), op.list_attr()
         childs = kwargs['childs']
         attrs = kwargs['attr']
         kernel = get_attr(attrs, 'kernel')
@@ -416,11 +417,21 @@ class SliceLike(Transformer):
         return get_nnvm_op(op_name)(*childs, **new_attrs)
 
 
-@register_pass("validate")
 @register_pass("calculate_ops")
 @register_pass("fuse_transpose")
 @register_transformer("slice_axis")
 class SliceAxis(Transformer):
+    def validate(self, op, **kwargs):
+        childs, attr = sym_iter(op.get_children()), op.list_attr()
+        axis = get_attr(attr, 'axis')
+        X = childs[0]
+        cshape = kwargs['infer_shapes'][X.attr('name')][get_entry_id(X)]
+        ndims = len(cshape)
+
+        axis = get_attr(attr, 'axis')
+        assert axis in range(-ndims, ndims)
+        return op
+
     def rewrite(self, op, **kwargs):
         name = op.attr('name')
         childs, attr = sym_iter(op.get_children()), op.list_attr()
@@ -429,7 +440,6 @@ class SliceAxis(Transformer):
         ndims = len(cshape)
 
         axis = get_attr(attr, 'axis')
-        assert axis in range(-ndims, ndims)
         axis = axis if axis >= 0 else axis+ndims
         axis_begin = get_attr(attr, 'begin')
         axis_end = get_attr(attr, 'end')
@@ -576,7 +586,7 @@ class Softmax(Transformer):
 
     def quantize(self, op, **kwargs):
         params, graph = kwargs['params'], kwargs['graph']
-        scales = kwargs['scales']
+        scales, precs = kwargs['scales'], kwargs['precs']
         name, op_name = op.attr('name'), op.attr('op_name')
         childs, attr = sym_iter(op.get_children()), op.list_attr()
         cns = [c.attr('name') for c in childs] if childs else []
@@ -624,8 +634,10 @@ class Softmax(Transformer):
         op = op.astype('int32').astype('float32')
         # op = mx.sym.floor(op) # simulate integer division
         op = realize(op, 0, oprec)
-        kwargs['precs'][name][OUT_KEY] = oprec
-        scales[name]= oscale
+        oname = op.attr('name')
+        precs[name][OUT_KEY] = oprec
+        precs[oname] = { OUT_KEY: oprec }
+        scales[oname] = scales[name]= oscale
 
         logger = logging.getLogger('log.mrt.realize')
         logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
@@ -991,7 +1003,7 @@ class Flatten(Transformer):
     def compile(self, op, **kwargs):
         childs = kwargs['childs']
         attrs = kwargs['attr']
-        sym = get_nnvm_op(Flatten.op_name)(*childs,
+        sym = get_nnvm_op("flatten")(*childs,
                 name=N.n(), **attrs)
         return sym
 
@@ -1422,7 +1434,7 @@ def _quantize_xwb(op, **kwargs):
     shp = kwargs['params'][childs[1].attr('name')].shape
     k = int(nd.prod(nd_array(shp[1:])).asscalar())
     kprec = get_bit_cnt(k)
-    infer_prec = kprec + (xprec+wprec-1)
+    infer_prec = kprec + xprec + wprec
     if not get_attr(attr, 'no_bias', False):
         infer_prec = max(infer_prec, bprec) + 1
     kwargs['precs'][name][OUT_KEY] = infer_prec
@@ -1487,10 +1499,5 @@ def _quantize_table(op, **kwargs):
     return op
 
 def _compile_child(op, **kwargs):
-    graph = kwargs['graph']
-
-    childs = sym_iter(op.get_children())
-    cname = childs[0].attr('name')
-
-    return graph[cname]
+    return kwargs['childs'][0]
 
