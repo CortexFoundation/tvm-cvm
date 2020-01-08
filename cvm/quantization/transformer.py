@@ -6,14 +6,18 @@ from gluon_zoo import *
 
 import sym_utils as sutils
 import cvm_op
+
 import logging
+import os
 from os import path
+import numpy as np
 
 #TODO(wlt): control available api for MRT
 
 class MRT(object):
     def __init__(self, symbol, params, input_shape, input_prec=8):
-        self.csym, self.cprm = symbol, params
+        self.csym = symbol
+        self.cprm = convert_params_dtype(params)
         self._ishp = input_shape
 
         self._data = None
@@ -32,60 +36,11 @@ class MRT(object):
 
         self.rsym, self.rprm = self.csym, self.cprm
 
-    def compile(self, model_name, datadir='/data/std_out'):
-        # TODO: change name
-        logger = logging.getLogger('mrt.compile')
-        datadir = path.join(datadir, model_name)
-        sym, params = prepare_for_compile(self._qsym, self._qprm)
-        nnvm_sym, _ = compile(sym, params)
-        args = nnvm_sym.list_input_names()
-        real_params = {}
-        use_dtype = "int32"
-        tvm_ctx = tvm.context("llvm", 0)
-        for key, value in params.items():
-            if key not in args:
-                continue
-
-            msg = "key:%s value:%s"%(key, value)
-            flat = value.asnumpy().flatten()
-            assert all(flat >= INT32_MIN) and all(flat <= INT32_MAX), msg
-            assert all(flat.astype('int32').astype('float32') == flat), msg
-            real_params[key] = tvm.nd.array(value.astype(use_dtype).asnumpy(), tvm_ctx)
-        return self.cvm_build(nnvm_sym, real_params,
-                path.join(datadir,"symbol"), path.join(datadir,"params"))
-
-    def cvm_build(self, nnvm_sym, nnvm_params, dump_sym, dump_params,
-            target="cuda", logger=logging, dtype="int32"):
-        tvm_ctx = tvm.context(target, 0)
-        inputs_shape = {'data': self._ishp}
-        with nnvm.compiler.build_config(opt_level=0):
-            deploy_graph, lib, real_params = nnvm.compiler.build(
-                nnvm_sym, target=target, shape=inputs_shape,
-                params=nnvm_params, dtype=dtype)
-        real_params = self.tvm_params_reduce(
-                    nnvm_sym, real_params, tvm_ctx)
-        open(dump_sym, "w").write(deploy_graph.json())
-        param_bytes = nnvm.compiler.save_param_dict(real_params)
-        open(dump_params, "wb").write(param_bytes)
-        return deploy_graph, real_params
-
-    def tvm_params_reduce(self, symbol, params, ctx):
-        for sym in topo_sort(symbol):
-            name, attr = sym.attr('name'), sym.list_attr()
-            if is_params(sym, params):
-                precision = get_attr(attr, "precision")
-                val = params[name].asnumpy()
-                if precision > 8:
-                    params[name] = tvm.nd.array(val.astype('int32'), ctx)
-                else:
-                    params[name] = tvm.nd.array(val.astype('int8'), ctx)
-        return params
-
     def _prepare(self):
         self._lgr = logging.getLogger('mrt')
         self._lgr.info("Graph initialize and reduce...")
-
         _sym, _prm = self.csym, self.cprm
+
         if self._ishp is not None:
             _sym, _prm = attach_input_shape(_sym, _prm,
                 {'data': self._ishp})
@@ -146,6 +101,7 @@ class MRT(object):
     def set_threshold(self, name, threshold):
         self.th_dict[name] = threshold
 
+
     def get_output_scales(self):
         oscales = []
         for s in self.csym:
@@ -201,13 +157,18 @@ class MRT(object):
 
 def load_model(model_name, sym_path, prm_path, ctx, inputs_qext=None):
     inputs = [mx.sym.var('data')]
-    net = utils.load_model(sym_path, prm_path, inputs, ctx=ctx)
+    sym, params = mx.sym.load(sym_path), nd.load(prm_path)
+    net = mx.gluon.nn.SymbolBlock(sym, inputs)
+    nparams = params if inputs_qext else \
+            convert_params_dtype(params, src_dtypes="float64",
+            dest_dtype="float32")
+    utils.load_parameters(net, nparams, ctx=ctx)
     acc_top1 = mx.metric.Accuracy()
     acc_top5 = mx.metric.TopKAccuracy(5)
     acc_top1.reset()
     acc_top5.reset()
     def model_func(data, label):
-        data = sim.load_real_data(data, 'data', inputs_qext) \
+        data = sim.load_real_data(data.astype("float64"), 'data', inputs_qext) \
                if inputs_qext else data
         data = gluon.utils.split_and_load(data, ctx_list=ctx,
             batch_axis=0, even_split=False)
@@ -221,7 +182,8 @@ def load_model(model_name, sym_path, prm_path, ctx, inputs_qext=None):
     return model_func
 
 def validate_model(sym_path, prm_path, ctx, num_channel=3, input_size=224,
-        batch_size=16, iter_num=10, ds_name='imagenet', from_scratch=0, lambd=None):
+        batch_size=16, iter_num=10, ds_name='imagenet', from_scratch=0,
+        lambd=None, dump_model=False):
     flag = [False]*from_scratch + [True]*(2-from_scratch)
     model_name, _ = path.splitext(path.basename(sym_path))
     model_dir = path.dirname(sym_path)
@@ -270,6 +232,18 @@ def validate_model(sym_path, prm_path, ctx, num_channel=3, input_size=224,
     inputs = [mx.sym.var('data')]
     inputs_ext = { 'data': { 'shape': input_shape } }
 
+    # dump model
+    if dump_model:
+        datadir = "/data/ryt"
+        model_name = model_name + "_tfm"
+        dump_shape = (1, num_channel, input_size, input_size)
+        compile_to_cvm(qsym, qprm, model_name, datadir=datadir,
+                input_shape=dump_shape)
+        data = data[0].reshape(dump_shape)
+        data = sim.load_real_data(data.astype("float64"), 'data', inputs_qext)
+        np.save(datadir+"/"+model_name+"/data.npy", data.astype('int8').asnumpy())
+        exit()
+
     # validate
     org_model = load_model(model_name, sym_path, prm_path, ctx)
     cvm_quantize = load_model(model_name, qsym_path, qprm_path, ctx, \
@@ -308,6 +282,8 @@ def split_model(symbol, params, input_shapes, keys):
 
 def merge_model(base, base_params, top, top_params,
         base_maps={}, callback=None):
+    logger = logging.getLogger("mrt.model.merge")
+    logger.info("Merge model with map: {}".format(base_maps))
     graph = {base_maps.get(c.attr('name'), c.attr('name')):c \
         for c in base }
     for sym in topo_sort(top):
@@ -328,3 +304,57 @@ def merge_model(base, base_params, top, top_params,
     params.update(top_params)
     params = {k:params[k] for k in symbol.list_inputs() if k in params}
     return symbol, params
+
+def compile_to_cvm(symbol, params, model_name,
+        datadir="/data/std_out",
+        input_shape=None, target="cuda"):
+    logger = logging.getLogger("mrt.compile")
+
+    datadir = path.join(datadir, model_name)
+    os.makedirs(datadir, exist_ok=True)
+
+    # transform from mxnet symbol to cvm
+    logger.info("Transform Mxnet symbol into CVM")
+    nnvm_sym, _ = compile(symbol, params)
+    dtype, nnvm_params = "int32", {}
+    tvm_ctx = tvm.context(target, 0)
+    for sym in topo_sort(symbol):
+        if is_params(sym, params):
+            key, value = sym.attr('name'), params[sym.attr('name')]
+            flat = value.asnumpy()
+            assert np.abs(flat).max() <= INT32_MAX, \
+                "key: {}\nvalue: {}".format(key, value)
+            assert (flat.astype(dtype).astype("float64") == flat).all(), \
+                "key: {}\nvalue: {}".format(key, value)
+            nnvm_params[key] = tvm.nd.array(flat.astype(dtype), tvm_ctx)
+
+    # compile to JSON&Bytes format
+    logger.info("Compile into CVM graph")
+    if input_shape is None:
+        for sym in topo_sort(symbol):
+            if is_inputs(sym, params):
+                _, oshp, _ = sym.infer_shape()
+                assert len(oshp) == 1
+                input_shape = oshp[0]
+    input_shapes = { 'data': input_shape }
+    with nnvm.compiler.build_config(opt_level=0):
+        deploy_graph, lib, nnvm_params = nnvm.compiler.build(
+            nnvm_sym, target=target, shape=input_shapes,
+            params=nnvm_params, dtype=dtype)
+
+    # tvm parameters reduce
+    logger.info("Parameters precision reduce")
+    for sym in topo_sort(nnvm_sym):
+        if is_params(sym, nnvm_params):
+            name, attr = sym.attr('name'), sym.list_attr()
+            precision = get_attr(attr, "precision")
+            dtype = "int32" if precision > 8 else "int8"
+            nnvm_params[name] = tvm.nd.array(
+                params[name].asnumpy().astype(dtype), tvm_ctx)
+
+    # dump
+    logger.info("CVM Json&Params dump")
+    open(path.join(datadir, "symbol"), "w").write(deploy_graph.json())
+    param_bytes = nnvm.compiler.save_param_dict(nnvm_params)
+    open(path.join(datadir, "params"), "wb").write(param_bytes)
+    return deploy_graph, nnvm_params

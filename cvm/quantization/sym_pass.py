@@ -120,7 +120,6 @@ def cvm_build(nnvm_sym, nnvm_params, inputs_ext, dump_sym, dump_params,
     logger.debug("Compile nnvm graph to %s", runtime)
     tvm_ctx = tvm.context(target, 0)
     inputs_shape = {k:v['shape'] for k,v in inputs_ext.items()}
-    print (inputs_shape)
 
     with nnvm.compiler.build_config(opt_level=0, runtime=runtime):
         deploy_graph, lib, real_params = nnvm.compiler.build(

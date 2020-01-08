@@ -57,7 +57,7 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratch=0):
     logger = logging.getLogger("log.test.mrt.quantize")
     flag = [False]*from_scratch + [True]*(4-from_scratch)
 
-    ctx = mx.gpu(2)
+    ctx = mx.gpu(4)
     qctx = mx.gpu(3)
     input_size = 416
     input_shape = (batch_size, 3, input_size, input_size)
@@ -108,11 +108,15 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratch=0):
         (top_inputs_ext,) = sim.load_ext(dump_ext)
 
     base_graph = mx.gluon.nn.SymbolBlock(base, [mx.sym.var('data')])
-    utils.load_parameters(base_graph, base_params, ctx=ctx)
+    nbase_params = convert_params_dtype(base_params, src_dtypes="float64",
+            dest_dtype="float32")
+    utils.load_parameters(base_graph, nbase_params, ctx=ctx)
 
     top_graph = mx.gluon.nn.SymbolBlock(top,
             [mx.sym.var(n) for n in top_inputs_ext])
-    utils.load_parameters(top_graph, top_params, ctx=ctx)
+    ntop_params = convert_params_dtype(top_params, src_dtypes="float64",
+            dest_dtype="float32")
+    utils.load_parameters(top_graph, ntop_params, ctx=ctx)
 
     # calibrate split model, get:
     # th_dict
@@ -145,7 +149,9 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratch=0):
         mrt.set_threshold('yolov30_yolooutputv31_tile0', 416)
         mrt.set_threshold('yolov30_yolooutputv32_tile0', 416)
         mrt.set_output_prec(30)
+
         qbase, qbase_params, qbase_inputs_ext = mrt.quantize()
+
         oscales = mrt.get_output_scales()
         maps = mrt.get_maps()
         dump_sym, dump_params, dump_ext = load_fname("_darknet53_voc", "mrt.quantize", True)
@@ -183,6 +189,11 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratch=0):
         qsym, qparams = mx.sym.load(dump_sym), nd.load(dump_params)
         _, oscales2 = sim.load_ext(dump_ext)
 
+    if False:
+        compile_to_cvm(qsym, qparams, "yolo_tfm",
+                datadir="/data/ryt", input_shape=(1, 3, 416, 416))
+        exit()
+
     metric = dataset.load_voc_metric()
     metric.reset()
     def yolov3(data, label):
@@ -201,7 +212,7 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratch=0):
     def mrt_quantize(data, label):
         def net(data):
             data = sim.load_real_data(data, 'data', qbase_inputs_ext)
-            outs = net2(data.as_in_context(qctx))
+            outs = net2(data.astype("float64").as_in_context(qctx))
             outs = [o.as_in_context(ctx) / oscales2[i] \
                     for i, o in enumerate(outs)]
             return outs
@@ -227,6 +238,5 @@ if __name__ == '__main__':
 
     # zoo.save_model('yolo3_darknet53_voc')
 
-    from_scratch = 0
+    from_scratch = 2
     test_mrt_quant(16, 10, from_scratch) # 87% --> 87%
-    #test_sym_nnvm(16, 0)

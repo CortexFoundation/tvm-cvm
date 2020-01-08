@@ -49,12 +49,36 @@ def rewrite(symbol, params):
 @N.register_nm("quantize")
 def quantize(symbol, params, th_dict, precs, scales, op_input_precs):
     infer_shapes = infer_shape(symbol, params)
+
+    def _quant(op, **kwargs):
+        op = apply_pass("quantize",
+            infer_shapes=kwargs['infer_shapes'],
+            th_dict=kwargs['th_dict'],
+        )(op, **kwargs)
+
+        if is_var(op, kwargs['params']):
+            return op
+
+        name = op.attr('name')
+        th_dict, scales = kwargs['th_dict'], kwargs['scales']
+        precs = kwargs['precs']
+        th = th_dict[name]
+        scale = scales[name]
+        tight_prec = get_bit(th_dict[name] * scales[name])
+        if precs[name][OUT_KEY] > tight_prec:
+            op = mx.sym.Custom(op, precision=tight_prec,
+                    name=N.n('clip'), op_type='cvm_clip')
+            clip_name = op.attr('name')
+            infer_shapes[clip_name] = infer_shapes[name]
+            th_dict[clip_name] = th_dict[name]
+            precs[clip_name] = { OUT_KEY: tight_prec }
+            scales[clip_name] = scales[name]
+
+        return op
+
     sym, params = topo_visit_transformer(symbol, params,
-            apply_pass(
-                "quantize",
-                infer_shapes=infer_shapes,
-            ),
-            th_dict=th_dict,
+            _quant,
+            infer_shapes=infer_shapes, th_dict=th_dict,
             precs=precs, scales=scales,
             op_input_precs=op_input_precs)
 
@@ -78,15 +102,6 @@ def quantize(symbol, params, th_dict, precs, scales, op_input_precs):
             quantize_output, th_dict=th_dict,
             precs=precs, scales=scales)
 
-@N.register_nm("prepare_for_cvm")
-def prepare_for_compile(symbol, params):
-    infer_shapes = infer_shape(symbol, params)
-    return topo_visit_transformer(symbol, params,
-            apply_pass(
-                "prepare_for_compile",
-                infer_shapes=infer_shapes,
-            ))
-
 @N.register_nm("cvm")
 def compile(symbol, params):
     def _as_list(arr):
@@ -99,7 +114,7 @@ def compile(symbol, params):
         childs, attr = sym_iter(op.get_children()), op.list_attr()
         childs = [] if childs is None else childs
         childs = [get_node(c, graph) for c in childs]
-        childs = [x for y in childs for x in _as_list(y)]
+        # childs = [x for y in childs for x in _as_list(y)]
         op = apply_pass("compile", infer_shapes=infer_shapes)(
                 op, childs=childs, attr=attr)
         graph[name] = op
@@ -177,6 +192,8 @@ def graph_validate(symbol, params):
 
 @N.register_nm("fc")
 def fuse_constant(symbol, params):
+    nparams = convert_params_dtype(params, src_dtypes="float64", dest_dtype="float32")
+
     def _impl(op, params, graph):
         name, op_name = op.attr('name'), op.attr('op_name')
         childs, attr = sym_iter(op.get_children()), op.list_attr()
@@ -184,13 +201,18 @@ def fuse_constant(symbol, params):
             pass
         elif childs is None:
             params[name] = get_nd_op(op_name)(**attr)
-            op = mx.sym.var(name, shape=params[name].shape)
+            attr = { 'precision': str(get_bit(params[name])) }
+            op = mx.sym.var(name, shape=params[name].shape, attr=attr)
         elif all([is_params(c, params) for c in childs]):
             in_params = [params[c.attr('name')] for c in childs]
             params[name] = get_nd_op(op_name)(*in_params, **attr)
-            op = mx.sym.var(name, shape=params[name].shape)
+            attr = { 'precision': str(get_bit(params[name])) }
+            op = mx.sym.var(name, shape=params[name].shape, attr=attr)
         return op
-    return topo_visit_transformer(symbol, params, _impl)
+
+    sym, params = topo_visit_transformer(symbol, nparams, _impl)
+    params = convert_params_dtype(params)
+    return sym, params
 
 @N.register_nm("ais")
 def attach_input_shape(symbol, params, input_shapes):
@@ -210,7 +232,6 @@ def infer_shape(symbol, params, input_shape=None):
     def _impl(op, params, graph):
         name, op_name = op.attr('name'), op.attr('op_name')
         _, oshp, _ = op.infer_shape()
-
         if is_params(op, params):
             if oshp is None:
                 oshp = [params[name].shape]
@@ -294,6 +315,20 @@ def fuse_multiple_outputs(symbol, params):
     return ret, params
 
 # === MRT ===
+def convert_params_dtype(params, src_dtypes=["float32"],
+        dest_dtype="float64"):
+    if not params:
+        return {}
+    if isinstance(src_dtypes, str):
+        src_dtypes = [src_dtypes]
+    nparams = {}
+    for k, v in params.items():
+        dtype = v.dtype.__name__
+        if dtype != dest_dtype and dtype in src_dtypes:
+            nparams[k] = v.astype(dest_dtype)
+        else:
+            nparams[k] = v
+    return nparams
 
 def _get_opt(out, lambd):
     absmax = out.abs().max().asscalar()
@@ -307,25 +342,21 @@ def _get_opt(out, lambd):
         return alpha
     return absmax
 
-def mx_const(number, graph, params):
-    name = N.n('const_var')
-    prec = math.ceil(math.log2(number)) + 1
-    if name not in graph:
-        attr = { 'precision': str(prec) }
-        graph[name] = mx.sym.var(name, shape=(1,), attr=attr)
-        params[name] = nd.array([number])
-    return graph[name]
-
 def get_bit(opt):
     if isinstance(opt, nd.NDArray):
         opt = opt.abs().max().asscalar()
-    if opt == 0:
-        return 1
-    return math.ceil(math.log2(opt+1)) + 1
+    return math.ceil(math.log2(math.fabs(opt)+1)) + 1
 
 def get_bit_cnt(cnt):
-    assert isinstance(cnt, int) and cnt > 0
-    return math.ceil(math.log2(cnt))
+    # get_bit_cnt (mrt) should be consistent with 
+    # GetReduceSumBit (cvm-runtime)
+    assert isinstance(cnt, int) and cnt > 0, \
+        "Error in get_bit_cnt, provided cnt: %s"%cnt
+    prec = 0
+    while cnt != 0:
+        prec += 1
+        cnt  >>= 1
+    return prec
 
 def get_range(prec):
     return (2 ** (prec - 1)) - 1
@@ -343,6 +374,8 @@ def sym_calibrate(symbol, params, data, **kwargs):
     th_dict, out_cache = {}, {}
     ctx = kwargs.get('ctx', mx.cpu())
     logger.info("calibrate model outputs")
+    nparams = convert_params_dtype(params, src_dtypes="float64",
+            dest_dtype="float32")
 
     def _impl(op, params, graph, **kwargs):
         deps, old_ths = kwargs['deps'], kwargs['old_ths']
@@ -373,7 +406,7 @@ def sym_calibrate(symbol, params, data, **kwargs):
             p("collect symbol %-40s out_shape=%-20s th_dict: (%s)",
                     name, [o.shape for o in out], th_dict[name])
 
-    topo_visit_transformer(symbol, params, _impl, logger=logger,
+    topo_visit_transformer(symbol, nparams, _impl, logger=logger,
             deps=deps, data=data, **kwargs)
     out_cache.clear()
 
@@ -405,43 +438,33 @@ def requant_operator(X, oprec, oscale=None, **kwargs):
     exactly = True if oscale else False
     oprec = precs[xn].get(kwargs['oname'], oprec)
     oscale = oscale if oscale else scale(th_dict[xn], oprec)
-    iprec = precs[xn][OUT_KEY]
     iscale = kwargs['scales'][xn]
+    # OUT_KEY may not by tight:
+    # exp, sigmoid, softmax, and other default quantized op
+    # use get_bit to acquire tight prec
+    # iprec = get_bit(th_dict[xn]*iscale)
+    iprec = precs[xn][OUT_KEY]
 
-    if exactly:
-        sb = get_bit(th_dict[xn]*iscale) - oprec
-        if sb > 1:
-            iprec -= sb
-            X = realize(X, sb, iprec)
-            iscale = iscale / (2**sb)
-            logger.debug(
-                "Operator  %-20s name=%-40s exactly quantize with sb=%s" +
-                " scale=%s, prec=%s",
-                    xopn, xn, sb, iscale, iprec)
+    sb = get_bit(th_dict[xn]*iscale) - oprec
+    if sb > 5:
+        iprec -= sb
+        X = realize(X, sb, iprec)
+        iscale = iscale / (2**sb)
+
     if exactly or iprec > oprec:
         rescale = oscale / iscale
-        # frac, exp = sim.cvm_float(rescale, MAX_BIT - iprec)
         bits = MAX_BIT - iprec
         frac, exp = sim.cvm_float(rescale, bits)
         sim_scale = frac * (2 ** exp)
         scale_err = abs((sim_scale - rescale) / rescale)
-        while not exactly and scale_err > 0.0000001:
-            # in order to guarantee that tight_prec <= infer_prec
-            # the precision of rescale must be improved as much as possible
-            bits += 1
-            assert bits < 33
-            frac, exp = sim.cvm_float(rescale, bits)
-            sim_scale = frac * (2 ** exp)
-            scale_err = abs((sim_scale - rescale) / rescale)
-        if exactly and scale_err > 0.001:
+        if scale_err > 0.001:
             logger.warn(
-                "Operator  %-20s name=%-40s requantize to scale=%s " +
-                "with <%s, %d, %d>, error=%s",
-                    xopn, xn, rescale, sim_scale, frac, exp, scale_err)
+                "Operator  %-20s name=%-40s quantize with sb=%s" +
+                " scale=%s, error=%s",
+                    xopn, xn, sb, iscale, scale_err)
         oscale = iscale * frac * (2 ** exp)
         if frac > 1:
-            # X = realize(X, 0, iprec)
-            var = mx_const(frac, graph, params)
+            var = nd_const(frac, graph, params)
             X = mx.sym.broadcast_mul(X, var, name=N.n("mrt_quantize_scale"))
         X = realize(X, -exp, oprec)
         logger.debug(
@@ -449,7 +472,6 @@ def requant_operator(X, oprec, oscale=None, **kwargs):
             " iprec=%s, iscale=%-10.5f, oprec=%s, oscale=%-10.5f",
                 xopn, xn, rescale, frac, exp, iprec, iscale, oprec, oscale)
     else:
-        # X = realize(X, 0, oprec)
         oscale = iscale
         logger.debug(
             "Operator  %-20s name=%-40s clip with iprec=%s, oprec=%s",
@@ -465,25 +487,22 @@ def requant_parameter(wname, oprec, oscale=None, **kwargs):
     if th_dict[wname] == 0:
         oprec, oscale = 1, 1
         shp = params[wname].shape
-        params[Wn] = nd.zeros(shp)
+        params[Wn] = nd_zeros(shp)
         attr = { 'precision': '1' }
         W = mx.sym.var(Wn, shape=shp, attr=attr)
     else:
         oprec = kwargs['precs'][wname].get(kwargs['oname'], oprec)
         oscale = oscale if oscale else scale(th_dict[wname], oprec)
-        params[Wn] = sim.int_realize(params[wname] * oscale,
+        params[Wn] = sim.int_realize(
+                params[wname].astype("float64") * oscale,
                 oprec, logger=logger)
         attr = { 'precision': str(oprec) }
+        max_v = params[Wn].abs().max().asscalar()
+        range_v = (2**(oprec-1)-1)
+        assert max_v <= range_v,\
+            "name:%s, max_v:%s, range_v:%s, oprec:%s"%\
+            (wname, max_v, range_v, oprec)
         W = mx.sym.var(Wn, shape=params[Wn].shape, attr=attr)
-
-    '''
-    oprec = kwargs['precs'][wname].get(kwargs['oname'], oprec)
-    oscale = oscale if oscale else scale(th_dict[wname], oprec)
-    params[Wn] = sim.int_realize(params[wname] * oscale,
-            oprec, logger=logger)
-    attr = { 'precision': str(oprec) }
-    W = mx.sym.var(Wn, shape=params[Wn].shape, attr=attr)
-    '''
 
     logger.debug(
         "Parameter th_dict=%-12.8f name=%-40s " + \
@@ -520,8 +539,13 @@ def requant_output_clip(op, name, **kwargs):
     scales[oname] = scales[name]
 
     infer_prec = precs[oname][OUT_KEY]
+    assert infer_prec <= 32, \
+        "infer_prec:%s, tight_prec:%s, name:%s, op:%s"%\
+        (infer_prec, tight_prec, name, op_name)
     tight_prec = get_bit(th_dict[oname] * scales[oname])
-    assert infer_prec >= tight_prec
+    assert infer_prec >= tight_prec, \
+        "infer_prec:%s, tight_prec:%s, name:%s, op:%s"%\
+        (infer_prec, tight_prec, name, op_name)
 
     if infer_prec > tight_prec:
         op = mx.sym.Custom(op, precision=tight_prec,
@@ -533,12 +557,4 @@ def requant_output_clip(op, name, **kwargs):
         scales[clip_name] = scales[oname]
 
     return op
-
-def get_infer_precision(sym, **kwargs):
-    params = kwargs['params']
-    name = sym.attr('name')
-    if is_params(sym, params):
-        return get_bit(params[name])
-    else:
-        return kwargs['precs'][name][OUT_KEY]
 

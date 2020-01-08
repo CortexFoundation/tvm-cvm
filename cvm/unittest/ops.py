@@ -262,7 +262,7 @@ class TestBoxNms(TfmTest):
                 coord_start=2,
                 score_index=1, id_index=-1,
                 return_indices=False, invalid_to_bottom=True)
-        self._assert_equal(ans, des, 'compile')
+        self._assert_equal(ans, des, ['prepare_for_compile', 'compile'])
 
 
 
