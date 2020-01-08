@@ -7,18 +7,32 @@
 """
 
 import logging
-import os
 from os import path
 import numpy as np
-from mxnet import gluon
-import tvm
 
-import tfm_ops
-from tfm_pass import *
-from gluon_zoo import *
+import mxnet as mx
+from mxnet import gluon, ndarray as nd
+import nnvm
+
+# import as registry pattern
+import tfm_ops  # pylint: disable=unused-import
+import cvm_op   # pylint: disable=unused-import
+
+from tfm_pass import OUT_KEY, convert_params_dtype
+import tfm_pass as tpass
+from tfm_pass import \
+    attach_input_shape, graph_validate, infer_shape, \
+    fuse_multiple_outputs, fuse_constant, \
+    calculate_ops, collect_op_names, \
+    fuse_transpose, rewrite, sym_calibrate, quantize, compile
+# from tfm_pass import *
+# from gluon_zoo import *
 
 import sym_utils as sutils
-import cvm_op
+from sym_utils import topo_sort, sym_iter, get_mxnet_op
+import dataset as ds
+import utils
+import sim_quant_helper as sim
 
 __all__ = ["MRT", "compile_to_cvm", "load_model", "validate_model",
            "split_model", "merge_model",
@@ -83,7 +97,7 @@ class MRT:
 
         self._qext = None
 
-        self.op_input_precs = self._op_default_input_precs()
+        self._op_default_input_precs()
         if prepare:
             self.prepare()
         self._update_precs()
@@ -91,7 +105,6 @@ class MRT:
     def prepare(self):
         self._lgr.info("Graph initialize and reduce...")
         _sym, _prm = self.csym, self.cprm
-
         _prm = convert_params_dtype(_prm)
         if self._ishp is not None:
             _sym, _prm = attach_input_shape(_sym, _prm,
@@ -112,7 +125,7 @@ class MRT:
 
     def calibrate(self, ctx=mx.cpu(), lambd=None, old_ths=None):
         self.th_dict = sym_calibrate(self.csym, self.cprm, self._data,
-                                 ctx=ctx, lambd=lambd, old_ths=old_ths)
+                                     ctx=ctx, lambd=lambd, old_ths=old_ths)
         return self.th_dict
 
     def quantize(self):
@@ -165,17 +178,18 @@ class MRT:
                         [c.attr('name') for c in self.rsym]))
 
     def _op_default_input_precs(self):
-        op_precs = {}
-        for n in ['Convolution', 'FullyConnected', 'sigmoid', 'exp', 'softmax']:
-            op_precs[n] = 8
+        op_precs = self.op_input_precs = {}
+        for name in ['Convolution', 'FullyConnected',
+                     'sigmoid', 'exp', 'softmax']:
+            op_precs[name] = 8
         op_precs['sum'] = 8
-        for n in ['broadcast_add', 'broadcast_sub', 'elemwise_add', 'elemwise_sub', 'slice_like']:
-            op_precs[n] = 16
+        for name in ['broadcast_add', 'broadcast_sub',
+                     'elemwise_add', 'elemwise_sub', 'slice_like']:
+            op_precs[name] = 16
         op_precs['broadcast_mul'] = 16
         op_precs['Concat'] = 16
         op_precs['Embedding'] = 16
         op_precs['slice_like'] = 30
-        return op_precs
 
     def _update_precs(self):
         for sym in topo_sort(self.csym):
@@ -195,21 +209,21 @@ class MRT:
             if name not in self._fixed:
                 continue
             assert op_name == 'null', (op_name, name)
-            if is_params(sym, self.cprm):
-                bit = get_bit(self.cprm[name])
+            if sutils.is_params(sym, self.cprm):
+                bit = tpass.get_bit(self.cprm[name])
                 self.precs[name] = {OUT_KEY: bit}
             else:
                 bit = self.precs[name][OUT_KEY]
                 self.precs[name] = {OUT_KEY: bit}
-            self.th_dict[name] = get_range(bit)
+            self.th_dict[name] = tpass.get_range(bit)
 
 def load_model(model_name, sym_path, prm_path, ctx, inputs_qext=None):
     inputs = [mx.sym.var('data')]
     sym, params = mx.sym.load(sym_path), nd.load(prm_path)
-    net = mx.gluon.nn.SymbolBlock(sym, inputs)
+    net = gluon.nn.SymbolBlock(sym, inputs)
     nparams = params if inputs_qext else \
             convert_params_dtype(params, src_dtypes="float64",
-            dest_dtype="float32")
+                                 dest_dtype="float32")
     utils.load_parameters(net, nparams, ctx=ctx)
     acc_top1 = mx.metric.Accuracy()
     acc_top5 = mx.metric.TopKAccuracy(5)
@@ -233,6 +247,8 @@ def validate_model(sym_path, prm_path, ctx, num_channel=3,
                    input_size=224, batch_size=16, iter_num=10,
                    ds_name='imagenet', from_scratch=0, lambd=None,
                    dump_model=False):
+    from gluon_zoo import save_model
+
     flag = [False]*from_scratch + [True]*(2-from_scratch)
     model_name, _ = path.splitext(path.basename(sym_path))
     model_dir = path.dirname(sym_path)
@@ -284,7 +300,7 @@ def validate_model(sym_path, prm_path, ctx, num_channel=3,
         model_name = model_name + "_tfm"
         dump_shape = (1, num_channel, input_size, input_size)
         compile_to_cvm(qsym, qprm, model_name, datadir=datadir,
-                input_shape=dump_shape)
+                       input_shape=dump_shape)
         data = data[0].reshape(dump_shape)
         data = sim.load_real_data(data.astype("float64"), 'data', inputs_qext)
         np.save(datadir+"/"+model_name+"/data.npy", data.astype('int8').asnumpy())
@@ -330,7 +346,7 @@ def split_model(symbol, params, input_shapes, keys):
 def merge_model(base, base_params, top, top_params,
                 base_maps={}, callback=None):
     logger = logging.getLogger("mrt.model.merge")
-    logger.info("Merge model with map: {}".format(base_maps))
+    logger.info("Merge model with map: %s", base_maps)
     graph = {base_maps.get(c.attr('name'), c.attr('name')):c for c in base}
     for sym in topo_sort(top):
         name, op_name = sym.attr('name'), sym.attr('op_name')
@@ -354,6 +370,9 @@ def merge_model(base, base_params, top, top_params,
 def compile_to_cvm(symbol, params, model_name,
                    datadir="/data/std_out",
                    input_shape=None, target="cuda"):
+    import os
+    import tvm
+
     logger = logging.getLogger("mrt.compile")
 
     datadir = path.join(datadir, model_name)
@@ -365,10 +384,10 @@ def compile_to_cvm(symbol, params, model_name,
     dtype, nnvm_params = "int32", {}
     tvm_ctx = tvm.context(target, 0)
     for sym in topo_sort(symbol):
-        if is_params(sym, params):
+        if sutils.is_params(sym, params):
             key, value = sym.attr('name'), params[sym.attr('name')]
             flat = value.asnumpy()
-            assert np.abs(flat).max() <= INT32_MAX, \
+            assert np.abs(flat).max() <= sutils.INT32_MAX, \
                 "key: {}\nvalue: {}".format(key, value)
             assert (flat.astype(dtype).astype("float64") == flat).all(), \
                 "key: {}\nvalue: {}".format(key, value)
@@ -380,22 +399,22 @@ def compile_to_cvm(symbol, params, model_name,
     logger.info("Compile into CVM graph")
     if input_shape is None:
         for sym in topo_sort(symbol):
-            if is_inputs(sym, params):
+            if sutils.is_inputs(sym, params):
                 _, oshp, _ = sym.infer_shape()
                 assert len(oshp) == 1
                 input_shape = oshp[0]
     input_shapes = {'data': input_shape}
     with nnvm.compiler.build_config(opt_level=0):
-        deploy_graph, lib, nnvm_params = nnvm.compiler.build(
+        deploy_graph, _, nnvm_params = nnvm.compiler.build(
             nnvm_sym, target=target, shape=input_shapes,
             params=nnvm_params, dtype=dtype)
 
     # tvm parameters reduce
     logger.info("Parameters precision reduce")
     for sym in topo_sort(nnvm_sym):
-        if is_params(sym, nnvm_params):
+        if sutils.is_params(sym, nnvm_params):
             name, attr = sym.attr('name'), sym.list_attr()
-            precision = get_attr(attr, "precision")
+            precision = sutils.get_attr(attr, "precision")
             dtype = "int32" if precision > 8 else "int8"
             nnvm_params[name] = tvm.nd.array(
                 params[name].asnumpy().astype(dtype), tvm_ctx)
