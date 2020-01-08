@@ -1,5 +1,18 @@
+""" MRT Interface API
+
+    Refractor of source code, using the registry pattern.
+    Rules of coding with pylint.
+    Collection of hyper-parameters controller.
+    Simplification of public API.
+"""
+
+import logging
+import os
+from os import path
+import numpy as np
 from mxnet import gluon
 import tvm
+
 import tfm_ops
 from tfm_pass import *
 from gluon_zoo import *
@@ -7,46 +20,83 @@ from gluon_zoo import *
 import sym_utils as sutils
 import cvm_op
 
-import logging
-import os
-from os import path
-import numpy as np
+__all__ = ["MRT", "compile_to_cvm", "load_model", "validate_model",
+           "split_model", "merge_model",
+           # transformer helper pass
+           "convert_params_dtype"]
 
-#TODO(wlt): control available api for MRT
+class MRT:
+    """ An MRT quantization class contained many helper functions.
 
-class MRT(object):
-    def __init__(self, symbol, params, input_shape, input_prec=8):
-        self.csym = symbol
-        self.cprm = convert_params_dtype(params)
+    Quantization Procedures:
+    ========================
+        1. prepare: initial of model graph, such as fuse_constant,
+            rewrite, validate, ...etc;
+        2. calibration: caculate the internal thresholds of layers;
+        3. quantization: quantize the floating parameters into INT(p)
+            precision with scales, using the floading data simulate
+            the realized environment of interger dataflow;
+
+    Helper functions:
+    =================
+    set_data:
+        set the model input data to calibrating.
+
+    set_threshold:
+        set the model internal layers threshold manually.
+
+    set_th_dict:
+        set the whold internal layers threshold.
+
+    set_input_prec:
+        set the input data's precision, 8 by default.
+
+    set_output_prec:
+        set the output results' precision.
+
+    set_fixed:
+        set the un-quantize internal layers.
+
+    get_maps:
+        get the after-quantization model's name map with
+        original floating graph.
+
+    get_output_scales:
+        get the after-quantization model's scales comparing to
+        original floating graph.
+    """
+    def __init__(self, symbol, params, input_shape,
+                 input_prec=8, prepare=True):
+        self._lgr = logging.getLogger("mrt")
+
+        self.rsym, self.rprm = symbol, params
+        self.csym, self.cprm = symbol, params
         self._ishp = input_shape
 
         self._data = None
         self._fixed = set()
 
         self.precs = {}
-        self.precs['data'] = { OUT_KEY: input_prec }
+        self.precs['data'] = {OUT_KEY: input_prec}
         self.th_dict = {}
         self.scales = {}
 
         self._qext = None
 
         self.op_input_precs = self._op_default_input_precs()
-        self.csym, self.cprm = self._prepare()
+        if prepare:
+            self.prepare()
         self._update_precs()
 
-        self.rsym, self.rprm = self.csym, self.cprm
-
-    def _prepare(self):
-        self._lgr = logging.getLogger('mrt')
+    def prepare(self):
         self._lgr.info("Graph initialize and reduce...")
         _sym, _prm = self.csym, self.cprm
 
+        _prm = convert_params_dtype(_prm)
         if self._ishp is not None:
             _sym, _prm = attach_input_shape(_sym, _prm,
-                {'data': self._ishp})
+                                            {'data': self._ishp})
         _sym, _prm = graph_validate(_sym, _prm)
-        infer_shape(_sym, _prm) # check infer_shape is correct.
-        _sym, _prm = validate(_sym, _prm)
 
         _sym, _prm = fuse_multiple_outputs(_sym, _prm)
         orig_ops = calculate_ops(_sym, _prm)
@@ -56,22 +106,24 @@ class MRT(object):
         _sym, _prm = fuse_constant(_sym, _prm)
 
         self._lgr.info("Original ops[%s] reduced into %s",
-                orig_ops, calculate_ops(_sym, _prm))
-        return _sym, _prm
+                       orig_ops, calculate_ops(_sym, _prm))
+
+        self.csym, self.cprm = _sym, _prm
 
     def calibrate(self, ctx=mx.cpu(), lambd=None, old_ths=None):
         self.th_dict = sym_calibrate(self.csym, self.cprm, self._data,
-                ctx=ctx, lambd=lambd, old_ths=old_ths)
+                                 ctx=ctx, lambd=lambd, old_ths=old_ths)
         return self.th_dict
 
-    def quantize(self, no_realize=False):
+    def quantize(self):
         if self.th_dict is None:
             self._lgr.error("Please calibrate thresholds first.")
             assert False
 
         self._check_fixed()
-        self.csym, self.cprm = quantize(self.csym, self.cprm,
-                self.th_dict, self.precs, self.scales, self.op_input_precs)
+        self.csym, self.cprm = \
+            quantize(self.csym, self.cprm, self.th_dict,
+                     self.precs, self.scales, self.op_input_precs)
         self._get_ext()
         return self.csym, self.cprm, self._qext
 
@@ -98,13 +150,10 @@ class MRT(object):
         else:
             self._fixed.add(fixes)
 
-    def set_threshold(self, name, threshold):
-        self.th_dict[name] = threshold
-
     def get_output_scales(self):
         oscales = []
-        for s in self.csym:
-            name = s.attr('name')
+        for sym in self.csym:
+            name = sym.attr('name')
             if name in self.scales:
                 oscales.append(self.scales[name])
             else:
@@ -113,7 +162,7 @@ class MRT(object):
 
     def get_maps(self):
         return dict(zip([c.attr('name') for c in self.csym],
-                    [c.attr('name') for c in self.rsym]))
+                        [c.attr('name') for c in self.rsym]))
 
     def _op_default_input_precs(self):
         op_precs = {}
@@ -135,10 +184,10 @@ class MRT(object):
                 self.precs[name] = {}
 
     def _get_ext(self):
-        self._qext = { 'data': {
+        self._qext = {'data': {
             'shape': self._ishp,
             'scale': self.scales['data'],
-            'target_bit': self.precs['data'][OUT_KEY], } }
+            'target_bit': self.precs['data'][OUT_KEY]}}
 
     def _check_fixed(self):
         for sym in topo_sort(self.csym):
@@ -148,10 +197,10 @@ class MRT(object):
             assert op_name == 'null', (op_name, name)
             if is_params(sym, self.cprm):
                 bit = get_bit(self.cprm[name])
-                self.precs[name] = { OUT_KEY: bit, }
+                self.precs[name] = {OUT_KEY: bit}
             else:
                 bit = self.precs[name][OUT_KEY]
-                self.precs[name] = { OUT_KEY: bit, }
+                self.precs[name] = {OUT_KEY: bit}
             self.th_dict[name] = get_range(bit)
 
 def load_model(model_name, sym_path, prm_path, ctx, inputs_qext=None):
@@ -170,7 +219,7 @@ def load_model(model_name, sym_path, prm_path, ctx, inputs_qext=None):
         data = sim.load_real_data(data.astype("float64"), 'data', inputs_qext) \
                if inputs_qext else data
         data = gluon.utils.split_and_load(data, ctx_list=ctx,
-            batch_axis=0, even_split=False)
+                                          batch_axis=0, even_split=False)
         res = [net.forward(d) for d in data]
         res = nd.concatenate(res)
         acc_top1.update(label, res)
@@ -180,9 +229,10 @@ def load_model(model_name, sym_path, prm_path, ctx, inputs_qext=None):
         return "top1={:6.2%} top5={:6.2%}".format(top1, top5)
     return model_func
 
-def validate_model(sym_path, prm_path, ctx, num_channel=3, input_size=224,
-        batch_size=16, iter_num=10, ds_name='imagenet', from_scratch=0,
-        lambd=None, dump_model=False):
+def validate_model(sym_path, prm_path, ctx, num_channel=3,
+                   input_size=224, batch_size=16, iter_num=10,
+                   ds_name='imagenet', from_scratch=0, lambd=None,
+                   dump_model=False):
     flag = [False]*from_scratch + [True]*(2-from_scratch)
     model_name, _ = path.splitext(path.basename(sym_path))
     model_dir = path.dirname(sym_path)
@@ -193,7 +243,7 @@ def validate_model(sym_path, prm_path, ctx, num_channel=3, input_size=224,
         save_model(model_name)
     sym, params = mx.sym.load(sym_path), mx.nd.load(prm_path)
 
-    print (collect_op_names(sym, params))
+    print(collect_op_names(sym, params))
 
     data_iter_func = ds.data_iter(ds_name, batch_size, input_size=input_size)
     data, _ = data_iter_func()
@@ -228,9 +278,6 @@ def validate_model(sym_path, prm_path, ctx, num_channel=3, input_size=224,
         qsym, qprm = mx.sym.load(qsym_path), nd.load(qprm_path)
         (inputs_qext, ) = sim.load_ext(qext_path)
 
-    inputs = [mx.sym.var('data')]
-    inputs_ext = { 'data': { 'shape': input_shape } }
-
     # dump model
     if dump_model:
         datadir = "/data/ryt"
@@ -249,7 +296,8 @@ def validate_model(sym_path, prm_path, ctx, num_channel=3, input_size=224,
             inputs_qext=inputs_qext)
 
     utils.multi_validate(org_model, data_iter_func, cvm_quantize,
-            iter_num=iter_num, logger=logging.getLogger('mrt.validate'))
+                         iter_num=iter_num,
+                         logger=logging.getLogger('mrt.validate'))
     logger.info("test %s finished."%model_name)
 
 def split_model(symbol, params, input_shapes, keys):
@@ -276,16 +324,15 @@ def split_model(symbol, params, input_shapes, keys):
     nodes = [graph[sym.attr('name')] for sym in symbol]
     top = nodes[0] if len(nodes) == 1 else mx.sym.Group(nodes)
     top_params = {k:params[k] for k in top.list_inputs() if k in params}
-    top_inputs_ext = {k:v for k,v in inputs.items() if k not in ['data']}
+    top_inputs_ext = {k:v for k, v in inputs.items() if k not in ['data']}
 
     return base, base_params, top, top_params, top_inputs_ext
 
 def merge_model(base, base_params, top, top_params,
-        base_maps={}, callback=None):
+                base_maps={}, callback=None):
     logger = logging.getLogger("mrt.model.merge")
     logger.info("Merge model with map: {}".format(base_maps))
-    graph = {base_maps.get(c.attr('name'), c.attr('name')):c \
-        for c in base }
+    graph = {base_maps.get(c.attr('name'), c.attr('name')):c for c in base}
     for sym in topo_sort(top):
         name, op_name = sym.attr('name'), sym.attr('op_name')
         childs, attr = sym_iter(sym.get_children()), sym.list_attr()
@@ -306,8 +353,8 @@ def merge_model(base, base_params, top, top_params,
     return symbol, params
 
 def compile_to_cvm(symbol, params, model_name,
-        datadir="/data/std_out",
-        input_shape=None, target="cuda"):
+                   datadir="/data/std_out",
+                   input_shape=None, target="cuda"):
     logger = logging.getLogger("mrt.compile")
 
     datadir = path.join(datadir, model_name)
@@ -329,6 +376,8 @@ def compile_to_cvm(symbol, params, model_name,
             nnvm_params[key] = tvm.nd.array(flat.astype(dtype), tvm_ctx)
 
     # compile to JSON&Bytes format
+    # graph = nnvm.graph.create(nnvm_sym)
+    # open("/tmp/tmp.nnvm.json", "w").write(graph.json())
     logger.info("Compile into CVM graph")
     if input_shape is None:
         for sym in topo_sort(symbol):
@@ -336,7 +385,7 @@ def compile_to_cvm(symbol, params, model_name,
                 _, oshp, _ = sym.infer_shape()
                 assert len(oshp) == 1
                 input_shape = oshp[0]
-    input_shapes = { 'data': input_shape }
+    input_shapes = {'data': input_shape}
     with nnvm.compiler.build_config(opt_level=0):
         deploy_graph, lib, nnvm_params = nnvm.compiler.build(
             nnvm_sym, target=target, shape=input_shapes,
