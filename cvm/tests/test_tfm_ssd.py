@@ -123,19 +123,20 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratchi=0):
             data, _ = data_iter_func()
             mrt.set_data(data)
             th_dict = mrt.calibrate(ctx=ctx)
-        _, _, dump_ext = load_fname("mrt.dict", True)
-        sim.save_ext(dump_ext, th_dict)
+        # _, _, dump_ext = load_fname("mrt.dict", True)
+        mrt.save("mrt.dict")
     else:
-        _, _, dump_ext = load_fname("mrt.dict", True)
-        (th_dict,) = sim.load_ext(dump_ext)
+        # _, _, dump_ext = load_fname("mrt.dict", True)
+        # (th_dict,) = sim.load_ext(dump_ext)
+        mrt = MRT.load("mrt.dict")
 
     # quantize split model, get:
     # qbase, qbase_params, qbase_inputs_ext, oscales, maps
     qbase, qbase_params, qbase_inputs_ext, oscales, maps = \
             None, None, None, None, None
     if flag[2]:
-        mrt = MRT(base, base_params, input_shape)
-        mrt.set_th_dict(th_dict)
+        # mrt = MRT(base, base_params, input_shape)
+        # mrt.set_th_dict(th_dict)
         mrt.set_threshold('data', 2.64)
         mrt.set_fixed("ssd0_multiperclassdecoder0_concat0")
         mrt.set_fixed("ssd0_multiperclassdecoder0__mulscalar0")

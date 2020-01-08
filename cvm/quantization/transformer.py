@@ -203,6 +203,30 @@ class MRT:
                 self.precs[name] = {OUT_KEY: bit}
             self.th_dict[name] = get_range(bit)
 
+    def save(self, model_name, datadir="./data"):
+        sym_file, params_file, ext_file = utils.extend_fname(path.join(datadir, model_name), True)
+        with open(sym_file, 'w') as f:
+            f.write(self.csym.tojson())
+        nd.save(params_file, self.cprm)
+        sim.save_ext(ext_file, self.th_dict, self._fixed,
+                     self._ishp, self.precs, self.scales, 
+                     self._qext)
+    
+    @staticmethod
+    def load(model_name, datadir="./data"):
+        sym_file, params_file, ext_file = utils.extend_fname(path.join(datadir, model_name), True)
+        sym, params = mx.sym.load(sym_file), nd.load(params_file)
+        sim.load_ext(ext_file)
+        th_dict, fixed, ishp, precs, scales, \
+            qext = sim.load_ext(ext_file)
+        mrt = MRT(sym, params, ishp, prepare=False)
+        mrt.set_th_dict(th_dict)
+        mrt._fixed = fixed
+        mrt.precs = precs
+        mrt.scales = scales
+        mrt._qext = qext
+        return mrt
+
 def load_model(model_name, sym_path, prm_path, ctx, inputs_qext=None):
     inputs = [mx.sym.var('data')]
     sym, params = mx.sym.load(sym_path), nd.load(prm_path)
