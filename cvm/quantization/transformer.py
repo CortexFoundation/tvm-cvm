@@ -21,7 +21,9 @@ import sym_utils as sutils
 import cvm_op
 
 __all__ = ["MRT", "compile_to_cvm", "load_model", "validate_model",
-           "split_model", "merge_model"]
+           "split_model", "merge_model",
+           # transformer helper pass
+           "convert_params_dtype"]
 
 class MRT:
     """ An MRT quantization class contained many helper functions.
