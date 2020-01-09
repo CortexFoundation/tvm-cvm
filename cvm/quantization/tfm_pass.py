@@ -97,10 +97,7 @@ def quantize(symbol, params, th_dict, precs, scales, op_input_precs):
             precs=precs, scales=scales)
 
 @N.register_nm("cvm")
-def compile(symbol, params):
-    def _as_list(arr):
-        return arr if isinstance(arr, list) else [arr]
-
+def to_nnvm(symbol, params):
     infer_shapes = infer_shape(symbol, params)
     graph = {}
     for op in topo_sort(symbol):
@@ -108,9 +105,8 @@ def compile(symbol, params):
         childs, attr = sym_iter(op.get_children()), op.list_attr()
         childs = [] if childs is None else childs
         childs = [get_node(c, graph) for c in childs]
-        # childs = [x for y in childs for x in _as_list(y)]
         op = apply_pass("compile", infer_shapes=infer_shapes)(
-                op, childs=childs, attr=attr)
+            op, childs=childs, attr=attr)
         graph[name] = op
 
     nodes = []

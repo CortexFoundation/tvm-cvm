@@ -7,47 +7,90 @@
 """
 
 import logging
+import os
 from os import path
-import sys
 import numpy as np
 
 import mxnet as mx
 from mxnet import gluon, ndarray as nd
 import nnvm
+import tvm
 
 # import as registry pattern
 import tfm_ops  # pylint: disable=unused-import
 import cvm_op   # pylint: disable=unused-import
 
-from tfm_pass import OUT_KEY, convert_params_dtype
 import tfm_pass as tpass
-from tfm_pass import \
-    infer_shape, fuse_multiple_outputs, fuse_constant, \
-    calculate_ops, collect_op_names, fuse_transpose, \
-    rewrite, sym_calibrate, quantize, compile
+from tfm_pass import OUT_KEY, convert_params_dtype
+from tfm_pass import sym_calibrate, quantize, to_nnvm
 
 import sym_utils as sutils
 from sym_utils import topo_sort, sym_iter, get_mxnet_op
-import dataset as ds
 import utils
 import sim_quant_helper as sim
 
-__all__ = ["init", "MRT", "compile_to_cvm",
-           "load_model", "validate_model",
+# TODO: collect hyper-parameters
+
+__all__ = ["Model", "init", "MRT", "compile_to_cvm",
            "split_model", "merge_model",
            # transformer helper pass
            "convert_params_dtype"]
 
+
+class Model:
+    """ Wrapper of Mxnet symbol and params, design
+            with user-friendly model API.
+    """
+    def __init__(self, symbol, params, dtype="float64"):
+        self.symbol = symbol
+        self.params = convert_params_dtype(params, dest_dtype=dtype)
+
+    def input_names(self):
+        """ List model input names.  """
+        return [s.attr('name') for s in self.symbol \
+            if sutils.is_inputs(s, self.params)]
+
+    def output_names(self):
+        """ List model output names. """
+        return [s.attr('name') for s in self.symbol]
+
+    def names(self):
+        return self.output_names()
+
+    def to_graph(self, dtype="float32", ctx=mx.cpu()):
+        """ Convenient helper function to create model runtime,
+                returns gluon.nn.SymbolBlock.
+        """
+        graph = gluon.nn.SymbolBlock(self.symbol, \
+            [mx.sym.var(n) for n in self.input_names()])
+        utils.load_parameters(graph, convert_params_dtype(
+            self.params,
+            dest_dtype=dtype), ctx=ctx)
+        return graph
+
+    def save(self, symbol_file, params_file):
+        """ Model dump to disk. """
+        with open(symbol_file, 'w') as fout:
+            fout.write(self.symbol.tojson())
+        nd.save(params_file, self.params)
+
+    @staticmethod
+    def load(symbol_file, params_file):
+        """ Model load from disk. """
+        symbol = mx.sym.load(symbol_file)
+        params = nd.load(params_file)
+        return Model(symbol, params)
+
 def init(model, input_shape=None):
     logger = logging.getLogger("mrt.prepare")
-    logger.info("Graph initialize and reduce...")
+    logger.info("Model initializing...")
 
     _sym, _prm = model.symbol, model.params
     tpass.name_duplicate_check(_sym, _prm)
 
     if isinstance(input_shape, dict):
         _sym, _prm = tpass.attach_input_shape(_sym, _prm, input_shape)
-        _sym, _prm = tfm.fuse_multiple_inputs(_sym, _prm)
+        _sym, _prm = tpass.fuse_multiple_inputs(_sym, _prm)
     elif input_shape is not None:
         model_inputs = tpass.model_inputs(_sym, _prm)
         assert model_inputs == 1, "Multiple inputs non-known shape"
@@ -55,53 +98,15 @@ def init(model, input_shape=None):
         _sym, _prm = tpass.attach_input_shape(_sym, _prm,
                                               {"data": input_shape})
     _sym, _prm = tpass.params_unique(_sym, _prm)
-    infer_shape(_sym, _prm) # check infer_shape is correct
+    tpass.infer_shape(_sym, _prm) # check infer_shape is correct
 
-    _sym, _prm = fuse_multiple_outputs(_sym, _prm)
-    orig_ops = calculate_ops(_sym, _prm)
-    _sym, _prm = fuse_constant(_sym, _prm)
-    _sym, _prm = fuse_transpose(_sym, _prm)
-    _sym, _prm = rewrite(_sym, _prm)
-    _sym, _prm = fuse_constant(_sym, _prm)
+    _sym, _prm = tpass.fuse_multiple_outputs(_sym, _prm)
+    _sym, _prm = tpass.fuse_constant(_sym, _prm)
+    _sym, _prm = tpass.fuse_transpose(_sym, _prm)
+    _sym, _prm = tpass.rewrite(_sym, _prm)
+    _sym, _prm = tpass.fuse_constant(_sym, _prm)
 
-    logger.info("Original ops[%s] reduced into %s",
-                orig_ops, calculate_ops(_sym, _prm))
-    return Model(_sym, _prm, "float64")
-
-
-class Model:
-    def __init__(self, symbol, params, dtype="float64"):
-        self.symbol = symbol
-        self.params = convert_params_dtype(params, dest_dtype=dtype)
-
-    def input_names(self):
-        return [s.attr('name') for s in self.symbol \
-            if sutils.is_inputs(s, self.params)]
-
-    def output_names(self):
-        return [s.attr('name') for s in self.symbol]
-
-    def names(self):
-        return self.output_names()
-
-    def to_graph(self, dtype="float32", ctx=mx.cpu()):
-        graph = gluon.nn.SymbolBlock(self.symbol, \
-            [mx.sym.var(n) for n in self.input_names])
-        utils.load_parameters(graph, convert_params_dtype(
-            self.params,
-            dest_dtype=dtype), ctx=ctx)
-        return graph
-
-    def save(self, symbol_file, params_file):
-        with open(symbol_file, 'w') as fout:
-            fout.write(self.symbol.tojson())
-        nd.save(params_file, self.params)
-
-    @staticmethod
-    def load(symbol_file, params_file):
-        symbol = mx.sym.load(symbol_file)
-        params = nd.load(params_file)
-        return Model(symbol, params)
+    return Model(_sym, _prm)
 
 class MRT:
     """ An MRT quantization class contained many helper functions.
@@ -116,8 +121,6 @@ class MRT:
             the realized environment of interger dataflow;
     """
     def __init__(self, model, input_prec=8):
-        self._lgr = logging.getLogger("mrt")
-
         self.csym, self.cprm = model.symbol, model.params
 
         self.old_names = model.output_names()
@@ -168,21 +171,13 @@ class MRT:
             self.precs[name][name] = prec
 
     def quantize(self):
-        if self.th_dict is None:
-            self._lgr.error("Please calibrate thresholds first.")
-            assert False
-
         self.csym, self.cprm = \
             quantize(self.csym, self.cprm, self.th_dict,
                      self.precs, self.scales, self.op_input_precs)
         return self.csym, self.cprm, self.get_inputs_ext()
 
     def get_output_scales(self):
-        oscales = []
-        for sym in self.csym:
-            name = sym.attr('name')
-            oscales.append(self.scales[name])
-        return oscales
+        return [self.scales[s.attr("name")] for s in self.csym]
 
     def get_maps(self):
         return dict(zip([c.attr('name') for c in self.csym], self.old_names))
@@ -211,13 +206,14 @@ class MRT:
             sim.load_ext(ext_file)
         return mrt
 
-def split_model(symbol, params, keys):
-    infer_shapes = infer_shape(symbol, params)
-    bases = [s for s in topo_sort(symbol) if s.attr('name') in keys]
-    base = mx.sym.Group(bases)
+def split_model(model, keys):
+    symbol, params = model.symbol, model.params
+    nodes = [s for s in topo_sort(symbol) if s.attr('name') in keys]
+    base = nodes[0] if len(nodes) == 1 else mx.sym.Group(nodes)
     base_params = {k:params[k] for k in base.list_inputs() if k in params}
 
     graph = {}
+    infer_shapes = tpass.infer_shape(symbol, params)
     for sym in topo_sort(symbol):
         name, op_name = sym.attr('name'), sym.attr('op_name')
         childs, attr = sym_iter(sym.get_children()), sym.list_attr()
@@ -226,23 +222,20 @@ def split_model(symbol, params, keys):
             childs = [sutils.get_node(c, graph) for c in childs]
             node = get_mxnet_op(op_name)(*childs, **attr, name=name)
         if name in keys:
-            node = mx.sym.var(name,
-                              shape=infer_shapes[name][get_entry_id(sym)])
+            node = mx.sym.var(name, \
+                shape=infer_shapes[name][sutils.get_entry_id(sym)])
         graph[name] = node
     nodes = [sutils.get_node(c, graph) for c in symbol]
     top = nodes[0] if len(nodes) == 1 else mx.sym.Group(nodes)
     top_params = {k:params[k] for k in top.list_inputs() if k in params}
 
-    return base, base_params, top, top_params
+    return Model(base, base_params), Model(top, top_params)
 
-def merge_model(base, base_params, top, top_params,
-                base_maps=None, callback=None):
-    logger = logging.getLogger("mrt.model.merge")
-    logger.info("Merge model with map: %s", base_maps)
-
-    base_maps = {} if base_maps is None else base_maps
-    graph = {base_maps.get(c.attr('name'), c.attr('name')):c for c in base}
-    for sym in topo_sort(top):
+def merge_model(base_model, top_model, name_maps=None, callback=None):
+    name_maps = {} if name_maps is None else name_maps
+    graph = {name_maps.get(c.attr('name'), c.attr('name')):c \
+        for c in base_model.symbol}
+    for sym in topo_sort(top_model.symbol):
         name, op_name = sym.attr('name'), sym.attr('op_name')
         childs, attr = sym_iter(sym.get_children()), sym.list_attr()
         node = sym
@@ -252,29 +245,28 @@ def merge_model(base, base_params, top, top_params,
         if name in graph:
             node = graph[name]
         if callback is not None:
-            node = callback(node, top_params, graph)
+            node = callback(node, top_model.params, graph)
         graph[name] = node
-    nodes = [sutils.get_node(s, graph) for s in top]
+    nodes = [sutils.get_node(s, graph) for s in top_model.symbol]
     symbol = nodes[0] if len(nodes) == 1 else mx.sym.Group(nodes)
-    params = base_params
-    params.update(top_params)
-    return symbol, params
+    params = base_model.params
+    params.update(top_model.params)
+    return Model(symbol, params)
 
 
-def compile_to_cvm(symbol, params, model_name,
-                   datadir="/data/std_out",
+def compile_to_cvm(model, model_name, datadir="/data/std_out",
                    input_shape=None, target="cuda"):
-    import os
-    import tvm
-
+    """ Compile Mxnet model into CVM Accept-JSON&BIN-Format
+    """
     logger = logging.getLogger("mrt.compile")
+    symbol, params = model.symbol, model.params
 
     datadir = path.join(datadir, model_name)
     os.makedirs(datadir, exist_ok=True)
 
     # transform from mxnet symbol to cvm
     logger.info("Transform Mxnet symbol into CVM")
-    nnvm_sym, _ = compile(symbol, params)
+    nnvm_sym, _ = to_nnvm(symbol, params)
     dtype, nnvm_params = "int32", {}
     tvm_ctx = tvm.context(target, 0)
     for sym in topo_sort(symbol):
