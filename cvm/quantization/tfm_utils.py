@@ -1,5 +1,4 @@
 from mxnet import ndarray as nd
-import mxnet as mx
 
 def get_bit(opt):
     if isinstance(opt, nd.NDArray):

@@ -1,6 +1,9 @@
-from tfm_pass import get_bit, get_bit_cnt, get_range, scale
-from sym_utils import *
-from tfm_utils import *
+from tfm_utils import get_bit, get_range, scale
+import tfm_utils as tutils
+from sym_utils import get_attr, sym_iter, is_params, is_inputs, \
+                      nd_array, get_mxnet_op, get_nnvm_op, nd_const, \
+
+import sym_utils as sutils
 
 from mxnet import ndarray as nd
 import mxnet as mx
@@ -605,7 +608,7 @@ class Softmax(Transformer):
         norm = mx.sym.relu(norm, name=N.n('Softmax_filter'))
         norm = realize(norm, 0, xprec)
 
-        data = nd_arange(0, alpha+1)
+        data = sutils.nd_arange(0, alpha+1)
         table = nd.exp(data/xs)
 
         tprec = get_bit(math.exp(lambd))
@@ -731,7 +734,8 @@ class Pooling(Transformer):
             W_name = N.n('weight')
             W_shape = (in_channel, 1, *kernel)
             graph[W_name] = W = mx.sym.var(W_name, shape=W_shape)
-            params[W_name] = nd_full(shape=W_shape, val=(1/np.product(kernel)))
+            params[W_name] = sutils.nd_full(shape=W_shape,
+                                            val=(1/np.product(kernel)))
             op = mx.sym.Convolution(X, W, **conv_attr, name=conv_name)
         return op
 
@@ -920,7 +924,7 @@ class Sum(Transformer):
         ishp = infer_shapes[cns[0]][get_entry_id(childs[0])]
         k = int(nd.prod(nd_array(ishp)).asscalar() / \
             nd.prod(nd_array(oshp)).asscalar())
-        kprec = get_bit_cnt(k)
+        kprec = tutils.get_bit_cnt(k)
         infer_prec = kprec + xprec
         kwargs['precs'][name][OUT_KEY] = infer_prec
 
@@ -1453,7 +1457,7 @@ def _quantize_xwb(op, **kwargs):
 
     shp = kwargs['params'][childs[1].attr('name')].shape
     k = int(nd.prod(nd_array(shp[1:])).asscalar())
-    kprec = get_bit_cnt(k)
+    kprec = tutils.get_bit_cnt(k)
     infer_prec = kprec + xprec + wprec
     if not get_attr(attr, 'no_bias', False):
         infer_prec = max(infer_prec, bprec) + 1
@@ -1502,7 +1506,7 @@ def _quantize_table(op, **kwargs):
     var = nd_const(alpha, graph, params)
     X = mx.sym.broadcast_add(X, var, name=N.n(op_name+'_offset'))
 
-    out = get_nd_op(op_name)(nd_arange(-alpha, alpha+1) / xs)
+    out = sutils.get_nd_op(op_name)(sutils.nd_arange(-alpha, alpha+1) / xs)
     oprec = precs[name].get(OUT_KEY, 16)
     oscale = scales[name] = scale(out.abs().max().asscalar(), oprec)
 
@@ -1592,7 +1596,7 @@ def requant_parameter(wname, oprec, oscale=None, **kwargs):
     if th_dict[wname] == 0:
         oprec, oscale = 1, 1
         shp = params[wname].shape
-        params[Wn] = nd_zeros(shp)
+        params[Wn] = sutils.nd_zeros(shp)
         attr = { 'precision': '1' }
         W = mx.sym.var(Wn, shape=shp, attr=attr)
     else:

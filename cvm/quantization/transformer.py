@@ -311,55 +311,6 @@ def validate_model(sym_path, prm_path, ctx, num_channel=3,
                          logger=logging.getLogger('mrt.validate'))
     logger.info("test %s finished.", model_name)
 
-def split_model(symbol, params, keys):
-    infer_shapes = infer_shape(symbol, params)
-    bases = [s for s in topo_sort(symbol) if s.attr('name') in keys]
-    base = mx.sym.Group(bases)
-    base_params = {k:params[k] for k in base.list_inputs() if k in params}
-
-    graph = {}
-    for sym in topo_sort(symbol):
-        name, op_name = sym.attr('name'), sym.attr('op_name')
-        childs, attr = sym_iter(sym.get_children()), sym.list_attr()
-        node = sym
-        if childs is not None:
-            childs = [sutils.get_node(c, graph) for c in childs]
-            node = get_mxnet_op(op_name)(*childs, **attr, name=name)
-        if name in keys:
-            node = mx.sym.var(name,
-                              shape=infer_shapes[name][get_entry_id(sym)])
-        graph[name] = node
-    nodes = [sutils.get_node(c, graph) for c in symbol]
-    top = nodes[0] if len(nodes) == 1 else mx.sym.Group(nodes)
-    top_params = {k:params[k] for k in top.list_inputs() if k in params}
-
-    return base, base_params, top, top_params
-
-def merge_model(base, base_params, top, top_params,
-                base_maps=None, callback=None):
-    logger = logging.getLogger("mrt.model.merge")
-    logger.info("Merge model with map: %s", base_maps)
-
-    base_maps = {} if base_maps is None else base_maps
-    graph = {base_maps.get(c.attr('name'), c.attr('name')):c for c in base}
-    for sym in topo_sort(top):
-        name, op_name = sym.attr('name'), sym.attr('op_name')
-        childs, attr = sym_iter(sym.get_children()), sym.list_attr()
-        node = sym
-        if childs is not None:
-            childs = [sutils.get_node(c, graph) for c in childs]
-            node = get_mxnet_op(op_name)(*childs, **attr, name=name)
-        if name in graph:
-            node = graph[name]
-        if callback is not None:
-            node = callback(node, top_params, graph)
-        graph[name] = node
-    nodes = [sutils.get_node(s, graph) for s in top]
-    symbol = nodes[0] if len(nodes) == 1 else mx.sym.Group(nodes)
-    params = base_params
-    params.update(top_params)
-    return symbol, params
-
 def compile_to_cvm(symbol, params, model_name,
                    datadir="/data/std_out",
                    input_shape=None, target="cuda"):

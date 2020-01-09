@@ -3,7 +3,7 @@ import math
 import numpy as np
 
 from tfm_utils import get_bit, scale
-from sym_utils import *
+from sym_utils import is_var, is_params, is_inputs
 from tfm_base import *
 import dataset as ds
 import utils
