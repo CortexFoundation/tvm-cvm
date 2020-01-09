@@ -25,6 +25,30 @@ __all__ = ["MRT", "compile_to_cvm", "load_model", "validate_model",
            # transformer helper pass
            "convert_params_dtype"]
 
+def init(symbol, params, input_shape=None):
+    logger = logging.getLogger("mrt.prepare")
+    logger.info("Graph initialize and reduce...")
+
+    _sym, _prm = symbol, params
+    _prm = convert_params_dtype(_prm)
+    if input_shape is not None:
+        _sym, _prm = attach_input_shape(_sym, _prm,
+                                        {'data': input_shape})
+    _sym, _prm = graph_validate(_sym, _prm)
+
+    _sym, _prm = fuse_multiple_outputs(_sym, _prm)
+    orig_ops = calculate_ops(_sym, _prm)
+    _sym, _prm = fuse_constant(_sym, _prm)
+    _sym, _prm = fuse_transpose(_sym, _prm)
+    _sym, _prm = rewrite(_sym, _prm)
+    _sym, _prm = fuse_constant(_sym, _prm)
+
+    logger.info("Original ops[%s] reduced into %s",
+                   orig_ops, calculate_ops(_sym, _prm))
+
+    return _sym, _prm
+
+
 class MRT:
     """ An MRT quantization class contained many helper functions.
 
@@ -66,7 +90,7 @@ class MRT:
         original floating graph.
     """
     def __init__(self, symbol, params, input_shape,
-                 input_prec=8, prepare=True):
+                 input_prec=8):
         self._lgr = logging.getLogger("mrt")
 
         self.rsym, self.rprm = symbol, params
@@ -76,39 +100,15 @@ class MRT:
         self._data = None
         self._fixed = set()
 
-        self.precs = {}
-        self.precs['data'] = {OUT_KEY: input_prec}
+        self.precs = {s.attr('name'):{} for s in topo_sort(self.csym)}
+        if 'data' not in self.precs:
+            raise RuntimeError("please invoke `init` function first")
+        self.precs['data'][OUT_KEY] = input_prec
         self.th_dict = {}
         self.scales = {}
-
         self._qext = None
-
         self.op_input_precs = self._op_default_input_precs()
-        if prepare:
-            self.prepare()
-        self._update_precs()
 
-    def prepare(self):
-        self._lgr.info("Graph initialize and reduce...")
-        _sym, _prm = self.csym, self.cprm
-
-        _prm = convert_params_dtype(_prm)
-        if self._ishp is not None:
-            _sym, _prm = attach_input_shape(_sym, _prm,
-                                            {'data': self._ishp})
-        _sym, _prm = graph_validate(_sym, _prm)
-
-        _sym, _prm = fuse_multiple_outputs(_sym, _prm)
-        orig_ops = calculate_ops(_sym, _prm)
-        _sym, _prm = fuse_constant(_sym, _prm)
-        _sym, _prm = fuse_transpose(_sym, _prm)
-        _sym, _prm = rewrite(_sym, _prm)
-        _sym, _prm = fuse_constant(_sym, _prm)
-
-        self._lgr.info("Original ops[%s] reduced into %s",
-                       orig_ops, calculate_ops(_sym, _prm))
-
-        self.csym, self.cprm = _sym, _prm
 
     def calibrate(self, ctx=mx.cpu(), lambd=None, old_ths=None):
         self.th_dict = sym_calibrate(self.csym, self.cprm, self._data,
@@ -177,12 +177,6 @@ class MRT:
         op_precs['slice_like'] = 30
         return op_precs
 
-    def _update_precs(self):
-        for sym in topo_sort(self.csym):
-            name = sym.attr('name')
-            if name not in self.precs:
-                self.precs[name] = {}
-
     def _get_ext(self):
         self._qext = {'data': {
             'shape': self._ishp,
@@ -211,7 +205,7 @@ class MRT:
         sim.save_ext(ext_file, self.th_dict, self._fixed,
                      self._ishp, self.precs, self.scales, 
                      self._qext)
-    
+
     @staticmethod
     def load(model_name, datadir="./data"):
         sym_file, params_file, ext_file = utils.extend_fname(path.join(datadir, model_name), True)

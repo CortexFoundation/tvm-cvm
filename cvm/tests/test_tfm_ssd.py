@@ -10,6 +10,7 @@ import sym_utils as sutils
 import sim_quant_helper as sim
 import dataset
 from transformer import *
+import transformer as tfm
 from tfm_pass import convert_params_dtype
 
 import logging
@@ -78,6 +79,8 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratchi=0):
     if flag[0]:
         sym_file, param_file = load_fname()
         sym, params = mx.sym.load(sym_file), nd.load(param_file)
+        # mrt = MRT(sym, params, input_shape)
+        sym, params = tfm.init(sym, params, input_shape)
         keys = [
           "ssd0_multiperclassdecoder0_concat0",
           "ssd0_multiperclassdecoder0__mulscalar0",
@@ -123,12 +126,10 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratchi=0):
             data, _ = data_iter_func()
             mrt.set_data(data)
             th_dict = mrt.calibrate(ctx=ctx)
-        # _, _, dump_ext = load_fname("mrt.dict", True)
         mrt.save("mrt.dict")
     else:
-        # _, _, dump_ext = load_fname("mrt.dict", True)
-        # (th_dict,) = sim.load_ext(dump_ext)
         mrt = MRT.load("mrt.dict")
+
 
     # quantize split model, get:
     # qbase, qbase_params, qbase_inputs_ext, oscales, maps

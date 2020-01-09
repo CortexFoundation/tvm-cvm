@@ -362,6 +362,9 @@ class Repeat(Transformer):
 
 
 @register_pass("calculate_ops")
+@register_pass("validate")
+@register_pass("fuse_transpose")
+@register_pass("rewrite")
 @register_transformer('_contrib_box_nms')
 class BoxNms(Transformer):
     def compile(self, op, **kwargs):
@@ -1332,10 +1335,16 @@ class ZerosLike(Transformer):
 class OnesLike(Transformer):
     def rewrite(self, op, **kwargs):
         # TODO: dynamic shape
+        # name = op.attr('name')
+        # shp = kwargs['infer_shapes'][name][get_entry_id(op)]
+        # kwargs['params'][name] = nd_ones(shp)
+        # return mx.sym.var(name, shape=shp)
         name = op.attr('name')
-        shp = kwargs['infer_shapes'][name][get_entry_id(op)]
-        kwargs['params'][name] = nd_ones(shp)
-        return mx.sym.var(name, shape=shp)
+        params = kwargs['params']
+
+        
+        var = mx.sym.var(name=N.n(), **mattrs)
+        op = mx.symbol.broadcast_mul(op, )
 
 
 @register_pass("calculate_ops")
@@ -1361,19 +1370,17 @@ class GreaterScalar(Transformer):
         op = nnvm.sym.broadcast_greater(childs[0], var, name=N.n(), **attr)
 
         infer_shapes = kwargs["infer_shapes"]
-        print(infer_shapes[childs[0].attr('name')])
-        print(infer_shapes[name])
         return op
 
 
 @register_pass("calculate_ops")
-# @register_pass("compile")
+@register_pass("validate")
+@register_pass("rewrite")
+@register_pass("fuse_transpose")
+@register_pass("compile")
 @register_transformer("where")
 class Where(Transformer):
-
-    def compile(self, op, **kwargs):
-        print(kwargs['infer_shapes'][op.attr("name")])
-        super().compile(op, **kwargs)
+    pass
 
 
 @register_pass("validate")
