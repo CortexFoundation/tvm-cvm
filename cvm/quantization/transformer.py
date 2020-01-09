@@ -62,9 +62,9 @@ def init(symbol, params, input_shape=None):
 
 
 class Model:
-    def __init__(self, symbol, params):
+    def __init__(self, symbol, params, dtype="float64"):
         self.symbol = symbol
-        self.params = convert_params_dtype(params)
+        self.params = convert_params_dtype(params, dest_dtype=dtype)
 
     def input_names(self):
         return [s.attr('name') for s in self.symbol \
@@ -80,8 +80,8 @@ class Model:
         graph = gluon.nn.SymbolBlock(self.symbol, \
             [mx.sym.var(n) for n in self.input_names])
         utils.load_parameters(graph, convert_params_dtype(
-            self.params, src_dtypes="float64",
-            dest_dtype="float32"), ctx=ctx)
+            self.params,
+            dest_dtype=dtypw), ctx=ctx)
         return graph
 
     def save(self, symbol_file, params_file):
