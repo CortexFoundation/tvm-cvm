@@ -59,7 +59,7 @@ def init(symbol, params, input_shape=None):
     _sym, _prm = fuse_constant(_sym, _prm)
 
     logger.info("Original ops[%s] reduced into %s",
-                   orig_ops, calculate_ops(_sym, _prm))
+                orig_ops, calculate_ops(_sym, _prm))
     return _sym, _prm
 
 
@@ -74,74 +74,31 @@ class MRT:
         3. quantization: quantize the floating parameters into INT(p)
             precision with scales, using the floading data simulate
             the realized environment of interger dataflow;
-
-    Helper functions:
-    =================
-    set_data:
-        set the model input data to calibrating.
-
-    set_threshold:
-        set the model internal layers threshold manually.
-
-    set_th_dict:
-        set the whold internal layers threshold.
-
-    set_input_prec:
-        set the input data's precision, 8 by default.
-
-    set_output_prec:
-        set the output results' precision.
-
-    set_fixed:
-        set the un-quantize internal layers.
-
-    get_maps:
-        get the after-quantization model's name map with
-        original floating graph.
-
-    get_output_scales:
-        get the after-quantization model's scales comparing to
-        original floating graph.
     """
     def __init__(self, symbol, params, input_shape,
                  input_prec=8):
         self._lgr = logging.getLogger("mrt")
 
-        self.old_names = [s.attr('name') for s in symbol]
         self.csym, self.cprm = symbol, params
-        self._ishp = input_shape
 
+        self.old_names = [s.attr('name') for s in symbol]
         self._data = None
-        self._fixed = set()
+        self.th_dict = {}
 
         self.precs = {s.attr('name'):{} for s in topo_sort(self.csym)}
         if 'data' not in self.precs:
             raise RuntimeError("please invoke `init` function first")
         self.precs['data'][OUT_KEY] = input_prec
-        self.th_dict = {}
         self.scales = {}
-        self._qext = None
         self._op_default_input_precs()
+
+    def set_data(self, data):
+        self._data = data
 
     def calibrate(self, ctx=mx.cpu(), lambd=None, old_ths=None):
         self.th_dict = sym_calibrate(self.csym, self.cprm, self._data,
                                      ctx=ctx, lambd=lambd, old_ths=old_ths)
         return self.th_dict
-
-    def quantize(self):
-        if self.th_dict is None:
-            self._lgr.error("Please calibrate thresholds first.")
-            assert False
-
-        self._check_fixed()
-        self.csym, self.cprm = \
-            quantize(self.csym, self.cprm, self.th_dict,
-                     self.precs, self.scales, self.op_input_precs)
-        self._get_ext()
-        return self.csym, self.cprm, self._qext
-
-    def set_data(self, data):
-        self._data = data
 
     def set_threshold(self, name, threshold):
         self.th_dict[name] = threshold
@@ -157,24 +114,31 @@ class MRT:
             name = sym.attr('name')
             self.precs[name][name] = prec
 
-    def set_fixed(self, fixes):
-        if isinstance(fixes, list):
-            self._fixed.update(fixes)
-        else:
-            self._fixed.add(fixes)
+    def quantize(self):
+        if self.th_dict is None:
+            self._lgr.error("Please calibrate thresholds first.")
+            assert False
+
+        self.csym, self.cprm = \
+            quantize(self.csym, self.cprm, self.th_dict,
+                     self.precs, self.scales, self.op_input_precs)
+        return self.csym, self.cprm, self.get_inputs_ext()
 
     def get_output_scales(self):
         oscales = []
         for sym in self.csym:
             name = sym.attr('name')
-            if name in self.scales:
-                oscales.append(self.scales[name])
-            else:
-                oscales.append(1)
+            oscales.append(self.scales[name])
         return oscales
 
     def get_maps(self):
-        return dict(zip([c.attr('name') for c in self.csym], old_names)
+        return dict(zip([c.attr('name') for c in self.csym], old_names))
+
+    def get_inputs_ext(self):
+        inputs_ext = {'data': {
+            'scale': self.scales['data'],
+            'target_bit': self.precs['data'][OUT_KEY]}}
+        return inputs_ext
 
     def _op_default_input_precs(self):
         op_precs = self.op_input_precs = {}
@@ -190,35 +154,14 @@ class MRT:
         op_precs['Embedding'] = 16
         op_precs['slice_like'] = 30
 
-    def _get_ext(self):
-        self._qext = {'data': {
-            'shape': self._ishp,
-            'scale': self.scales['data'],
-            'target_bit': self.precs['data'][OUT_KEY]}}
-
-    def _check_fixed(self):
-        for sym in topo_sort(self.csym):
-            name, op_name = sym.attr('name'), sym.attr('op_name')
-            if name not in self._fixed:
-                continue
-            assert op_name == 'null', (op_name, name)
-            if sutils.is_params(sym, self.cprm):
-                bit = tpass.get_bit(self.cprm[name])
-                self.precs[name] = {OUT_KEY: bit}
-            else:
-                bit = self.precs[name][OUT_KEY]
-                self.precs[name] = {OUT_KEY: bit}
-            self.th_dict[name] = tpass.get_range(bit)
-
     def save(self, model_name, datadir="./data"):
         sym_file, params_file, ext_file = utils.extend_fname(path.join(datadir, model_name), True)
         with open(sym_file, 'w') as f:
             f.write(self.csym.tojson())
         nd.save(params_file, self.cprm)
-        # save_ext do not support set type, convert into list manually.
         sim.save_ext(ext_file,
-                     self.old_names, self.th_dict, list(self._fixed),
-                     self._ishp, self.precs, self.scales, self._qext)
+                     self.old_names, self.th_dict,
+                     self.precs, self.scales)
 
     @staticmethod
     def load(model_name, datadir="./data"):
@@ -226,15 +169,12 @@ class MRT:
             utils.extend_fname(path.join(datadir, model_name), True)
         sym, params = mx.sym.load(sym_file), nd.load(params_file)
         sim.load_ext(ext_file)
-        old_names, th_dict, fixed, ishp, precs, scales, \
-            qext = sim.load_ext(ext_file)
+        old_names, th_dict, precs, scales = sim.load_ext(ext_file)
         mrt = MRT(sym, params, ishp)
         mrt.set_th_dict(th_dict)
         mrt.old_names = old_names
-        mrt._fixed = set(fixed)
         mrt.precs = precs
         mrt.scales = scales
-        mrt._qext = qext
         return mrt
 
 def load_model(model_name, sym_path, prm_path, ctx, inputs_qext=None):
