@@ -20,8 +20,9 @@ import tfm_ops  # pylint: disable=unused-import
 import cvm_op   # pylint: disable=unused-import
 
 from tfm_pass import OUT_KEY, convert_params_dtype
+import tfm_pass as tpass
 from tfm_pass import \
-    attach_input_shape, graph_validate, infer_shape, \
+    attach_input_shape, infer_shape, \
     fuse_multiple_outputs, fuse_constant, \
     calculate_ops, collect_op_names, fuse_transpose, \
     rewrite, sym_calibrate, quantize, compile
@@ -38,16 +39,24 @@ __all__ = ["init", "MRT", "compile_to_cvm",
            # transformer helper pass
            "convert_params_dtype"]
 
-def init(symbol, params, input_shape=None):
+def init(model, input_shape=None):
     logger = logging.getLogger("mrt.prepare")
     logger.info("Graph initialize and reduce...")
 
-    _sym, _prm = symbol, params
-    _prm = convert_params_dtype(_prm)
-    if input_shape is not None:
+    _sym, _prm = model.symbol, model.params
+    tpass.name_duplicate_check(_sym, _prm)
+
+    if isinstance(input_shape, dict):
+        _sym, _prm = attach_input_shape(_sym, _prm, input_shape)
+        _sym, _prm = tfm.fuse_multiple_inputs(_sym, _prm)
+    elif input_shape is not None:
+        model_inputs = tpass.model_inputs(_sym, _prm)
+        assert model_inputs == 1, "Multiple inputs non-known shape"
+        _sym, _prm = tpass.input_name_replace(_sym, _prm)
         _sym, _prm = attach_input_shape(_sym, _prm,
-                                        {'data': input_shape})
-    _sym, _prm = graph_validate(_sym, _prm)
+                                        {"data": input_shape})
+    _sym, _prm = tpass.params_unique(_sym, _prm)
+    infer_shape(_sym, _prm) # check infer_shape is correct
 
     _sym, _prm = fuse_multiple_outputs(_sym, _prm)
     orig_ops = calculate_ops(_sym, _prm)
@@ -58,7 +67,7 @@ def init(symbol, params, input_shape=None):
 
     logger.info("Original ops[%s] reduced into %s",
                 orig_ops, calculate_ops(_sym, _prm))
-    return _sym, _prm
+    return Model(_sym, _prm, "float64")
 
 
 class Model:
@@ -81,7 +90,7 @@ class Model:
             [mx.sym.var(n) for n in self.input_names])
         utils.load_parameters(graph, convert_params_dtype(
             self.params,
-            dest_dtype=dtypw), ctx=ctx)
+            dest_dtype=dtype), ctx=ctx)
         return graph
 
     def save(self, symbol_file, params_file):
@@ -107,13 +116,12 @@ class MRT:
             precision with scales, using the floading data simulate
             the realized environment of interger dataflow;
     """
-    def __init__(self, symbol, params, input_prec=8):
+    def __init__(self, model, input_prec=8):
         self._lgr = logging.getLogger("mrt")
 
-        self.csym, self.cprm = symbol, params
-        self.current_model = Model(symbol, params)
+        self.csym, self.cprm = model.symbol, model.params
 
-        self.old_names = [s.attr('name') for s in symbol]
+        self.old_names = model.output_names()
         self._data = None
         self.th_dict = {}
 
@@ -190,26 +198,18 @@ class MRT:
         # pylint: disable=unbalanced-tuple-unpacking
         sym_file, params_file, ext_file = \
             utils.extend_fname(path.join(datadir, model_name), True)
-        with open(sym_file, 'w') as fout:
-            fout.write(self.csym.tojson())
-        nd.save(params_file, self.cprm)
-        sim.save_ext(ext_file,
-                     self.old_names, self.th_dict,
+        sim.save_ext(ext_file, self.old_names, self.th_dict,
                      self.precs, self.scales)
+        Model(self.csym, self.cprm).save(sym_file, params_file)
 
     @staticmethod
     def load(model_name, datadir="./data"):
         # pylint: disable=unbalanced-tuple-unpacking
         sym_file, params_file, ext_file = \
             utils.extend_fname(path.join(datadir, model_name), True)
-        sym, params = mx.sym.load(sym_file), nd.load(params_file)
-        sim.load_ext(ext_file)
-        old_names, th_dict, precs, scales = sim.load_ext(ext_file)
-        mrt = MRT(sym, params)
-        mrt.old_names = old_names
-        mrt.set_th_dict(th_dict)
-        mrt.precs = precs
-        mrt.scales = scales
+        mrt = MRT(Model.load(sym_file, params_file))
+        mrt.old_names, mrt.th_dict, mrt.precs, mrt.scales = \
+            sim.load_ext(ext_file)
         return mrt
 
 def load_model(model_name, sym_path, prm_path, ctx, inputs_qext=None):

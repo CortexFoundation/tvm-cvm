@@ -124,7 +124,7 @@ def compile(symbol, params):
 # === symbol helper ===
 
 @N.register_nm("fmi")
-def transfer_multiple_inputs(sym, params):
+def fuse_multiple_inputs(sym, params):
     infer_shapes = infer_shape(sym, params)
     dim_sum, dim_per, dims = 0, {}, {}
     def _sum_input(node, params, **kwargs):
@@ -157,38 +157,37 @@ def transfer_multiple_inputs(sym, params):
     sym, params = topo_visit_transformer(sym, params, _change_node)
     return sym, params
 
-@N.register_nm("gv")
-def graph_validate(symbol, params):
-    """ Graph Validate pass do some checks:
-            1. examine unique names in model
-            2. fuse multiple inputs into single one
-            3. named the single input node `data`
-            4. remove unused params
-    """
+def model_inputs(symbol, params):
+    input_count = 0
+    def _count(op, params, graph):
+        nonlocal input_count
+        input_count += is_inputs(op, params)
+    topo_visit_transformer(symbol, params, _count)
+    return input_count
+
+def name_duplicate_check(symbol, params):
     names = set()
     for sym in topo_sort(symbol):
         name = sym.attr('name')
         assert name not in names, "duplicated name in graph: %s" % name
         names.add(name)
 
-    sym, params = transfer_multiple_inputs(symbol, params)
+def params_unique(symbol, params):
+    new_params = {s.attr('name'):params[s.attr('name')] \
+            for s in topo_sort(sym) if is_params(s, params)}
+    return symbol, new_params
 
+def input_name_replace(symbol, params):
     def _name_replace(op, params, graph):
         name, attr = op.attr('name'), op.list_attr()
         if is_inputs(op, params):
             op = mx.sym.var("data", attr=attr)
         return op
-    sym, params = topo_visit_transformer(sym, params, _name_replace)
-
-    new_params = {s.attr('name'):params[s.attr('name')] \
-            for s in topo_sort(sym) if is_params(s, params)}
-
-    infer_shape(sym, new_params) # check infer_shape is correct
-    return sym, new_params
+    return topo_visit_transformer(sym, params, _name_replace)
 
 @N.register_nm("fc")
 def fuse_constant(symbol, params):
-    nparams = convert_params_dtype(params, src_dtypes="float64", dest_dtype="float32")
+    nparams = convert_params_dtype(params, dest_dtype="float32")
 
     def _impl(op, params, graph):
         name, op_name = op.attr('name'), op.attr('op_name')
@@ -207,7 +206,7 @@ def fuse_constant(symbol, params):
         return op
 
     sym, params = topo_visit_transformer(symbol, nparams, _impl)
-    params = convert_params_dtype(params)
+    params = convert_params_dtype(params, dest_dtype="float64")
     return sym, params
 
 @N.register_nm("ais")
