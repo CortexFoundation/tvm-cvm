@@ -8,6 +8,7 @@
 
 import logging
 from os import path
+import sys
 import numpy as np
 
 import mxnet as mx
@@ -19,14 +20,11 @@ import tfm_ops  # pylint: disable=unused-import
 import cvm_op   # pylint: disable=unused-import
 
 from tfm_pass import OUT_KEY, convert_params_dtype
-import tfm_pass as tpass
 from tfm_pass import \
     attach_input_shape, graph_validate, infer_shape, \
     fuse_multiple_outputs, fuse_constant, \
-    calculate_ops, collect_op_names, \
-    fuse_transpose, rewrite, sym_calibrate, quantize, compile
-# from tfm_pass import *
-# from gluon_zoo import *
+    calculate_ops, collect_op_names, fuse_transpose, \
+    rewrite, sym_calibrate, quantize, compile
 
 import sym_utils as sutils
 from sym_utils import topo_sort, sym_iter, get_mxnet_op
@@ -63,6 +61,40 @@ def init(symbol, params, input_shape=None):
     return _sym, _prm
 
 
+class Model:
+    def __init__(self, symbol, params):
+        self.symbol = symbol
+        self.params = convert_params_dtype(params)
+
+    def input_names(self):
+        return [s.attr('name') for s in self.symbol \
+            if sutils.is_inputs(s, self.params)]
+
+    def output_names(self):
+        return [s.attr('name') for s in self.symbol]
+
+    def names(self):
+        return self.output_names()
+
+    def to_graph(self, dtype="float32", ctx=mx.cpu()):
+        graph = gluon.nn.SymbolBlock(self.symbol, \
+            [mx.sym.var(n) for n in self.input_names])
+        utils.load_parameters(graph, convert_params_dtype(
+            self.params, src_dtypes="float64",
+            dest_dtype="float32"), ctx=ctx)
+        return graph
+
+    def save(self, symbol_file, params_file):
+        with open(symbol_file, 'w') as fout:
+            fout.write(self.symbol.tojson())
+        nd.save(params_file, self.params)
+
+    @staticmethod
+    def load(symbol_file, params_file):
+        symbol = mx.sym.load(symbol_file)
+        params = nd.load(params_file)
+        return Model(symbol, params)
+
 class MRT:
     """ An MRT quantization class contained many helper functions.
 
@@ -75,22 +107,22 @@ class MRT:
             precision with scales, using the floading data simulate
             the realized environment of interger dataflow;
     """
-    def __init__(self, symbol, params, input_shape,
-                 input_prec=8):
+    def __init__(self, symbol, params, input_prec=8):
         self._lgr = logging.getLogger("mrt")
 
         self.csym, self.cprm = symbol, params
+        self.current_model = Model(symbol, params)
 
         self.old_names = [s.attr('name') for s in symbol]
         self._data = None
         self.th_dict = {}
 
+        self._op_default_input_precs()
         self.precs = {s.attr('name'):{} for s in topo_sort(self.csym)}
         if 'data' not in self.precs:
             raise RuntimeError("please invoke `init` function first")
         self.precs['data'][OUT_KEY] = input_prec
         self.scales = {}
-        self._op_default_input_precs()
 
     def set_data(self, data):
         self._data = data
@@ -105,6 +137,20 @@ class MRT:
 
     def set_th_dict(self, th_dict):
         self.th_dict = th_dict
+
+    def _op_default_input_precs(self):
+        op_precs = self.op_input_precs = {}
+        for name in ['Convolution', 'FullyConnected',
+                     'sigmoid', 'exp', 'softmax']:
+            op_precs[name] = 8
+        op_precs['sum'] = 8
+        for name in ['broadcast_add', 'broadcast_sub',
+                     'elemwise_add', 'elemwise_sub', 'slice_like']:
+            op_precs[name] = 16
+        op_precs['broadcast_mul'] = 16
+        op_precs['Concat'] = 16
+        op_precs['Embedding'] = 16
+        op_precs['slice_like'] = 30
 
     def set_input_prec(self, prec):
         self.precs['data'][OUT_KEY] = prec
@@ -132,7 +178,7 @@ class MRT:
         return oscales
 
     def get_maps(self):
-        return dict(zip([c.attr('name') for c in self.csym], old_names))
+        return dict(zip([c.attr('name') for c in self.csym], self.old_names))
 
     def get_inputs_ext(self):
         inputs_ext = {'data': {
@@ -140,24 +186,12 @@ class MRT:
             'target_bit': self.precs['data'][OUT_KEY]}}
         return inputs_ext
 
-    def _op_default_input_precs(self):
-        op_precs = self.op_input_precs = {}
-        for name in ['Convolution', 'FullyConnected',
-                     'sigmoid', 'exp', 'softmax']:
-            op_precs[name] = 8
-        op_precs['sum'] = 8
-        for name in ['broadcast_add', 'broadcast_sub',
-                     'elemwise_add', 'elemwise_sub', 'slice_like']:
-            op_precs[name] = 16
-        op_precs['broadcast_mul'] = 16
-        op_precs['Concat'] = 16
-        op_precs['Embedding'] = 16
-        op_precs['slice_like'] = 30
-
     def save(self, model_name, datadir="./data"):
-        sym_file, params_file, ext_file = utils.extend_fname(path.join(datadir, model_name), True)
-        with open(sym_file, 'w') as f:
-            f.write(self.csym.tojson())
+        # pylint: disable=unbalanced-tuple-unpacking
+        sym_file, params_file, ext_file = \
+            utils.extend_fname(path.join(datadir, model_name), True)
+        with open(sym_file, 'w') as fout:
+            fout.write(self.csym.tojson())
         nd.save(params_file, self.cprm)
         sim.save_ext(ext_file,
                      self.old_names, self.th_dict,
@@ -165,14 +199,15 @@ class MRT:
 
     @staticmethod
     def load(model_name, datadir="./data"):
+        # pylint: disable=unbalanced-tuple-unpacking
         sym_file, params_file, ext_file = \
             utils.extend_fname(path.join(datadir, model_name), True)
         sym, params = mx.sym.load(sym_file), nd.load(params_file)
         sim.load_ext(ext_file)
         old_names, th_dict, precs, scales = sim.load_ext(ext_file)
-        mrt = MRT(sym, params, ishp)
-        mrt.set_th_dict(th_dict)
+        mrt = MRT(sym, params)
         mrt.old_names = old_names
+        mrt.set_th_dict(th_dict)
         mrt.precs = precs
         mrt.scales = scales
         return mrt
@@ -264,7 +299,7 @@ def validate_model(sym_path, prm_path, ctx, num_channel=3,
         data = data[0].reshape(dump_shape)
         data = sim.load_real_data(data.astype("float64"), 'data', inputs_qext)
         np.save(datadir+"/"+model_name+"/data.npy", data.astype('int8').asnumpy())
-        exit()
+        sys.exit(0)
 
     # validate
     org_model = load_model(model_name, sym_path, prm_path, ctx)
@@ -274,58 +309,55 @@ def validate_model(sym_path, prm_path, ctx, num_channel=3,
     utils.multi_validate(org_model, data_iter_func, cvm_quantize,
                          iter_num=iter_num,
                          logger=logging.getLogger('mrt.validate'))
-    logger.info("test %s finished."%model_name)
+    logger.info("test %s finished.", model_name)
 
-def split_model(symbol, params, input_shapes, keys):
-    symbol, params = attach_input_shape(symbol, params, input_shapes)
+def split_model(symbol, params, keys):
     infer_shapes = infer_shape(symbol, params)
     bases = [s for s in topo_sort(symbol) if s.attr('name') in keys]
     base = mx.sym.Group(bases)
     base_params = {k:params[k] for k in base.list_inputs() if k in params}
 
     graph = {}
-    inputs = {k: {'shape': v} for k, v in input_shapes.items()}
     for sym in topo_sort(symbol):
         name, op_name = sym.attr('name'), sym.attr('op_name')
         childs, attr = sym_iter(sym.get_children()), sym.list_attr()
         node = sym
         if childs is not None:
-            childs = [get_node(c, graph) for c in childs]
-            # childs = [graph[c.attr('name')] for c in childs]
+            childs = [sutils.get_node(c, graph) for c in childs]
             node = get_mxnet_op(op_name)(*childs, **attr, name=name)
         if name in keys:
-            node = mx.sym.var(name)
-            inputs[name] = {'shape': infer_shapes[name]}
+            node = mx.sym.var(name,
+                              shape=infer_shapes[name][get_entry_id(sym)])
         graph[name] = node
-    nodes = [graph[sym.attr('name')] for sym in symbol]
+    nodes = [sutils.get_node(c, graph) for c in symbol]
     top = nodes[0] if len(nodes) == 1 else mx.sym.Group(nodes)
     top_params = {k:params[k] for k in top.list_inputs() if k in params}
-    top_inputs_ext = {k:v for k, v in inputs.items() if k not in ['data']}
 
-    return base, base_params, top, top_params, top_inputs_ext
+    return base, base_params, top, top_params
 
 def merge_model(base, base_params, top, top_params,
-                base_maps={}, callback=None):
+                base_maps=None, callback=None):
     logger = logging.getLogger("mrt.model.merge")
     logger.info("Merge model with map: %s", base_maps)
+
+    base_maps = {} if base_maps is None else base_maps
     graph = {base_maps.get(c.attr('name'), c.attr('name')):c for c in base}
     for sym in topo_sort(top):
         name, op_name = sym.attr('name'), sym.attr('op_name')
         childs, attr = sym_iter(sym.get_children()), sym.list_attr()
         node = sym
         if childs is not None:
-            childs = [graph[c.attr('name')] for c in childs]
+            childs = [sutils.get_node(c, graph) for c in childs]
             node = get_mxnet_op(op_name)(*childs, **attr, name=name)
         if name in graph:
             node = graph[name]
         if callback is not None:
             node = callback(node, top_params, graph)
         graph[name] = node
-    symbols = [graph[s.attr('name')] for s in top]
-    symbol = symbols[0] if len(symbols) == 1 else mx.sym.Group(symbols)
+    nodes = [sutils.get_node(s, graph) for s in top]
+    symbol = nodes[0] if len(nodes) == 1 else mx.sym.Group(nodes)
     params = base_params
     params.update(top_params)
-    params = {k:params[k] for k in symbol.list_inputs() if k in params}
     return symbol, params
 
 def compile_to_cvm(symbol, params, model_name,
