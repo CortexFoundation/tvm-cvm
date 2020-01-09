@@ -45,10 +45,13 @@ class Model:
         self.symbol = symbol
         self.params = convert_params_dtype(params, dest_dtype=dtype)
 
+    def __iter__(self):
+        return iter(self.symbol)
+
     def input_names(self):
         """ List model input names.  """
-        return [s.attr('name') for s in self.symbol \
-            if sutils.is_inputs(s, self.params)]
+        return [s.attr("name") for s in topo_sort(self.symbol) \
+                if sutils.is_inputs(s, self.params)]
 
     def output_names(self):
         """ List model output names. """
@@ -121,14 +124,15 @@ class MRT:
             the realized environment of interger dataflow;
     """
     def __init__(self, model, input_prec=8):
-        self.csym, self.cprm = model.symbol, model.params
-
         self.old_names = model.output_names()
+        self.current_model = model
+
         self._data = None
         self.th_dict = {}
 
         self._op_default_input_precs()
-        self.precs = {s.attr('name'):{} for s in topo_sort(self.csym)}
+        self.precs = {s.attr('name'):{} \
+            for s in topo_sort(self.current_model)}
         if 'data' not in self.precs:
             raise RuntimeError("please invoke `init` function first")
         self.precs['data'][OUT_KEY] = input_prec
@@ -138,8 +142,9 @@ class MRT:
         self._data = data
 
     def calibrate(self, ctx=mx.cpu(), lambd=None, old_ths=None):
-        self.th_dict = sym_calibrate(self.csym, self.cprm, self._data,
-                                     ctx=ctx, lambd=lambd, old_ths=old_ths)
+        self.th_dict = sym_calibrate(
+                self.current_model.symbol, self.current_model.params,
+                self._data, ctx=ctx, lambd=lambd, old_ths=old_ths)
         return self.th_dict
 
     def set_threshold(self, name, threshold):
@@ -166,21 +171,23 @@ class MRT:
         self.precs['data'][OUT_KEY] = prec
 
     def set_output_prec(self, prec):
-        for sym in self.csym:
+        for sym in self.current_model:
             name = sym.attr('name')
             self.precs[name][name] = prec
 
     def quantize(self):
-        self.csym, self.cprm = \
-            quantize(self.csym, self.cprm, self.th_dict,
-                     self.precs, self.scales, self.op_input_precs)
-        return self.csym, self.cprm, self.get_inputs_ext()
+        _sym, _prm = quantize(
+            self.current_model.symbol, self.current_model.params,
+            self.th_dict, self.precs, self.scales, self.op_input_precs)
+        self.current_model = Model(_sym, _prm)
+        return self.current_model
 
     def get_output_scales(self):
-        return [self.scales[s.attr("name")] for s in self.csym]
+        return [self.scales[s.attr("name")] for s in self.current_model]
 
     def get_maps(self):
-        return dict(zip([c.attr('name') for c in self.csym], self.old_names))
+        return dict(zip([c.attr('name') for c in self.current_model],
+                        self.old_names))
 
     def get_inputs_ext(self):
         inputs_ext = {'data': {
@@ -194,7 +201,7 @@ class MRT:
             utils.extend_fname(path.join(datadir, model_name), True)
         sim.save_ext(ext_file, self.old_names, self.th_dict,
                      self.precs, self.scales)
-        Model(self.csym, self.cprm).save(sym_file, params_file)
+        self.current_model.save(sym_file, params_file)
 
     @staticmethod
     def load(model_name, datadir="./data"):
@@ -307,7 +314,9 @@ def compile_to_cvm(model, model_name, datadir="/data/std_out",
 
     # dump
     logger.info("CVM Json&Params dump")
-    open(path.join(datadir, "symbol"), "w").write(deploy_graph.json())
+    with open(path.join(datadir, "symbol"), "w") as fout:
+        fout.write(deploy_graph.json())
     param_bytes = nnvm.compiler.save_param_dict(nnvm_params)
-    open(path.join(datadir, "params"), "wb").write(param_bytes)
+    with open(path.join(datadir, "params"), "wb") as fout:
+        fout.write(param_bytes)
     return deploy_graph, nnvm_params

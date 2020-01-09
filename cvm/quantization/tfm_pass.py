@@ -2,7 +2,7 @@ from mxnet import ndarray as nd
 import math
 import numpy as np
 
-from tfm_utils import get_bit, scale
+from tfm_utils import get_bit, scale, requant
 from sym_utils import is_var, is_params, is_inputs
 from tfm_base import *
 import dataset as ds
@@ -170,7 +170,7 @@ def name_duplicate_check(symbol, params):
 
 def params_unique(symbol, params):
     new_params = {s.attr('name'):params[s.attr('name')] \
-            for s in topo_sort(sym) if is_params(s, params)}
+            for s in topo_sort(symbol) if is_params(s, params)}
     return symbol, new_params
 
 def input_name_replace(symbol, params):
@@ -179,7 +179,7 @@ def input_name_replace(symbol, params):
         if is_inputs(op, params):
             op = mx.sym.var("data", attr=attr)
         return op
-    return topo_visit_transformer(sym, params, _name_replace)
+    return topo_visit_transformer(symbol, params, _name_replace)
 
 @N.register_nm("fc")
 def fuse_constant(symbol, params):

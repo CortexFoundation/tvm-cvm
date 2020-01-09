@@ -6,8 +6,8 @@ from mxnet import ndarray as nd
 import mxnet as mx
 import nnvm
 
-from tfm_utils import get_bit, get_range, scale
-import tfm_utils as tutils
+from tfm_utils import get_bit, get_range, scale, get_bit_cnt
+from tfm_utils import requant, requant_operator, requant_parameter
 from sym_utils import get_attr, sym_iter, is_params, is_inputs, \
                       nd_array, get_mxnet_op, get_nnvm_op, nd_const, \
                       get_entry_id
@@ -921,7 +921,7 @@ class Sum(Transformer):
         ishp = infer_shapes[cns[0]][get_entry_id(childs[0])]
         k = int(nd.prod(nd_array(ishp)).asscalar() / \
             nd.prod(nd_array(oshp)).asscalar())
-        kprec = tutils.get_bit_cnt(k)
+        kprec = get_bit_cnt(k)
         infer_prec = kprec + xprec
         kwargs['precs'][name][OUT_KEY] = infer_prec
 
@@ -1453,7 +1453,7 @@ def _quantize_xwb(op, **kwargs):
 
     shp = kwargs['params'][childs[1].attr('name')].shape
     k = int(nd.prod(nd_array(shp[1:])).asscalar())
-    kprec = tutils.get_bit_cnt(k)
+    kprec = get_bit_cnt(k)
     infer_prec = kprec + xprec + wprec
     if not get_attr(attr, 'no_bias', False):
         infer_prec = max(infer_prec, bprec) + 1
@@ -1515,102 +1515,3 @@ def _quantize_table(op, **kwargs):
     logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
                  op_name, name, scales[name], cns)
     return op
-
-def realize(X, sb, prec, name=None):
-    name = name if name else N.n('realize')
-    if sb == 0:
-        sym = mx.sym.Custom(X, precision=prec,
-                            name=name, op_type='cvm_clip')
-    elif sb < 0:
-        sym = mx.sym.Custom(X, shift_bit=-sb, precision=prec,
-                            name=name, op_type='cvm_left_shift')
-    else:
-        sym = mx.sym.Custom(X, shift_bit=sb, precision=prec,
-                            name=name, op_type='cvm_right_shift')
-    return sym
-
-def requant_operator(X, oprec, oscale=None, **kwargs):
-    logger = logging.getLogger('log.mrt.realize')
-    params, graph = kwargs['params'], kwargs['graph']
-    th_dict, precs = kwargs['th_dict'], kwargs['precs']
-    xopn, xn = X.attr('op_name'), X.attr('name')
-
-    if th_dict[xn] == 0:
-        return X, 1, oscale if oscale else 1
-
-    exactly = True if oscale else False
-    oprec = precs[xn].get(kwargs['oname'], oprec)
-    oscale = oscale if oscale else scale(th_dict[xn], oprec)
-    iscale = kwargs['scales'][xn]
-    iprec = precs[xn][OUT_KEY]
-
-    sb = get_bit(th_dict[xn]*iscale) - oprec
-    if sb > 5:
-        iprec -= sb
-        X = realize(X, sb, iprec)
-        iscale = iscale / (2**sb)
-
-    if exactly or iprec > oprec:
-        rescale = oscale / iscale
-        bits = MAX_BIT - iprec
-        frac, exp = sim.cvm_float(rescale, bits)
-        sim_scale = frac * (2 ** exp)
-        scale_err = abs((sim_scale - rescale) / rescale)
-        if scale_err > 0.001:
-            logger.warn(
-                "Operator  %-20s name=%-40s quantize with sb=%s" +
-                " scale=%s, error=%s",
-                xopn, xn, sb, iscale, scale_err)
-        oscale = iscale * frac * (2 ** exp)
-        if frac > 1:
-            var = nd_const(frac, graph, params)
-            X = mx.sym.broadcast_mul(X, var, name=N.n("mrt_quantize_scale"))
-        X = realize(X, -exp, oprec)
-        logger.debug(
-            "Operator  %-20s name=%-40s requantize with scale=%-16.8f<%d, %d>" +
-            " iprec=%s, iscale=%-10.5f, oprec=%s, oscale=%-10.5f",
-            xopn, xn, rescale, frac, exp, iprec, iscale, oprec, oscale)
-    else:
-        oscale = iscale
-        logger.debug(
-            "Operator  %-20s name=%-40s clip with iprec=%s, oprec=%s",
-            xopn, xn, iprec, oprec)
-    return X, oprec, oscale
-
-def requant_parameter(wname, oprec, oscale=None, **kwargs):
-    params, th_dict = kwargs['params'], kwargs['th_dict']
-    logger = logging.getLogger('log.mrt.realize')
-    Wn = N.n(wname)
-
-    W = None
-    if th_dict[wname] == 0:
-        oprec, oscale = 1, 1
-        shp = params[wname].shape
-        params[Wn] = sutils.nd_zeros(shp)
-        attr = {'precision': '1'}
-        W = mx.sym.var(Wn, shape=shp, attr=attr)
-    else:
-        oprec = kwargs['precs'][wname].get(kwargs['oname'], oprec)
-        oscale = oscale if oscale else scale(th_dict[wname], oprec)
-        params[Wn] = sim.int_realize(
-            params[wname].astype("float64") * oscale,
-            oprec, logger=logger)
-        attr = {'precision': str(oprec)}
-        max_v = params[Wn].abs().max().asscalar()
-        range_v = (2**(oprec-1)-1)
-        assert max_v <= range_v,\
-            "name:%s, max_v:%s, range_v:%s, oprec:%s"%\
-            (wname, max_v, range_v, oprec)
-        W = mx.sym.var(Wn, shape=params[Wn].shape, attr=attr)
-
-    logger.debug(
-        "Parameter th_dict=%-12.8f name=%-40s " + \
-        "requantize with scale=%-16.8f to prec=%s",
-        th_dict[wname], wname, oscale, oprec)
-
-    return W, oprec, oscale
-
-def requant(sym, oprec, oscale=None, **kwargs):
-    if is_params(sym, kwargs['params']):
-        return requant_parameter(sym.attr('name'), oprec, oscale, **kwargs)
-    return requant_operator(sym, oprec, oscale, **kwargs)

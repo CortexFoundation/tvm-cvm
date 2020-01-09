@@ -1,7 +1,7 @@
 import mxnet as mx
 
 import utils
-from transformer import validate_model
+from model_utils import validate_model
 from gluon_zoo import save_mobilenet1_0
 from from_tensorflow import tf_dump_model
 
@@ -64,7 +64,9 @@ def test_resnet(suffix):
     sym_path = "./data/resnet" + suffix + ".json"
     prm_path = "./data/resnet" + suffix + ".params"
     ctx = [mx.gpu(int(i)) for i in "4".split(',') if i.strip()]
-    validate_model(sym_path, prm_path, ctx, iter_num=100, lambd=16, dump_model=True)
+    validate_model(sym_path, prm_path, ctx,
+        iter_num=100, lambd=16, dump_model=False,
+        from_scratch=2)
 
 def test_densenet161():
     sym_path = "./data/densenet161.json"
@@ -108,7 +110,7 @@ if __name__ == '__main__':
     # test_tf_inceptionv3()         # 56% --> 54%
     # test_alexnet()                # 56% --> 55%
     # test_cifar10_resnet20_v1()    # 91% --> 90%
-    # test_resnet("50_v1")          # 78% --> 76%
+    test_resnet("50_v1")          # 78% --> 76%
     # test_resnet("18_v1")          # 70% --> %
     # test_resnet("50_v1d_0.86")    # not valid: Pooling count_include_pad:True
     # test_resnet("18_v1b_0.89")    # 68% --> 65%
@@ -117,7 +119,7 @@ if __name__ == '__main__':
     # test_qd10_resnetv1_20()       # 83% --> 83%
     # test_shufflenet_v1()          # 64% --> 61%
     # test_squeezenet()             # 57% --> 55%
-    test_vgg()                    # 78% --> 78%
+    # test_vgg()                    # 78% --> 78%
 
     # TODO: test
     # test_tf_mobilenet()           # 0% --> 0%, maybe due to pad
