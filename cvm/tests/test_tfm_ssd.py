@@ -82,11 +82,12 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratchi=0):
         # mrt = MRT(sym, params, input_shape)
         sym, params = tfm.init(sym, params, input_shape)
         keys = [
-          "ssd0_multiperclassdecoder0_concat0",
-          "ssd0_multiperclassdecoder0__mulscalar0",
+          "ssd0_multiperclassdecoder0_zeros_like0",
+          # "ssd0_multiperclassdecoder0_concat0",
+          # "ssd0_multiperclassdecoder0__mulscalar0",
 
           "ssd0_multiperclassdecoder0_slice_axis0",
-          "ssd0_multiperclassdecoder0_zeros_like1",
+          # "ssd0_multiperclassdecoder0_zeros_like1",
 
           "ssd0_normalizedboxcenterdecoder0_concat0",
         ]
@@ -130,7 +131,6 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratchi=0):
     else:
         mrt = MRT.load("mrt.dict")
 
-
     # quantize split model, get:
     # qbase, qbase_params, qbase_inputs_ext, oscales, maps
     qbase, qbase_params, qbase_inputs_ext, oscales, maps = \
@@ -138,10 +138,10 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratchi=0):
     if flag[2]:
         # mrt = MRT(base, base_params, input_shape)
         # mrt.set_th_dict(th_dict)
-        mrt.set_threshold('data', 2.64)
-        mrt.set_fixed("ssd0_multiperclassdecoder0_concat0")
-        mrt.set_fixed("ssd0_multiperclassdecoder0__mulscalar0")
-        mrt.set_fixed("ssd0_multiperclassdecoder0_zeros_like1")
+        # mrt.set_threshold('data', 2.64)
+        # mrt.set_fixed("ssd0_multiperclassdecoder0_concat0")
+        # mrt.set_fixed("ssd0_multiperclassdecoder0__mulscalar0")
+        # mrt.set_fixed("ssd0_multiperclassdecoder0_zeros_like1")
         mrt.set_threshold("ssd0_multiperclassdecoder0_slice_axis0", 1)
         # mrt.set_threshold("ssd0_normalizedboxcenterdecoder0_concat0", 512)
         mrt.set_output_prec(30)
@@ -162,7 +162,7 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratchi=0):
     qsym, qparams = None, None
     if flag[3]:
         name_maps = {
-            "ssd0_slice_axis41": "ssd0_multiperclassdecoder0_concat0",
+            "ssd0_slice_axis41": "ssd0_multiperclassdecoder0_zeros_like0",
             "ssd0_slice_axis42": "ssd0_multiperclassdecoder0_slice_axis0",
             "ssd0_slice_axis43": "ssd0_normalizedboxcenterdecoder0_concat0",
         }
@@ -192,7 +192,7 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratchi=0):
         qsym, qparams = mx.sym.load(dump_sym), nd.load(dump_params)
         _, oscales2 = sim.load_ext(dump_ext)
 
-    if True:
+    if False:
         dump_shape = (1, 3, input_size, input_size)
         compile_to_cvm(qsym, qparams, "ssd_tfm", datadir="/data/ryt",
                 input_shape=dump_shape)

@@ -168,8 +168,7 @@ def examine_parameters(symbol, params, inputs_ext, allows=[], callback=None):
     return new_params
 
 def nd_const(number, graph, params):
-    # name = 'const_var_' + str(number)
-    name = N.n('const_var')
+    name = 'const_var_' + str(number)
     prec = math.ceil(math.log2(math.fabs(number)+1)) + 1
     if name not in graph:
         attr = { 'precision': str(prec) }

@@ -125,10 +125,8 @@ class MulScalar(Transformer):
         scalar = get_attr(op.list_attr(), 'scalar')
 
         X = op.get_children()[0]
-        sname = N.n('scalar')
-        params[sname] = nd_array([scalar])
-        graph[sname] = mx.sym.var(sname, shape=(1,))
-        return mx.sym.broadcast_mul(X, graph[sname], name=name)
+        var = nd_const(scalar, graph, params)
+        return mx.sym.broadcast_mul(X, var, name=name)
 
 
 @register_pass("validate")
@@ -137,6 +135,7 @@ class MulScalar(Transformer):
 @register_transformer("_div_scalar")
 class DivScalar(Transformer):
     def rewrite(self, op, **kwargs):
+        # TODO: dynamic shape
         graph = kwargs['graph']
         name = op.attr('name')
         attr, childs = op.list_attr(), sym_iter(op.get_children())
@@ -1303,15 +1302,14 @@ class SwapAxis(Transformer):
 @register_transformer("_plus_scalar")
 class PlusScalar(Transformer):
     def rewrite(self, op, **kwargs):
+        graph, params = kwargs['graph'], kwargs['params']
         name = op.attr('name')
         attr, childs = op.list_attr(), sym_iter(op.get_children())
 
         scalar = get_attr(attr, 'scalar')
         if scalar == 0:
             return childs[0]
-        sname = N.n('scalar')
-        kwargs['params'][sname] = nd_array([scalar])
-        kwargs['graph'][sname] = offset = mx.sym.var(sname, shape=(1,))
+        offset = nd_const(scalar, graph, params)
         return mx.sym.broadcast_add(childs[0], offset, name=name)
 
 
@@ -1321,11 +1319,14 @@ class PlusScalar(Transformer):
 @register_transformer("zeros_like")
 class ZerosLike(Transformer):
     def rewrite(self, op, **kwargs):
-        # TODO: dynamic shape
+        graph, params = kwargs['graph'], kwargs['params']
         name = op.attr('name')
-        shp = kwargs['infer_shapes'][name][get_entry_id(op)]
-        kwargs['params'][name] = nd_zeros(shp)
-        return mx.sym.var(name, shape=shp)
+        childs = sym_iter(op.get_children())
+
+        mul_zero = nd_const(0, graph, params)
+        op = mx.sym.broadcast_mul(childs[0], mul_zero, name=name)
+        return op
+
 
 
 @register_pass("validate")
@@ -1334,17 +1335,15 @@ class ZerosLike(Transformer):
 @register_transformer("ones_like")
 class OnesLike(Transformer):
     def rewrite(self, op, **kwargs):
-        # TODO: dynamic shape
-        # name = op.attr('name')
-        # shp = kwargs['infer_shapes'][name][get_entry_id(op)]
-        # kwargs['params'][name] = nd_ones(shp)
-        # return mx.sym.var(name, shape=shp)
+        graph, params = kwargs['graph'], kwargs['params']
         name = op.attr('name')
-        params = kwargs['params']
+        childs = sym_iter(op.get_children())
 
-        
-        var = mx.sym.var(name=N.n(), **mattrs)
-        op = mx.symbol.broadcast_mul(op, )
+        mul_zero = nd_const(0, graph, params)
+        op = mx.symbol.broadcast_mul(childs[0], mul_zero)
+        add_one = nd_const(1, graph, params)
+        op = mx.sym.broadcast_add(op, add_one, name=name)
+        return op
 
 
 @register_pass("calculate_ops")
@@ -1368,8 +1367,6 @@ class GreaterScalar(Transformer):
         var = nnvm.sym.Variable(N.n('const_var'), shape=(1,),
                 vattr = { 'precision': str(prec) })
         op = nnvm.sym.broadcast_greater(childs[0], var, name=N.n(), **attr)
-
-        infer_shapes = kwargs["infer_shapes"]
         return op
 
 
