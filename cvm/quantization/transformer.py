@@ -97,7 +97,6 @@ def init(model, input_shape=None):
         _sym, _prm = tpass.input_name_replace(_sym, _prm)
         _sym, _prm = tpass.attach_input_shape(_sym, _prm,
                                               {"data": input_shape})
-    _sym, _prm = tpass.params_unique(_sym, _prm)
     tpass.infer_shape(_sym, _prm) # check infer_shape is correct
 
     _sym, _prm = tpass.fuse_multiple_outputs(_sym, _prm)
@@ -105,6 +104,7 @@ def init(model, input_shape=None):
     _sym, _prm = tpass.fuse_transpose(_sym, _prm)
     _sym, _prm = tpass.rewrite(_sym, _prm)
     _sym, _prm = tpass.fuse_constant(_sym, _prm)
+    _sym, _prm = tpass.params_unique(_sym, _prm)
 
     return Model(_sym, _prm)
 
