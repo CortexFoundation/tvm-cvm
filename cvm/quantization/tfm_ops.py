@@ -361,11 +361,10 @@ class Repeat(Transformer):
         return get_nnvm_op(op_name)(childs[0], **new_attrs)
 
 
-@register_pass("validate")
 @register_pass("calculate_ops")
+@register_pass("validate")
 @register_pass("fuse_transpose")
 @register_pass("rewrite")
-@register_pass("quantize")
 @register_transformer('_contrib_box_nms')
 class BoxNms(Transformer):
     def compile(self, op, **kwargs):
@@ -1336,26 +1335,49 @@ class ZerosLike(Transformer):
 class OnesLike(Transformer):
     def rewrite(self, op, **kwargs):
         # TODO: dynamic shape
+        # name = op.attr('name')
+        # shp = kwargs['infer_shapes'][name][get_entry_id(op)]
+        # kwargs['params'][name] = nd_ones(shp)
+        # return mx.sym.var(name, shape=shp)
         name = op.attr('name')
-        shp = kwargs['infer_shapes'][name][get_entry_id(op)]
-        kwargs['params'][name] = nd_ones(shp)
-        return mx.sym.var(name, shape=shp)
+        params = kwargs['params']
+
+        
+        var = mx.sym.var(name=N.n(), **mattrs)
+        op = mx.symbol.broadcast_mul(op, )
 
 
-@register_pass("validate")
 @register_pass("calculate_ops")
 @register_pass("fuse_transpose")
 @register_pass("rewrite")
 @register_transformer("_greater_scalar")
 class GreaterScalar(Transformer):
-    pass
+    def validate(self, op, **kwargs):
+        attr = op.list_attr()
+
+        scalar = int(get_attr(attr, 'scalar', None))
+        assert int(scalar) == scalar
+        return op
+
+    def compile(self, op, **kwargs):
+        name, op_name = op.attr('name'), op.attr('op_name')
+        childs, attr = kwargs['childs'], kwargs['attr']
+
+        scalar = int(attr['scalar'])
+        prec = get_bit(scalar)
+        var = nnvm.sym.Variable(N.n('const_var'), shape=(1,),
+                vattr = { 'precision': str(prec) })
+        op = nnvm.sym.broadcast_greater(childs[0], var, name=N.n(), **attr)
+
+        infer_shapes = kwargs["infer_shapes"]
+        return op
 
 
-@register_pass("validate")
 @register_pass("calculate_ops")
-@register_pass("fuse_transpose")
+@register_pass("validate")
 @register_pass("rewrite")
-@register_pass("quantize")
+@register_pass("fuse_transpose")
+@register_pass("compile")
 @register_transformer("where")
 class Where(Transformer):
     pass

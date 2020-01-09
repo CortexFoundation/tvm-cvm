@@ -34,10 +34,34 @@ import dataset as ds
 import utils
 import sim_quant_helper as sim
 
-__all__ = ["MRT", "compile_to_cvm", "load_model", "validate_model",
+__all__ = ["init", "MRT", "compile_to_cvm",
+           "load_model", "validate_model",
            "split_model", "merge_model",
            # transformer helper pass
            "convert_params_dtype"]
+
+def init(symbol, params, input_shape=None):
+    logger = logging.getLogger("mrt.prepare")
+    logger.info("Graph initialize and reduce...")
+
+    _sym, _prm = symbol, params
+    _prm = convert_params_dtype(_prm)
+    if input_shape is not None:
+        _sym, _prm = attach_input_shape(_sym, _prm,
+                                        {'data': input_shape})
+    _sym, _prm = graph_validate(_sym, _prm)
+
+    _sym, _prm = fuse_multiple_outputs(_sym, _prm)
+    orig_ops = calculate_ops(_sym, _prm)
+    _sym, _prm = fuse_constant(_sym, _prm)
+    _sym, _prm = fuse_transpose(_sym, _prm)
+    _sym, _prm = rewrite(_sym, _prm)
+    _sym, _prm = fuse_constant(_sym, _prm)
+
+    logger.info("Original ops[%s] reduced into %s",
+                   orig_ops, calculate_ops(_sym, _prm))
+    return _sym, _prm
+
 
 class MRT:
     """ An MRT quantization class contained many helper functions.
@@ -80,48 +104,24 @@ class MRT:
         original floating graph.
     """
     def __init__(self, symbol, params, input_shape,
-                 input_prec=8, prepare=True):
+                 input_prec=8):
         self._lgr = logging.getLogger("mrt")
 
-        self.rsym, self.rprm = symbol, params
+        self.old_names = [s.attr('name') for s in symbol]
         self.csym, self.cprm = symbol, params
         self._ishp = input_shape
 
         self._data = None
         self._fixed = set()
 
-        self.precs = {}
-        self.precs['data'] = {OUT_KEY: input_prec}
+        self.precs = {s.attr('name'):{} for s in topo_sort(self.csym)}
+        if 'data' not in self.precs:
+            raise RuntimeError("please invoke `init` function first")
+        self.precs['data'][OUT_KEY] = input_prec
         self.th_dict = {}
         self.scales = {}
-
         self._qext = None
-
         self._op_default_input_precs()
-        if prepare:
-            self.prepare()
-        self._update_precs()
-
-    def prepare(self):
-        self._lgr.info("Graph initialize and reduce...")
-        _sym, _prm = self.csym, self.cprm
-        _prm = convert_params_dtype(_prm)
-        if self._ishp is not None:
-            _sym, _prm = attach_input_shape(_sym, _prm,
-                                            {'data': self._ishp})
-        _sym, _prm = graph_validate(_sym, _prm)
-
-        _sym, _prm = fuse_multiple_outputs(_sym, _prm)
-        orig_ops = calculate_ops(_sym, _prm)
-        _sym, _prm = fuse_constant(_sym, _prm)
-        _sym, _prm = fuse_transpose(_sym, _prm)
-        _sym, _prm = rewrite(_sym, _prm)
-        _sym, _prm = fuse_constant(_sym, _prm)
-
-        self._lgr.info("Original ops[%s] reduced into %s",
-                       orig_ops, calculate_ops(_sym, _prm))
-
-        self.csym, self.cprm = _sym, _prm
 
     def calibrate(self, ctx=mx.cpu(), lambd=None, old_ths=None):
         self.th_dict = sym_calibrate(self.csym, self.cprm, self._data,
@@ -174,8 +174,7 @@ class MRT:
         return oscales
 
     def get_maps(self):
-        return dict(zip([c.attr('name') for c in self.csym],
-                        [c.attr('name') for c in self.rsym]))
+        return dict(zip([c.attr('name') for c in self.csym], old_names)
 
     def _op_default_input_precs(self):
         op_precs = self.op_input_precs = {}
@@ -190,12 +189,6 @@ class MRT:
         op_precs['Concat'] = 16
         op_precs['Embedding'] = 16
         op_precs['slice_like'] = 30
-
-    def _update_precs(self):
-        for sym in topo_sort(self.csym):
-            name = sym.attr('name')
-            if name not in self.precs:
-                self.precs[name] = {}
 
     def _get_ext(self):
         self._qext = {'data': {
@@ -216,6 +209,33 @@ class MRT:
                 bit = self.precs[name][OUT_KEY]
                 self.precs[name] = {OUT_KEY: bit}
             self.th_dict[name] = tpass.get_range(bit)
+
+    def save(self, model_name, datadir="./data"):
+        sym_file, params_file, ext_file = utils.extend_fname(path.join(datadir, model_name), True)
+        with open(sym_file, 'w') as f:
+            f.write(self.csym.tojson())
+        nd.save(params_file, self.cprm)
+        # save_ext do not support set type, convert into list manually.
+        sim.save_ext(ext_file,
+                     self.old_names, self.th_dict, list(self._fixed),
+                     self._ishp, self.precs, self.scales, self._qext)
+
+    @staticmethod
+    def load(model_name, datadir="./data"):
+        sym_file, params_file, ext_file = \
+            utils.extend_fname(path.join(datadir, model_name), True)
+        sym, params = mx.sym.load(sym_file), nd.load(params_file)
+        sim.load_ext(ext_file)
+        old_names, th_dict, fixed, ishp, precs, scales, \
+            qext = sim.load_ext(ext_file)
+        mrt = MRT(sym, params, ishp)
+        mrt.set_th_dict(th_dict)
+        mrt.old_names = old_names
+        mrt._fixed = set(fixed)
+        mrt.precs = precs
+        mrt.scales = scales
+        mrt._qext = qext
+        return mrt
 
 def load_model(model_name, sym_path, prm_path, ctx, inputs_qext=None):
     inputs = [mx.sym.var('data')]
@@ -330,7 +350,8 @@ def split_model(symbol, params, input_shapes, keys):
         childs, attr = sym_iter(sym.get_children()), sym.list_attr()
         node = sym
         if childs is not None:
-            childs = [graph[c.attr('name')] for c in childs]
+            childs = [get_node(c, graph) for c in childs]
+            # childs = [graph[c.attr('name')] for c in childs]
             node = get_mxnet_op(op_name)(*childs, **attr, name=name)
         if name in keys:
             node = mx.sym.var(name)

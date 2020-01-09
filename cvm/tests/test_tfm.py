@@ -70,32 +70,33 @@ def test_densenet161():
     sym_path = "./data/densenet161.json"
     prm_path = "./data/densenet161.params"
     ctx = [mx.gpu(int(i)) for i in "1,2,3,4,5".split(',') if i.strip()]
-    validate_model(sym_path, prm_path, ctx, batch_size=16, dump_model=True, from_scratch=1)
+    validate_model(sym_path, prm_path, ctx, batch_size=16, dump_model=True)
 
 def test_qd10_resnetv1_20():
     sym_path = "./data/quick_raw_qd_animal10_2_cifar_resnet20_v2.json"
     prm_path = "./data/quick_raw_qd_animal10_2_cifar_resnet20_v2.params"
     ctx = [mx.gpu(int(i)) for i in "4".split(',') if i.strip()]
     validate_model(sym_path, prm_path, ctx, num_channel=1,
-            input_size=28, ds_name='quickdraw')
+            input_size=28, ds_name='quickdraw', dump_model=True)
 
 def test_shufflenet_v1():
     sym_path = "./data/shufflenet_v1.json"
     prm_path = "./data/shufflenet_v1.params"
     ctx = [mx.gpu(int(i)) for i in "4".split(',') if i.strip()]
-    validate_model(sym_path, prm_path, ctx, iter_num=100)
+    validate_model(sym_path, prm_path, ctx, iter_num=100, dump_model=True)
 
 def test_squeezenet():
     sym_path = "./data/squeezenet1.0.json"
     prm_path = "./data/squeezenet1.0.params"
     ctx = [mx.gpu(int(i)) for i in "4".split(',') if i.strip()]
-    validate_model(sym_path, prm_path, ctx, batch_size=60, iter_num=100)
+    validate_model(sym_path, prm_path, ctx, batch_size=60, iter_num=100,
+            dump_model=True)
 
 def test_vgg():
     sym_path = "./data/vgg19.json"
     prm_path = "./data/vgg19.params"
     ctx = [mx.gpu(int(i)) for i in "4".split(',') if i.strip()]
-    validate_model(sym_path, prm_path, ctx)
+    validate_model(sym_path, prm_path, ctx, dump_model=True)
 
 if __name__ == '__main__':
     utils.log_init()
@@ -112,11 +113,11 @@ if __name__ == '__main__':
     # test_resnet("50_v1d_0.86")    # not valid: Pooling count_include_pad:True
     # test_resnet("18_v1b_0.89")    # 68% --> 65%
     # test_resnet("50_v2")          # 77% --> 74%
-    test_densenet161()            # 81% --> 77%
+    # test_densenet161()            # 81% --> 77%
     # test_qd10_resnetv1_20()       # 83% --> 83%
     # test_shufflenet_v1()          # 64% --> 61%
     # test_squeezenet()             # 57% --> 55%
-    # test_vgg()                    # 78% --> 78%
+    test_vgg()                    # 78% --> 78%
 
     # TODO: test
     # test_tf_mobilenet()           # 0% --> 0%, maybe due to pad
