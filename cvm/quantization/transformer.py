@@ -22,8 +22,7 @@ import cvm_op   # pylint: disable=unused-import
 from tfm_pass import OUT_KEY, convert_params_dtype
 import tfm_pass as tpass
 from tfm_pass import \
-    attach_input_shape, infer_shape, \
-    fuse_multiple_outputs, fuse_constant, \
+    infer_shape, fuse_multiple_outputs, fuse_constant, \
     calculate_ops, collect_op_names, fuse_transpose, \
     rewrite, sym_calibrate, quantize, compile
 
@@ -47,14 +46,14 @@ def init(model, input_shape=None):
     tpass.name_duplicate_check(_sym, _prm)
 
     if isinstance(input_shape, dict):
-        _sym, _prm = attach_input_shape(_sym, _prm, input_shape)
+        _sym, _prm = tpass.attach_input_shape(_sym, _prm, input_shape)
         _sym, _prm = tfm.fuse_multiple_inputs(_sym, _prm)
     elif input_shape is not None:
         model_inputs = tpass.model_inputs(_sym, _prm)
         assert model_inputs == 1, "Multiple inputs non-known shape"
         _sym, _prm = tpass.input_name_replace(_sym, _prm)
-        _sym, _prm = attach_input_shape(_sym, _prm,
-                                        {"data": input_shape})
+        _sym, _prm = tpass.attach_input_shape(_sym, _prm,
+                                              {"data": input_shape})
     _sym, _prm = tpass.params_unique(_sym, _prm)
     infer_shape(_sym, _prm) # check infer_shape is correct
 
