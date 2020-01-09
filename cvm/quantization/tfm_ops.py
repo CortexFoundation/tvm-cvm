@@ -2,7 +2,7 @@ from tfm_utils import get_bit, get_range, scale
 import tfm_utils as tutils
 from sym_utils import get_attr, sym_iter, is_params, is_inputs, \
                       nd_array, get_mxnet_op, get_nnvm_op, nd_const, \
-
+                      get_entry_id
 import sym_utils as sutils
 
 from mxnet import ndarray as nd
