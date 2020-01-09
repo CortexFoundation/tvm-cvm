@@ -1,15 +1,20 @@
+import logging
+import math
+import numpy as np
+
+from mxnet import ndarray as nd
+import mxnet as mx
+import nnvm
+
 from tfm_utils import get_bit, get_range, scale
 import tfm_utils as tutils
 from sym_utils import get_attr, sym_iter, is_params, is_inputs, \
                       nd_array, get_mxnet_op, get_nnvm_op, nd_const, \
                       get_entry_id
 import sym_utils as sutils
-
-from mxnet import ndarray as nd
-import mxnet as mx
-import nnvm
-
-import numpy as np
+from tfm_base import register_pass, register_transformer, Transformer, \
+                     N, OUT_KEY, MAX_BIT
+import sim_quant_helper as sim
 
 # TODO(ryt): infer precision for ops
 
@@ -23,7 +28,7 @@ class Null(Transformer):
             name, attr = op.attr('name'), op.list_attr()
             prec = kwargs['precs'][name][OUT_KEY]
             kwargs['scales'][name] = scale(kwargs['th_dict'][name], prec)
-            extra_attr = { 'precision': str(prec) }
+            extra_attr = {'precision': str(prec)}
             return mx.sym.var(name, **attr, attr=extra_attr)
         return op
 
@@ -54,7 +59,7 @@ class Transpose(Transformer):
         axes = get_attr(attr, 'axes')
         X = sym_iter(op.get_children())[0]
         if X.attr('op_name') == Transpose.op_name:
-            tname, tattr = X.attr('name'), X.list_attr()
+            tattr = X.list_attr()
             caxes = get_attr(tattr, 'axes')
             axes = [caxes[ii] for ii in axes]
             op = X.get_children()[0]
@@ -100,7 +105,6 @@ class LeakyReLU(Transformer):
         return op
 
     def rewrite(self, op, **kwargs):
-        name, op_name = op.attr('name'), op.attr('op_name')
         childs, attr = sym_iter(op.get_children()), op.list_attr()
 
         slope = get_attr(attr, 'slope', 0.25)
@@ -124,7 +128,6 @@ class LeakyReLU(Transformer):
 class MulScalar(Transformer):
     def rewrite(self, op, **kwargs):
         params, graph = kwargs['params'], kwargs['graph']
-        infer_shapes = kwargs['infer_shapes']
         name = op.attr('name')
         scalar = get_attr(op.list_attr(), 'scalar')
 
@@ -182,8 +185,8 @@ class Activation(Transformer):
         attrs = kwargs['attr']
         act_type = attrs['act_type']
         if act_type == Relu.op_name:
-            nkwargs = { k: v for k, v in kwargs.items() if k != 'attr' }
-            nattrs = { k: v for k, v in attrs.items() if k != 'act_type' }
+            nkwargs = {k: v for k, v in kwargs.items() if k != 'attr'}
+            nattrs = {k: v for k, v in attrs.items() if k != 'act_type'}
             nkwargs['attr'] = nattrs
             sym = Relu().compile(op, **nkwargs)
         return sym
@@ -193,8 +196,6 @@ class Activation(Transformer):
 @register_transformer("Convolution")
 class Convolution(Transformer):
     def validate(self, op, **kwargs):
-        childs = sym_iter(op.get_children())
-        W_name = childs[1].attr('name')
         op = self._validate_layout(op, **kwargs)
         return op
 
@@ -208,7 +209,7 @@ class Convolution(Transformer):
         name, op_name = op.attr('name'), op.attr('op_name')
         childs, attr = sym_iter(op.get_children()), op.list_attr()
         X, W = childs[0], childs[1]
-        X_name, W_name = X.attr('name'), W.attr('name')
+        W_name = W.attr('name')
 
         layout = get_attr(attr, 'layout', "NCHW")
         if layout == "NCW":
@@ -242,6 +243,7 @@ class Convolution(Transformer):
         return op
 
     def _fuse_bias(self, op, infer_shapes):
+        name = op.attr('name')
         childs, attr = sym_iter(op.get_children()), op.list_attr()
         if get_attr(attr, 'no_bias', False):
             return op
@@ -326,17 +328,16 @@ class Embedding(Transformer):
         X, xs = childs[0], scales[cns[0]]
         if xs != 1:
             X, _, _ = requant_parameter(X, 32, 1)
-        W, wprec, ws = requant_parameter(cns[1], iprec, oname=name, **kwargs)
+        W, _, ws = requant_parameter(cns[1], iprec, oname=name, **kwargs)
         th_dict[name] = th_dict[cns[1]]
         scales[name] = ws
         kwargs['precs'][name][OUT_KEY] = get_bit(th_dict[name]*ws)
-        op  = get_mxnet_op(op_name)(X, W, **attr, name=name)
+        op = get_mxnet_op(op_name)(X, W, **attr, name=name)
 
         return op
 
     def compile(self, op, **kwargs):
         childs = kwargs['childs']
-        attrs = kwargs['attr']
         indices, weight = childs
         op_name = 'take'
         return get_nnvm_op(op_name)(weight, indices, axis=0)
@@ -386,18 +387,18 @@ class BoxNms(Transformer):
         coord_start = get_attr(attrs, 'coord_start', 2)
         score_index = get_attr(attrs, 'score_index', 1)
         id_index = get_attr(attrs, 'id_index', -1)
-        in_format = get_attr(attrs, 'in_format', 'corner')
-        out_format = get_attr(attrs, 'out_format', 'corner')
         op_name = 'get_valid_counts'
-        ret = get_nnvm_op(op_name)(childs[0],
-                score_threshold=valid_thresh)
+        ret = get_nnvm_op(op_name)(childs[0], score_threshold=valid_thresh)
         op_name = 'non_max_suppression'
         nms_out = get_nnvm_op(op_name)(ret[1], ret[0],
-                iou_threshold=iou_thresh,
-                force_suppress=force_suppress, top_k=top_k,
-                coord_start=coord_start,
-                score_index=score_index, id_index=id_index,
-                return_indices=False, invalid_to_bottom=True)
+                                       iou_threshold=iou_thresh,
+                                       force_suppress=force_suppress,
+                                       top_k=top_k,
+                                       coord_start=coord_start,
+                                       score_index=score_index,
+                                       id_index=id_index,
+                                       return_indices=False,
+                                       invalid_to_bottom=True)
         return nms_out
 
 
@@ -464,8 +465,8 @@ class UpSampling(Transformer):
     def compile(self, op, **kwargs):
         childs = kwargs['childs']
         attrs = kwargs['attr']
-        scale = get_attr(attrs, 'scale')
-        op_name, new_attrs = 'upsampling', {'scale': int(scale)}
+        sc = get_attr(attrs, 'scale')
+        op_name, new_attrs = 'upsampling', {'scale': int(sc)}
         return get_nnvm_op(op_name)(childs[0], **new_attrs)
 
 
@@ -499,7 +500,7 @@ class FullyConnected(Transformer):
                                     **new_attrs)
 
     def _matrix_decomposition(self, op, params, infer_shapes):
-        name, attr = op.attr('name'), op.list_attr()
+        attr = op.list_attr()
         childs = sym_iter(op.get_children())
         X, W = childs[:2]
 
@@ -523,7 +524,8 @@ class FullyConnected(Transformer):
         while start < C:
             stop = min(start+step, C)
             Xk = mx.sym.slice_axis(X, axis=1,
-                    begin=start, end=stop, name=N.n("slice_axis"))
+                                   begin=start, end=stop,
+                                   name=N.n("slice_axis"))
             Wk_name = N.n('slice_axis')
             params[Wk_name] = wgt.slice_axis(axis=1, begin=start, end=stop)
             Wk = mx.sym.var(Wk_name, shape=params[Wk_name].shape)
@@ -538,8 +540,7 @@ class FullyConnected(Transformer):
 
         op = nodes[0]
         if not no_bias:
-            op = mx.sym.broadcast_add(op, childs[2],
-                    name=N.n('broadcast_add'))
+            op = mx.sym.broadcast_add(op, childs[2], name=N.n('broadcast_add'))
 
         return op
 
@@ -596,7 +597,7 @@ class Softmax(Transformer):
         oprec = kwargs['op_input_precs'][op_name]
         xs = scale(kwargs['th_dict'][childs[0].attr('name')], oprec)
         X, xprec, xs = requant_operator(childs[0], oprec, xs,
-                oname=name, **kwargs)
+                                        oname=name, **kwargs)
         axis = get_attr(attr, 'axis', -1)
         lambd = 10
         alpha = int(lambd*xs)
@@ -615,12 +616,12 @@ class Softmax(Transformer):
         table = nd.clip(table, a_min=0, a_max=get_range(tprec))
         W_name = N.n('cvm_lut_weight')
         params[W_name] = weight = table.round().reshape(alpha+1, 1)
-        wattr = { 'precision': str(tprec) }
+        wattr = {'precision': str(tprec)}
         W = graph[W_name] = mx.sym.var(W_name, shape=weight.shape, attr=wattr)
         lut = mx.sym.Custom(norm, W, in_dim=alpha+1,
-                name=name, op_type='cvm_lut')
+                            name=name, op_type='cvm_lut')
         sum_lut = mx.sym.sum(lut, axis=axis, keepdims=True,
-                name=N.n("softmax_sum"))
+                             name=N.n("softmax_sum"))
 
         oprec = min(15, 31 - tprec)
         assert oprec > 8, "operator softmax(%s) lambda(%d) is too large" \
@@ -628,8 +629,7 @@ class Softmax(Transformer):
         oscale = get_range(oprec)
         var_scale = nd_const(oscale, graph, params)
         prob = mx.sym.broadcast_mul(lut, var_scale,
-                name=N.n("softmax_output_scale"))
-        var_one = nd_const(1, graph, params)
+                                    name=N.n("softmax_output_scale"))
         half_lut = realize(sum_lut, 1, 31)
         prob = mx.sym.broadcast_add(prob, half_lut, name=N.n("softmax_round"))
         op = mx.sym.broadcast_div(prob, sum_lut, name=N.n("softmax_prob"))
@@ -638,12 +638,12 @@ class Softmax(Transformer):
         op = realize(op, 0, oprec)
         oname = op.attr('name')
         precs[name][OUT_KEY] = oprec
-        precs[oname] = { OUT_KEY: oprec }
-        scales[oname] = scales[name]= oscale
+        precs[oname] = {OUT_KEY: oprec}
+        scales[oname] = scales[name] = oscale
 
         logger = logging.getLogger('log.mrt.realize')
         logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
-               op_name, name, scales[name], cns)
+                     op_name, name, scales[name], cns)
         return op
 
 
@@ -652,14 +652,13 @@ class Softmax(Transformer):
 @register_transformer("Pooling")
 class Pooling(Transformer):
     def validate(self, op, **kwargs):
-        name, op_name  = op.attr('name'), op.attr('op_name')
+        name, op_name = op.attr('name'), op.attr('op_name')
         attr = op.list_attr()
         layout = get_attr(attr, 'layout', 'NCHW')
         assert layout == 'NCHW'
         pool_type = get_attr(attr, 'pool_type', 'max')
         assert pool_type in ['max', 'avg'], \
             "Pooling(%s) only supported type for max and avg." % name
-        count_include_pad = get_attr(attr, 'count_include_pad', True)
         assert get_attr(attr, 'count_include_pad', True), \
             "Pooling(%s) only supported count_include_pad for True." % name
 
@@ -669,9 +668,10 @@ class Pooling(Transformer):
             if pooling_convention == 'full':
                 msg = "%s(%s attr=%s) not match attribute %s (%s vs. %s)"
                 assert global_pool, msg % (name, op_name, attr,
-                    'pooling_convention&global_pool',
-                    [attr['pooling_convention'], attr['global_pool']],
-                    ['full', 'True'])
+                                           'pooling_convention&global_pool',
+                                           [attr['pooling_convention'],
+                                            attr['global_pool']],
+                                           ['full', 'True'])
             else:
                 assert pooling_convention == 'valid' or global_pool, \
                     "Pooling(%s) only supported convention for valid." % name
@@ -690,7 +690,7 @@ class Pooling(Transformer):
             new_attrs['strides'] = get_attr(attrs, 'stride', (1, 1))
             new_attrs['padding'] = get_attr(attrs, 'pad', (0, 0))
             new_attrs['ceil_mode'] = (get_attr(attrs, 'pooling_convention',
-                        'valid') == 'full')
+                                               'valid') == 'full')
             if pool_type == 'avg':
                 new_attrs['count_include_pad'] = \
                         get_attr(attrs, 'count_include_pad', True)
@@ -700,7 +700,7 @@ class Pooling(Transformer):
     def rewrite(self, op, **kwargs):
         params, graph = kwargs['params'], kwargs['graph']
         infer_shapes = kwargs['infer_shapes']
-        name, attr = op.attr('name'), op.list_attr()
+        attr = op.list_attr()
         childs = sym_iter(op.get_children())
         pool_type = get_attr(attr, 'pool_type', 'max')
         is_global = get_attr(attr, 'global_pool', False)
@@ -761,8 +761,6 @@ class Pooling(Transformer):
 @register_transformer("broadcast_mul")
 class BroadcastMul(Transformer):
     def quantize(self, op, **kwargs):
-        params = kwargs['params']
-        th_dict = kwargs['th_dict']
         precs, scales = kwargs['precs'], kwargs['scales']
         name, op_name = op.attr('name'), op.attr('op_name')
         childs, attr = sym_iter(op.get_children()), op.list_attr()
@@ -772,7 +770,7 @@ class BroadcastMul(Transformer):
         X, xprec, xs = requant(childs[0], oprec, oname=name, **kwargs)
         B, bprec, bs = requant(childs[1], oprec, oname=name, **kwargs)
 
-        oscale = scales[name] = xs * bs
+        scales[name] = xs * bs
         op = get_mxnet_op(op_name)(X, B, **attr, name=name)
 
         infer_prec = xprec + bprec
@@ -780,7 +778,7 @@ class BroadcastMul(Transformer):
 
         logger = logging.getLogger('log.mrt.realize')
         logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
-               op_name, name, scales[name], cns)
+                     op_name, name, scales[name], cns)
         return op
 
 
@@ -804,12 +802,12 @@ class BroadcastAdd(Transformer):
 
         if ths[0] == 0 or ths[1] == 0:
             if ths[0] == 0 and ths[1] == 0:
-                th_dict[name], precs[name], scales[name] = 0, { OUT_KEY: 1 }, 1
+                th_dict[name], precs[name], scales[name] = 0, {OUT_KEY: 1}, 1
                 return op
             cn = cns[1] if ths[0] == 0 else cns[0]
             bit = get_bit(params[cn]) if cn in params else precs[cn][OUT_KEY]
             scales[name] = 1 if cn in params else scales[cn]
-            precs[name] = { OUT_KEY: bit }
+            precs[name] = {OUT_KEY: bit}
             th_dict[name] = get_range(bit)
             return op
 
@@ -867,8 +865,7 @@ class Concat(Transformer):
         attrs = kwargs['attr']
         op_name = 'concatenate'
         new_attrs = {'axis': get_attr(attrs, 'dim', 1)}
-        return get_nnvm_op(op_name)(*childs,
-                name=N.n('concat'), **new_attrs)
+        return get_nnvm_op(op_name)(*childs, name=N.n('concat'), **new_attrs)
 
 
 @register_pass('compile')
@@ -910,7 +907,7 @@ class Sum(Transformer):
 
     def quantize(self, op, **kwargs):
         infer_shapes = kwargs['infer_shapes']
-        th_dict, scales = kwargs['th_dict'], kwargs['scales']
+        scales = kwargs['scales']
         name, op_name = op.attr('name'), op.attr('op_name')
         childs, attr = sym_iter(op.get_children()), op.list_attr()
         cns = [c.attr('name') for c in childs] if childs else []
@@ -918,7 +915,7 @@ class Sum(Transformer):
 
         oprec = kwargs['op_input_precs'][op_name]
         X, xprec, xs = requant_operator(childs[0], oprec, oname=name, **kwargs)
-        oscale = scales[name] = xs
+        scales[name] = xs
         op = get_mxnet_op(op_name)(X, **attr, name=name)
 
         ishp = infer_shapes[cns[0]][get_entry_id(childs[0])]
@@ -930,7 +927,7 @@ class Sum(Transformer):
 
         logger = logging.getLogger('log.mrt.realize')
         logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
-               op_name, name, scales[name], cns)
+                     op_name, name, scales[name], cns)
         return op
 
 
@@ -941,7 +938,7 @@ class BatchNorm(Transformer):
     def rewrite(self, op, **kwargs):
         params, infer_shapes = kwargs["params"], kwargs["infer_shapes"]
         name = op.attr('name')
-        childs, attr= sym_iter(op.get_children()), op.list_attr()
+        childs, attr = sym_iter(op.get_children()), op.list_attr()
         X, X_name = childs[0], childs[0].attr('name')
         gamma = params[childs[1].attr('name')]
         beta = params[childs[2].attr('name')]
@@ -953,8 +950,8 @@ class BatchNorm(Transformer):
         axis = get_attr(attr, 'axis', 1)
 
         epsilon = float(attr['eps']) if 'eps' in attr else 1e-5
-        scale = gamma / nd.sqrt(data_var + epsilon)
-        bias = beta - scale * data_mean
+        sc = gamma / nd.sqrt(data_var + epsilon)
+        bias = beta - sc * data_mean
 
         if X.attr('op_name') == 'Convolution':
             # Since convolution is "NCHW" format, axis must be one
@@ -965,24 +962,24 @@ class BatchNorm(Transformer):
             W_name = cchilds[1].attr('name')
             weight = params[W_name]
             wn = N.n(W_name)
-            params[wn] = weight * scale.reshape(*scale.shape, 1, 1, 1)
+            params[wn] = weight * sc.reshape(*sc.shape, 1, 1, 1)
             W = mx.sym.var(wn, shape=params[W_name].shape)
 
             B_name = N.n('bias')
             if not get_attr(cattr, 'no_bias', False):
-               B_name = cchilds[2].attr('name')
-               bias += params[B_name]
+                B_name = cchilds[2].attr('name')
+                bias += params[B_name]
             params[B_name] = bias
             B = mx.sym.var(B_name, shape=bias.shape)
 
             cattr['no_bias'] = False
             op = mx.sym.Convolution(cchilds[0], W,
-                   B, **cattr, name=conv_name)
+                                    B, **cattr, name=conv_name)
         else:
             ishp = infer_shapes[X_name][get_entry_id(X)]
-            reshp = [s if i==axis else 1 for i,s in enumerate(ishp)]
+            reshp = [s if i == axis else 1 for i, s in enumerate(ishp)]
             w_name = N.n('weight')
-            params[w_name] = scale.reshape(reshp)
+            params[w_name] = sc.reshape(reshp)
             W = mx.sym.var(w_name, shape=reshp)
             node = mx.sym.broadcast_mul(X, W, name=N.n("broadcast_mul"))
             bias_name = N.n('bias')
@@ -1006,39 +1003,38 @@ class Flatten(Transformer):
     def compile(self, op, **kwargs):
         childs = kwargs['childs']
         attrs = kwargs['attr']
-        sym = get_nnvm_op("flatten")(*childs,
-                name=N.n(), **attrs)
+        sym = get_nnvm_op("flatten")(*childs, name=N.n(), **attrs)
         return sym
 
 
 @register_transformer('floor')
 class Floor(Transformer):
     def compile(self, op, **kwargs):
-        return _compile_child(op, **kwargs)
+        return kwargs['childs'][0]
 
 
 @register_transformer('ceil')
 class Ceil(Transformer):
     def compile(self, op, **kwargs):
-        return _compile_child(op, **kwargs)
+        return kwargs['childs'][0]
 
 
 @register_transformer('round')
 class Round(Transformer):
     def compile(self, op, **kwargs):
-        return _compile_child(op, **kwargs)
+        return kwargs['childs'][0]
 
 
 @register_transformer('fix')
 class Fix(Transformer):
     def compile(self, op, **kwargs):
-        return _compile_child(op, **kwargs)
+        return kwargs['childs'][0]
 
 
 @register_transformer('Cast')
 class Cast(Transformer):
     def compile(self, op, **kwargs):
-        return _compile_child(op, **kwargs)
+        return kwargs['childs'][0]
 
 
 @register_pass("calculate_ops")
@@ -1048,7 +1044,7 @@ class Cast(Transformer):
 @register_pass("quantize")
 @register_transformer("slice")
 class Slice(Transformer):
-    def _fix_attr(self, op, **kwargs):
+    def _fix_attr(self, **kwargs):
         infer_shapes = kwargs['infer_shapes']
         childs, attr = kwargs['childs'], kwargs['attr']
         X = childs[0]
@@ -1056,11 +1052,11 @@ class Slice(Transformer):
         begin = get_attr(attr, 'begin')
         end = get_attr(attr, 'end')
         attr['begin'] = [0 if s is None else s for s in begin]
-        attr['end'] = [cshape[i] if s is None else s for i,s in enumerate(end)]
+        attr['end'] = [cshape[i] if s is None else s for i, s in enumerate(end)]
         return attr
 
     def compile(self, op, **kwargs):
-        attrs = self._fix_attr(op, **kwargs)
+        attrs = self._fix_attr(**kwargs)
         childs = kwargs['childs']
         # TODO: check default value
         begin = attrs['begin']
@@ -1070,7 +1066,8 @@ class Slice(Transformer):
         if stride is not None:
             new_attrs['stride'] = stride
         return get_nnvm_op('strided_slice')(childs[0],
-                name=N.n('slice'), **new_attrs)
+                                            name=N.n('slice'),
+                                            **new_attrs)
 
 
 @register_pass("validate")
@@ -1087,7 +1084,7 @@ class Reshape(Transformer):
         new_attrs = {}
         new_attrs['shape'] = get_attr(attrs, 'shape', 'reshape')
         return get_nnvm_op(op_name)(*childs,
-                name=N.n('reshape'), **new_attrs)
+                                    name=N.n('reshape'), **new_attrs)
 
 
 @register_transformer("Custom")
@@ -1096,7 +1093,7 @@ class Custom(Transformer):
         attr = op.list_attr()
         op_type = attr['op_type']
         assert op_type in ['cvm_clip', 'cvm_left_shift',
-                        'cvm_right_shift', 'cvm_lut'], \
+                           'cvm_right_shift', 'cvm_lut'], \
             "Invalid op_type:%s in Custom operator" % op_type
         return op
 
@@ -1108,16 +1105,16 @@ class Custom(Transformer):
         if op_type == 'cvm_clip':
             new_attrs['precision'] = attr['precision']
             sym = get_nnvm_op(op_type)(*childs, name=N.n('cvm_clip'),
-                                        **new_attrs)
+                                       **new_attrs)
         elif op_type == 'cvm_lut':
             new_attrs['in_dim'] = attr['in_dim']
             sym = get_nnvm_op(op_type)(*childs, name=N.n('cvm_lut'),
-                                        **new_attrs)
+                                       **new_attrs)
         else:
             new_attrs['precision'] = attr['precision']
             new_attrs['shift_bit'] = attr['shift_bit']
             sym = get_nnvm_op(op_type)(*childs, name=N.n('cvm_shift'),
-                                         **new_attrs)
+                                       **new_attrs)
         return sym
 
 
@@ -1144,7 +1141,7 @@ class Minimum(Transformer):
         attrs = kwargs['attr']
         op_name = 'broadcast_min'
         return get_nnvm_op(op_name)(*childs,
-                name=N.n('_minimum'), **attrs)
+                                    name=N.n('_minimum'), **attrs)
 
 
 @register_transformer("_maximum")
@@ -1154,7 +1151,7 @@ class Maximum(Transformer):
         attrs = kwargs['attr']
         op_name = 'broadcast_max'
         return get_nnvm_op(op_name)(*childs,
-                name=N.n('_maximum'), **attrs)
+                                    name=N.n('_maximum'), **attrs)
 
 
 @register_pass("validate")
@@ -1184,11 +1181,11 @@ class Argmax(Transformer):
         new_attrs['axis'] = get_attr(attrs, 'axis', 0)
         new_attrs['keepdims'] = get_attr(attrs, 'keepdims', False)
         return get_nnvm_op(op_name)(*childs,
-                name=N.n('_argmax'), **new_attrs)
+                                    name=N.n('_argmax'), **new_attrs)
 
 
 @register_transformer("argmin")
-class Argmax(Transformer):
+class Argmin(Transformer):
     def compile(self, op, **kwargs):
         childs = kwargs['childs']
         attrs = kwargs['attr']
@@ -1197,7 +1194,7 @@ class Argmax(Transformer):
         new_attrs['axis'] = get_attr(attrs, 'axis', 0)
         new_attrs['keepdims'] = get_attr(attrs, 'keepdims', False)
         return get_nnvm_op(op_name)(*childs,
-                name=N.n('_argmin'), **new_attrs)
+                                    name=N.n('_argmin'), **new_attrs)
 
 
 @register_pass("compile")
@@ -1364,13 +1361,12 @@ class GreaterScalar(Transformer):
         return op
 
     def compile(self, op, **kwargs):
-        name, op_name = op.attr('name'), op.attr('op_name')
         childs, attr = kwargs['childs'], kwargs['attr']
 
         scalar = int(attr['scalar'])
         prec = get_bit(scalar)
         var = nnvm.sym.Variable(N.n('const_var'), shape=(1,),
-                vattr = { 'precision': str(prec) })
+                                vattr={'precision': str(prec)})
         op = nnvm.sym.broadcast_greater(childs[0], var, name=N.n(), **attr)
         return op
 
@@ -1434,7 +1430,7 @@ def _quantize_scale(op, **kwargs):
 
     logger = logging.getLogger('log.mrt.realize')
     logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
-           op_name, name, scales[name], cns)
+                 op_name, name, scales[name], cns)
     return op
 
 def _quantize_xwb(op, **kwargs):
@@ -1451,8 +1447,8 @@ def _quantize_xwb(op, **kwargs):
         bs = ws * xs
         bias_prec = get_bit(th_dict[cns[2]] * bs)
         B, bprec, _ = requant_parameter(cns[2], bias_prec, bs,
-            oname=name, **kwargs)
-    oscale = scales[name] = ws * xs
+                                        oname=name, **kwargs)
+    scales[name] = ws * xs
     op = get_mxnet_op(op_name)(X, W, B, **attr, name=name)
 
     shp = kwargs['params'][childs[1].attr('name')].shape
@@ -1465,15 +1461,13 @@ def _quantize_xwb(op, **kwargs):
 
     logger = logging.getLogger('log.mrt.realize')
     logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
-           op_name, name, scales[name], cns)
+                 op_name, name, scales[name], cns)
     return op
 
 def _restore(op, **kwargs):
-    params, graph = kwargs['params'], kwargs['graph']
     th_dict, precs, scales = kwargs['th_dict'], kwargs['precs'], kwargs['scales']
     name, op_name = op.attr('name'), op.attr('op_name')
     childs, attr = sym_iter(op.get_children()), op.list_attr()
-    cns = [c.attr('name') for c in childs] if childs else []
 
     childs = [] if childs is None else childs
     new_childs = [c / scales[c.attr('name')] \
@@ -1494,7 +1488,7 @@ def _quantize_table(op, **kwargs):
     params, graph = kwargs['params'], kwargs['graph']
     th_dict, precs, scales = kwargs['th_dict'], kwargs['precs'], kwargs['scales']
     name, op_name = op.attr('name'), op.attr('op_name')
-    childs, attr = sym_iter(op.get_children()), op.list_attr()
+    childs = sym_iter(op.get_children())
     cns = [c.attr('name') for c in childs] if childs else []
 
     iprec = kwargs['op_input_precs'][op_name]
@@ -1512,37 +1506,33 @@ def _quantize_table(op, **kwargs):
 
     W_name = N.n("cvm_lut_weight")
     params[W_name] = weight = (out * oscale).round().reshape(2*alpha+1, 1)
-    wattr = { 'precision': str(oprec)}
+    wattr = {'precision': str(oprec)}
     W = graph[W_name] = mx.sym.var(W_name, shape=weight.shape, attr=wattr)
     op = mx.sym.Custom(X, W, in_dim=2*alpha+1, name=name, op_type='cvm_lut')
     precs[name][OUT_KEY] = oprec
 
     logger = logging.getLogger('log.mrt.realize')
     logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
-           op_name, name, scales[name], cns)
+                 op_name, name, scales[name], cns)
     return op
-
-def _compile_child(op, **kwargs):
-    return kwargs['childs'][0]
 
 def realize(X, sb, prec, name=None):
     name = name if name else N.n('realize')
     if sb == 0:
         sym = mx.sym.Custom(X, precision=prec,
-                name=name, op_type='cvm_clip')
+                            name=name, op_type='cvm_clip')
     elif sb < 0:
         sym = mx.sym.Custom(X, shift_bit=-sb, precision=prec,
-                name=name, op_type='cvm_left_shift')
+                            name=name, op_type='cvm_left_shift')
     else:
         sym = mx.sym.Custom(X, shift_bit=sb, precision=prec,
-                name=name, op_type='cvm_right_shift')
+                            name=name, op_type='cvm_right_shift')
     return sym
 
 def requant_operator(X, oprec, oscale=None, **kwargs):
     logger = logging.getLogger('log.mrt.realize')
     params, graph = kwargs['params'], kwargs['graph']
     th_dict, precs = kwargs['th_dict'], kwargs['precs']
-    scales = kwargs['scales']
     xopn, xn = X.attr('op_name'), X.attr('name')
 
     if th_dict[xn] == 0:
@@ -1570,7 +1560,7 @@ def requant_operator(X, oprec, oscale=None, **kwargs):
             logger.warn(
                 "Operator  %-20s name=%-40s quantize with sb=%s" +
                 " scale=%s, error=%s",
-                    xopn, xn, sb, iscale, scale_err)
+                xopn, xn, sb, iscale, scale_err)
         oscale = iscale * frac * (2 ** exp)
         if frac > 1:
             var = nd_const(frac, graph, params)
@@ -1579,12 +1569,12 @@ def requant_operator(X, oprec, oscale=None, **kwargs):
         logger.debug(
             "Operator  %-20s name=%-40s requantize with scale=%-16.8f<%d, %d>" +
             " iprec=%s, iscale=%-10.5f, oprec=%s, oscale=%-10.5f",
-                xopn, xn, rescale, frac, exp, iprec, iscale, oprec, oscale)
+            xopn, xn, rescale, frac, exp, iprec, iscale, oprec, oscale)
     else:
         oscale = iscale
         logger.debug(
             "Operator  %-20s name=%-40s clip with iprec=%s, oprec=%s",
-                xopn, xn, iprec, oprec)
+            xopn, xn, iprec, oprec)
     return X, oprec, oscale
 
 def requant_parameter(wname, oprec, oscale=None, **kwargs):
@@ -1597,15 +1587,15 @@ def requant_parameter(wname, oprec, oscale=None, **kwargs):
         oprec, oscale = 1, 1
         shp = params[wname].shape
         params[Wn] = sutils.nd_zeros(shp)
-        attr = { 'precision': '1' }
+        attr = {'precision': '1'}
         W = mx.sym.var(Wn, shape=shp, attr=attr)
     else:
         oprec = kwargs['precs'][wname].get(kwargs['oname'], oprec)
         oscale = oscale if oscale else scale(th_dict[wname], oprec)
         params[Wn] = sim.int_realize(
-                params[wname].astype("float64") * oscale,
-                oprec, logger=logger)
-        attr = { 'precision': str(oprec) }
+            params[wname].astype("float64") * oscale,
+            oprec, logger=logger)
+        attr = {'precision': str(oprec)}
         max_v = params[Wn].abs().max().asscalar()
         range_v = (2**(oprec-1)-1)
         assert max_v <= range_v,\
@@ -1616,12 +1606,11 @@ def requant_parameter(wname, oprec, oscale=None, **kwargs):
     logger.debug(
         "Parameter th_dict=%-12.8f name=%-40s " + \
         "requantize with scale=%-16.8f to prec=%s",
-            th_dict[wname], wname, oscale, oprec)
+        th_dict[wname], wname, oscale, oprec)
 
     return W, oprec, oscale
 
 def requant(sym, oprec, oscale=None, **kwargs):
     if is_params(sym, kwargs['params']):
         return requant_parameter(sym.attr('name'), oprec, oscale, **kwargs)
-    else:
-        return requant_operator(sym, oprec, oscale, **kwargs)
+    return requant_operator(sym, oprec, oscale, **kwargs)
