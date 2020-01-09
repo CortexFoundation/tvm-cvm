@@ -363,6 +363,15 @@ def scale(threshold, precision):
     alpha = (2 ** (precision - 1)) - 1
     return alpha / threshold
 
+def nd_const_tfm(number, graph, params):
+    name = N.n('const_var')
+    prec = math.ceil(math.log2(math.fabs(number)+1)) + 1
+    if name not in graph:
+        attr = { 'precision': str(prec) }
+        graph[name] = mx.sym.var(name, shape=(1,), attr=attr)
+        params[name] = nd_array([number])
+    return graph[name]
+
 def sym_calibrate(symbol, params, data, **kwargs):
     logger = logging.getLogger('log.mrt')
     _, deps = topo_sort(symbol, logger=logger, with_deps=True)
