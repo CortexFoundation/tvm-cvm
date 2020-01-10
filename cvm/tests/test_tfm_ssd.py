@@ -10,6 +10,8 @@ import sym_utils as sutils
 import sim_quant_helper as sim
 import dataset
 from transformer import *
+import transformer as tfm
+from tfm_pass import convert_params_dtype
 
 import logging
 
@@ -77,18 +79,20 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratchi=0):
     if flag[0]:
         sym_file, param_file = load_fname()
         sym, params = mx.sym.load(sym_file), nd.load(param_file)
-        mrt = MRT(sym, params, input_shape)
+        # mrt = MRT(sym, params, input_shape)
+        sym, params = tfm.init(sym, params, input_shape)
         keys = [
-          "ssd0_multiperclassdecoder0_concat0",
-          "ssd0_multiperclassdecoder0__mulscalar0",
+          "ssd0_multiperclassdecoder0_zeros_like0",
+          # "ssd0_multiperclassdecoder0_concat0",
+          # "ssd0_multiperclassdecoder0__mulscalar0",
 
           "ssd0_multiperclassdecoder0_slice_axis0",
-          "ssd0_multiperclassdecoder0_zeros_like1",
+          # "ssd0_multiperclassdecoder0_zeros_like1",
 
           "ssd0_normalizedboxcenterdecoder0_concat0",
         ]
         base, base_params, top, top_params, top_inputs_ext \
-                = split_model(mrt.csym, mrt.cprm, {'data': input_shape}, keys)
+                = split_model(sym, params, {'data': input_shape}, keys)
         dump_sym, dump_params = load_fname("mrt.base")
         open(dump_sym, "w").write(base.tojson())
         nd.save(dump_params, base_params)
@@ -104,11 +108,15 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratchi=0):
         (top_inputs_ext,) = sim.load_ext(dump_ext)
 
     base_graph = mx.gluon.nn.SymbolBlock(base, [mx.sym.var('data')])
-    utils.load_parameters(base_graph, base_params, ctx=ctx)
+    nbase_params = convert_params_dtype(base_params, src_dtypes="float64",
+            dest_dtype="float32")
+    utils.load_parameters(base_graph, nbase_params, ctx=ctx)
 
     top_graph = mx.gluon.nn.SymbolBlock(top,
             [mx.sym.var(n) for n in top_inputs_ext])
-    utils.load_parameters(top_graph, top_params, ctx=ctx)
+    ntop_params = convert_params_dtype(top_params, src_dtypes="float64",
+            dest_dtype="float32")
+    utils.load_parameters(top_graph, ntop_params, ctx=ctx)
 
     # calibrate split model, get:
     # th_dict
@@ -119,23 +127,21 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratchi=0):
             data, _ = data_iter_func()
             mrt.set_data(data)
             th_dict = mrt.calibrate(ctx=ctx)
-        _, _, dump_ext = load_fname("mrt.dict", True)
-        sim.save_ext(dump_ext, th_dict)
+        mrt.save("mrt.dict")
     else:
-        _, _, dump_ext = load_fname("mrt.dict", True)
-        (th_dict,) = sim.load_ext(dump_ext)
+        mrt = MRT.load("mrt.dict")
 
     # quantize split model, get:
     # qbase, qbase_params, qbase_inputs_ext, oscales, maps
     qbase, qbase_params, qbase_inputs_ext, oscales, maps = \
             None, None, None, None, None
     if flag[2]:
-        mrt = MRT(base, base_params, input_shape)
-        mrt.set_th_dict(th_dict)
-        mrt.set_threshold('data', 2.64)
-        mrt.set_fixed("ssd0_multiperclassdecoder0_concat0")
-        mrt.set_fixed("ssd0_multiperclassdecoder0__mulscalar0")
-        mrt.set_fixed("ssd0_multiperclassdecoder0_zeros_like1")
+        # mrt = MRT(base, base_params, input_shape)
+        # mrt.set_th_dict(th_dict)
+        # mrt.set_threshold('data', 2.64)
+        # mrt.set_fixed("ssd0_multiperclassdecoder0_concat0")
+        # mrt.set_fixed("ssd0_multiperclassdecoder0__mulscalar0")
+        # mrt.set_fixed("ssd0_multiperclassdecoder0_zeros_like1")
         mrt.set_threshold("ssd0_multiperclassdecoder0_slice_axis0", 1)
         # mrt.set_threshold("ssd0_normalizedboxcenterdecoder0_concat0", 512)
         mrt.set_output_prec(30)
@@ -156,7 +162,7 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratchi=0):
     qsym, qparams = None, None
     if flag[3]:
         name_maps = {
-            "ssd0_slice_axis41": "ssd0_multiperclassdecoder0_concat0",
+            "ssd0_slice_axis41": "ssd0_multiperclassdecoder0_zeros_like0",
             "ssd0_slice_axis42": "ssd0_multiperclassdecoder0_slice_axis0",
             "ssd0_slice_axis43": "ssd0_normalizedboxcenterdecoder0_concat0",
         }
@@ -186,6 +192,12 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratchi=0):
         qsym, qparams = mx.sym.load(dump_sym), nd.load(dump_params)
         _, oscales2 = sim.load_ext(dump_ext)
 
+    if False:
+        dump_shape = (1, 3, input_size, input_size)
+        compile_to_cvm(qsym, qparams, "ssd_tfm", datadir="/data/ryt",
+                input_shape=dump_shape)
+        exit()
+
     metric = dataset.load_voc_metric()
     metric.reset()
     def yolov3(data, label):
@@ -198,7 +210,9 @@ def test_mrt_quant(batch_size=1, iter_num=10, from_scratchi=0):
 
     net2 = mx.gluon.nn.SymbolBlock(qsym,
             [mx.sym.var(n) for n in qbase_inputs_ext])
-    utils.load_parameters(net2, qparams, ctx=qctx)
+    nqparams = convert_params_dtype(qparams, src_dtypes="float64",
+            dest_dtype="float32")
+    utils.load_parameters(net2, nqparams, ctx=qctx)
     net2_metric = dataset.load_voc_metric()
     net2_metric.reset()
     def mrt_quantize(data, label):
