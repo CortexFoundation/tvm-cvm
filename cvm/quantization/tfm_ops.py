@@ -6,8 +6,9 @@ from mxnet import ndarray as nd
 import mxnet as mx
 import nnvm
 
-from tfm_utils import get_bit, get_range, scale, get_bit_cnt
-from tfm_utils import requant, requant_operator, requant_parameter
+from tfm_utils import get_bit, get_range, scale, get_bit_cnt, \
+                      requant, requant_operator, requant_parameter, \
+                      realize
 from sym_utils import get_attr, sym_iter, is_params, is_inputs, \
                       nd_array, get_mxnet_op, get_nnvm_op, nd_const, \
                       get_entry_id
@@ -326,7 +327,7 @@ class Embedding(Transformer):
         iprec = kwargs['op_input_precs'][op_name]
         X, xs = childs[0], scales[cns[0]]
         if xs != 1:
-            X, _, _ = requant_parameter(X, 32, 1)
+            X, _, _ = requant(X, 32, oscale=1, oname=name, **kwargs)
         W, _, ws = requant_parameter(cns[1], iprec, oname=name, **kwargs)
         th_dict[name] = th_dict[cns[1]]
         scales[name] = ws
@@ -598,7 +599,7 @@ class Softmax(Transformer):
         X, xprec, xs = requant_operator(childs[0], oprec, xs,
                                         oname=name, **kwargs)
         axis = get_attr(attr, 'axis', -1)
-        lambd = MRT._SOFTMAX_LAMBD
+        lambd = kwargs['softmax_lambd']
         alpha = int(lambd*xs)
         var = nd_const(alpha, graph, params)
         max_axis = mx.sym.max(X, axis=axis, keepdims=True)

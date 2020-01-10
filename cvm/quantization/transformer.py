@@ -123,9 +123,6 @@ class MRT:
             precision with scales, using the floading data simulate
             the realized environment of interger dataflow;
     """
-    _SOFTMAX_LAMBD = 10
-    _SHIFT_BIT = 5
-
     def __init__(self, model, input_prec=8):
         self.old_names = model.output_names()
         self.current_model = model
@@ -140,6 +137,8 @@ class MRT:
             raise RuntimeError("please invoke `init` function first")
         self.precs['data'][OUT_KEY] = input_prec
         self.scales = {}
+        self.softmax_lambd = 10
+        self.shift_bits = 5
 
     def set_data(self, data):
         self._data = data
@@ -178,10 +177,17 @@ class MRT:
             name = sym.attr('name')
             self.precs[name][name] = prec
 
+    def set_softmax_lambd(self, val):
+        self.softmax_lambd = val
+
+    def set_shift_bits(self, val):
+        self.shift_bits = val
+
     def quantize(self):
         _sym, _prm = quantize(
             self.current_model.symbol, self.current_model.params,
-            self.th_dict, self.precs, self.scales, self.op_input_precs)
+            self.th_dict, self.precs, self.scales, self.op_input_precs,
+            self.shift_bits, self.softmax_lambd)
         self.current_model = Model(_sym, _prm)
         return self.current_model
 
@@ -205,14 +211,6 @@ class MRT:
         sim.save_ext(ext_file, self.old_names, self.th_dict,
                      self.precs, self.scales)
         self.current_model.save(sym_file, params_file)
-
-    @staticmethod
-    def set_softmax_lambd(val):
-        MRT._SOFTMAX_LAMBD = val
-
-    @staticmethod
-    def set_shift_bit(val):
-        MRT._SHIFT_BIT = val
 
     @staticmethod
     def load(model_name, datadir="./data"):

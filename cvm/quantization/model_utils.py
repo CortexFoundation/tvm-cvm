@@ -37,13 +37,15 @@ def load_model(model, ctx, inputs_qext=None):
 def validate_model(sym_path, prm_path, ctx, num_channel=3,
                    input_size=224, batch_size=16, iter_num=10,
                    ds_name='imagenet', from_scratch=0, lambd=None,
-                   dump_model=False):
+                   dump_model=False, input_shape=None, dump_shape=None,
+                   input_prec=8, out_prec=8):
     from gluon_zoo import save_model
 
     flag = [False]*from_scratch + [True]*(2-from_scratch)
     model_name, _ = path.splitext(path.basename(sym_path))
     model_dir = path.dirname(sym_path)
-    input_shape = (batch_size, num_channel, input_size, input_size)
+    input_shape = input_shape if input_shape else \
+                  (batch_size, num_channel, input_size, input_size)
     logger = logging.getLogger("log.validate.%s"%model_name)
 
     if not path.exists(sym_path) or not path.exists(prm_path):
@@ -70,8 +72,8 @@ def validate_model(sym_path, prm_path, ctx, num_channel=3,
         (th_dict,) = sim.load_ext(dump_ext)
         mrt.set_th_dict(th_dict)
 
-    mrt.set_input_prec(8)
-    mrt.set_output_prec(8)
+    mrt.set_input_prec(input_prec)
+    mrt.set_output_prec(out_prec)
 
     if flag[1]:
         mrt.quantize()
@@ -83,7 +85,8 @@ def validate_model(sym_path, prm_path, ctx, num_channel=3,
     if dump_model:
         datadir = "/data/ryt"
         model_name = model_name + "_tfm"
-        dump_shape = (1, num_channel, input_size, input_size)
+        dump_shape = dump_shape if dump_shape else \
+            (1, num_channel, input_size, input_size)
         compile_to_cvm(
             mrt.current_model, model_name,
             datadir=datadir, input_shape=dump_shape)

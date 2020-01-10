@@ -50,6 +50,7 @@ def realize(X, sb, prec, name=None):
 def requant_operator(X, oprec, oscale=None, **kwargs):
     logger = logging.getLogger('log.mrt.realize')
     params, graph = kwargs['params'], kwargs['graph']
+    shift_bits = kwargs['shift_bits']
     th_dict, precs = kwargs['th_dict'], kwargs['precs']
     xopn, xn = X.attr('op_name'), X.attr('name')
 
@@ -63,7 +64,7 @@ def requant_operator(X, oprec, oscale=None, **kwargs):
     iprec = precs[xn][OUT_KEY]
 
     sb = get_bit(th_dict[xn]*iscale) - oprec
-    if sb > MRT._SHIFT_BIT:
+    if sb > shift_bits:
         iprec -= sb
         X = realize(X, sb, iprec)
         iscale = iscale / (2**sb)
