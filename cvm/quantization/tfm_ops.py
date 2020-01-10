@@ -16,7 +16,6 @@ from tfm_base import register_pass, register_transformer, Transformer, \
                      N, OUT_KEY, MAX_BIT
 import sim_quant_helper as sim
 
-# TODO(ryt): infer precision for ops
 
 @register_pass("validate")
 @register_pass("rewrite")
@@ -599,7 +598,7 @@ class Softmax(Transformer):
         X, xprec, xs = requant_operator(childs[0], oprec, xs,
                                         oname=name, **kwargs)
         axis = get_attr(attr, 'axis', -1)
-        lambd = 10
+        lambd = MRT._SOFTMAX_LAMBD
         alpha = int(lambd*xs)
         var = nd_const(alpha, graph, params)
         max_axis = mx.sym.max(X, axis=axis, keepdims=True)

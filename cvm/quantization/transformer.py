@@ -123,6 +123,9 @@ class MRT:
             precision with scales, using the floading data simulate
             the realized environment of interger dataflow;
     """
+    _SOFTMAX_LAMBD = 10
+    _SHIFT_BIT = 5
+
     def __init__(self, model, input_prec=8):
         self.old_names = model.output_names()
         self.current_model = model
@@ -143,8 +146,8 @@ class MRT:
 
     def calibrate(self, ctx=mx.cpu(), lambd=None, old_ths=None):
         self.th_dict = sym_calibrate(
-                self.current_model.symbol, self.current_model.params,
-                self._data, ctx=ctx, lambd=lambd, old_ths=old_ths)
+            self.current_model.symbol, self.current_model.params,
+            self._data, ctx=ctx, lambd=lambd, old_ths=old_ths)
         return self.th_dict
 
     def set_threshold(self, name, threshold):
@@ -202,6 +205,14 @@ class MRT:
         sim.save_ext(ext_file, self.old_names, self.th_dict,
                      self.precs, self.scales)
         self.current_model.save(sym_file, params_file)
+
+    @staticmethod
+    def set_softmax_lambd(val):
+        MRT._SOFTMAX_LAMBD = val
+
+    @staticmethod
+    def set_shift_bit(val):
+        MRT._SHIFT_BIT = val
 
     @staticmethod
     def load(model_name, datadir="./data"):

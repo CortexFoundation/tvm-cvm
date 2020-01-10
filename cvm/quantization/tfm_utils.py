@@ -63,7 +63,7 @@ def requant_operator(X, oprec, oscale=None, **kwargs):
     iprec = precs[xn][OUT_KEY]
 
     sb = get_bit(th_dict[xn]*iscale) - oprec
-    if sb > 5:
+    if sb > MRT._SHIFT_BIT:
         iprec -= sb
         X = realize(X, sb, iprec)
         iscale = iscale / (2**sb)
