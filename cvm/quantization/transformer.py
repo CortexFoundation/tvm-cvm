@@ -249,9 +249,9 @@ def split_model(model, keys):
 
     return Model(base, base_params), Model(top, top_params)
 
-def merge_model(base_model, top_model, name_maps=None, callback=None):
-    name_maps = {} if name_maps is None else name_maps
-    graph = {name_maps.get(c.attr('name'), c.attr('name')):c \
+def merge_model(base_model, top_model, base_name_maps=None, callback=None):
+    base_name_maps = {} if base_name_maps is None else base_name_maps
+    graph = {base_name_maps.get(c.attr('name'), c.attr('name')):c \
         for c in base_model.symbol}
     for sym in topo_sort(top_model.symbol):
         name, op_name = sym.attr('name'), sym.attr('op_name')
@@ -271,6 +271,32 @@ def merge_model(base_model, top_model, name_maps=None, callback=None):
     params.update(top_model.params)
     return Model(symbol, params)
 
+
+class ModelSpliter:
+    def __init__(self, model, keys):
+        self.model = model
+        self.keys = keys
+
+    def split(self):
+        return split_model(self.model, self.keys)
+
+
+class ModelMerger:
+    def __init__(self, base_model, top_model, base_name_maps=None):
+        self.base, self.top = base_model, top_model
+        base_name_maps = {} if base_name_maps is None else base_name_maps
+        self.base_name_maps = base_name_maps
+
+    def merge(self, callback=None):
+        return merge_model(
+            self.base, self.top, self.base_name_maps, callback)
+
+    def get_output_scales(self, base_oscales, maps):
+        name_idx = {self.base_name_map.get(
+            s.attr("name"), s.attr("name")): i \
+            for i, s in enumerate(self.base)}
+        return [1 if v is None else base_oscales[name_idx[k]] \
+            for k, v in maps.items()]
 
 def compile_to_cvm(model, model_name, datadir="/data/std_out",
                    input_shape=None, target="cuda"):
