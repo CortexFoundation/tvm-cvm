@@ -41,7 +41,8 @@ def rewrite(symbol, params):
             apply_pass("rewrite", infer_shapes=infer_shapes))
 
 @N.register_nm("quantize")
-def quantize(symbol, params, th_dict, precs, scales, op_input_precs):
+def quantize(symbol, params, th_dict, precs, scales, op_input_precs,
+             shift_bits, softmax_lambd):
     infer_shapes = infer_shape(symbol, params)
 
     def _quant(op, **kwargs):
@@ -74,7 +75,9 @@ def quantize(symbol, params, th_dict, precs, scales, op_input_precs):
             _quant,
             infer_shapes=infer_shapes, th_dict=th_dict,
             precs=precs, scales=scales,
-            op_input_precs=op_input_precs)
+            op_input_precs=op_input_precs,
+            shift_bits=shift_bits,
+            softmax_lambd=softmax_lambd)
 
     def quantize_output(op, **kwargs):
         name = op.attr('name')
@@ -94,7 +97,9 @@ def quantize(symbol, params, th_dict, precs, scales, op_input_precs):
         return op
     return topo_visit_transformer(sym, params,
             quantize_output, th_dict=th_dict,
-            precs=precs, scales=scales)
+            precs=precs, scales=scales,
+            shift_bits=shift_bits,
+            softmax_lambd=softmax_lambd)
 
 @N.register_nm("cvm")
 def to_nnvm(symbol, params):
