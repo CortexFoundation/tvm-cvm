@@ -240,6 +240,32 @@ class Convolution(Transformer):
     def rewrite(self, op, **kwargs):
         #TODO: matrix decomposition
         # op = self._fuse_bias(op, kwargs["infer_shapes"])
+        params = kwargs['params']
+        name, op_name = op.attr('name'), op.attr('op_name')
+        childs, attr = sym_iter(op.get_children()), op.list_attr()
+        X, W = childs[0], childs[1]
+        W_name = W.attr('name')
+
+        layout = get_attr(attr, 'layout', "NCHW")
+        if layout == "NCW":
+            no_bias = get_attr(attr, 'no_bias', False)
+            dilate, kernel = get_attr(attr, 'dilate'), get_attr(attr, 'kernel')
+            pad, stride = get_attr(attr, 'pad'), get_attr(attr, 'stride')
+            num_filter = get_attr(attr, 'num_filter')
+            num_group = get_attr(attr, 'num_group', 1)
+            attr = {
+                'layout': "NCHW", 'no_bias': no_bias,
+                'dilate': (*dilate, 1), 'kernel': (*kernel, 1),
+                'pad': (*pad, 0), 'stride': (*stride, 1),
+                'num_filter': num_filter, 'num_group': num_group,
+            }
+            X = mx.sym.expand_dims(X, axis=3)
+            params[W_name] = params[W_name].expand_dims(axis=3)
+            W = kwargs['graph'][W_name] = mx.sym.var(W_name, shape=params[W_name].shape)
+            B = None if no_bias else childs[2]
+            op = get_mxnet_op(op_name)(X, W, B, **attr, name=name)
+            self._validate_overflow(op, **kwargs)
+            op = mx.sym.squeeze(op, axis=3)
         return op
 
     def _fuse_bias(self, op, infer_shapes):

@@ -127,7 +127,6 @@ def test_trec():
     # validate_model(sym_path, prm_path, ctx, ds_name="trec",
     #                input_shape=(38, 16), iter_num=999999)
 
-
 if __name__ == '__main__':
     utils.log_init()
 
@@ -209,11 +208,11 @@ if __name__ == '__main__':
 
     # test_densenet161()
     '''
-    2020-01-10 
-    top1: --> 
-    top5: --> 
-    Iteration: 
-    Total Sample: 
+    2020-01-10 20:33:58
+    top1: 77.61% --> 77.32%
+    top5: 93.82% --> 93.62%
+    Iteration: 3127
+    Total Sample: 49984
     '''
 
     # test_qd10_resnetv1_20()
