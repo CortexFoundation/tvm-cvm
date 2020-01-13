@@ -65,7 +65,7 @@ def test_mrt_quant(batch_size=1, iter_num=10):
         th_dict = calib.sym_calibrate(sym, params, inputs_qext, ctx=ctx)
         qsym, qparams, _ = calib.pure_int8_quantize(sym, params, inputs_qext, th_dict)
 
-    net2 = model.to_graph(ctx=ctx)
+    net2 = mrt.current_model.to_graph(ctx=ctx)
     # net2 = gluon.nn.SymbolBlock(qsym, inputs)
     # utils.load_parameters(net2, qparams, ctx=ctx)
     inputs_qext = mrt.get_inputs_ext()
@@ -86,12 +86,13 @@ def test_mrt_quant(batch_size=1, iter_num=10):
                 ["/data/std_out/trec/sentimentnet0_embedding0_fwd_0.mrt.dump.out.npy"],
                 "/data/std_out/trec/sentimentnet0_embedding0_fwd.attr")
 
-    if False:
+    if True:
         while True:
             data, _ = next(data_iter)
+            inputs_qext = mrt.get_inputs_ext()
             data = sim.load_real_data(data, 'data', inputs_qext)
             inputs_qext['data']['data'] = data
-            spass.sym_dump_ops(qsym, qparams, inputs_qext,
+            spass.sym_dump_ops(mrt.current_model.symbol, mrt.current_model.params, inputs_qext,
                     ctx=mx.gpu(3))
         exit()
 
