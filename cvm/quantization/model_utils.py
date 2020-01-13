@@ -8,8 +8,7 @@ from mxnet import gluon, ndarray as nd
 
 import tfm_pass as tpass
 import dataset as ds
-from transformer import Model, MRT, \
-         convert_params_dtype, init, compile_to_cvm
+from transformer import Model, MRT # , init, compile_to_cvm
 import sim_quant_helper as sim
 import utils
 
@@ -51,7 +50,8 @@ def validate_model(sym_path, prm_path, ctx, num_channel=3,
     if not path.exists(sym_path) or not path.exists(prm_path):
         save_model(model_name)
     model = Model.load(sym_path, prm_path)
-    model = init(model, input_shape)
+    model.prepare(input_shape)
+    # model = init(model, input_shape)
 
     print(tpass.collect_op_names(model.symbol, model.params))
 
@@ -59,7 +59,8 @@ def validate_model(sym_path, prm_path, ctx, num_channel=3,
     data, _ = data_iter_func()
 
     # prepare
-    mrt = MRT(model)
+    mrt = model.get_mrt()
+    # mrt = MRT(model)
 
     # calibrate
     mrt.set_data(data)
@@ -87,9 +88,11 @@ def validate_model(sym_path, prm_path, ctx, num_channel=3,
         model_name = model_name + "_tfm"
         dump_shape = dump_shape if dump_shape else \
             (1, num_channel, input_size, input_size)
-        compile_to_cvm(
-            mrt.current_model, model_name,
-            datadir=datadir, input_shape=dump_shape)
+        mrt.current_model.to_cvm(
+            model_name, datadir=datadir, input_shape=input_shape)
+        # compile_to_cvm(
+            # mrt.current_model, model_name,
+            # datadir=datadir, input_shape=dump_shape)
         data = data[0].reshape(dump_shape)
         data = sim.load_real_data(
             data.astype("float64"), 'data', mrt.get_inputs_ext())

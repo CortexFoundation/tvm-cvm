@@ -31,10 +31,12 @@ import sim_quant_helper as sim
 
 # TODO: collect hyper-parameters
 
-__all__ = ["Model", "init", "MRT", "compile_to_cvm",
-           "split_model", "merge_model",
+__all__ = ["Model", "MRT", "ModelSpliter", "ModelMerger",
+           # "init", "MRT", "compile_to_cvm",
+           # "split_model", "merge_model",
            # transformer helper pass
-           "convert_params_dtype"]
+           # "convert_params_dtype",
+]
 
 
 class Model:
@@ -83,6 +85,25 @@ class Model:
         symbol = mx.sym.load(symbol_file)
         params = nd.load(params_file)
         return Model(symbol, params)
+
+    def split(self, keys):
+        return split_model(self, keys)
+
+    @staticmethod
+    def merger(base, top, base_name_map=None):
+        return ModelMerger(base, top_model, base_name_map)
+
+    def prepare(self, input_shape=None):
+        model = init(self, input_shape)
+        self.symbol, self.params = model.symbol, model.params
+
+    def get_mrt(self):
+        return MRT(self)
+
+    def to_cvm(self, model_name, datadir="/data/stdout",
+                       input_shape=None, target="cuda"):
+        return compile_to_cvm(self, model_name, datadir,
+                              input_shape, target)
 
 def init(model, input_shape=None):
     logger = logging.getLogger("mrt.prepare")
