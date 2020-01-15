@@ -6,8 +6,9 @@ from mxnet import ndarray as nd
 import mxnet as mx
 import nnvm
 
-from tfm_utils import get_bit, get_range, scale, get_bit_cnt
-from tfm_utils import requant, requant_operator, requant_parameter
+from tfm_utils import get_bit, get_range, scale, get_bit_cnt, \
+                      requant, requant_operator, requant_parameter, \
+                      realize
 from sym_utils import get_attr, sym_iter, is_params, is_inputs, \
                       nd_array, get_mxnet_op, get_nnvm_op, nd_const, \
                       get_entry_id
@@ -239,6 +240,32 @@ class Convolution(Transformer):
     def rewrite(self, op, **kwargs):
         #TODO: matrix decomposition
         # op = self._fuse_bias(op, kwargs["infer_shapes"])
+        params = kwargs['params']
+        name, op_name = op.attr('name'), op.attr('op_name')
+        childs, attr = sym_iter(op.get_children()), op.list_attr()
+        X, W = childs[0], childs[1]
+        W_name = W.attr('name')
+
+        layout = get_attr(attr, 'layout', "NCHW")
+        if layout == "NCW":
+            no_bias = get_attr(attr, 'no_bias', False)
+            dilate, kernel = get_attr(attr, 'dilate'), get_attr(attr, 'kernel')
+            pad, stride = get_attr(attr, 'pad'), get_attr(attr, 'stride')
+            num_filter = get_attr(attr, 'num_filter')
+            num_group = get_attr(attr, 'num_group', 1)
+            attr = {
+                'layout': "NCHW", 'no_bias': no_bias,
+                'dilate': (*dilate, 1), 'kernel': (*kernel, 1),
+                'pad': (*pad, 0), 'stride': (*stride, 1),
+                'num_filter': num_filter, 'num_group': num_group,
+            }
+            X = mx.sym.expand_dims(X, axis=3)
+            params[W_name] = params[W_name].expand_dims(axis=3)
+            W = kwargs['graph'][W_name] = mx.sym.var(W_name, shape=params[W_name].shape)
+            B = None if no_bias else childs[2]
+            op = get_mxnet_op(op_name)(X, W, B, **attr, name=name)
+            self._validate_overflow(op, **kwargs)
+            op = mx.sym.squeeze(op, axis=3)
         return op
 
     def _fuse_bias(self, op, infer_shapes):
@@ -326,7 +353,7 @@ class Embedding(Transformer):
         iprec = kwargs['op_input_precs'][op_name]
         X, xs = childs[0], scales[cns[0]]
         if xs != 1:
-            X, _, _ = requant_parameter(X, 32, 1)
+            X, _, _ = requant(X, 32, oscale=1, oname=name, **kwargs)
         W, _, ws = requant_parameter(cns[1], iprec, oname=name, **kwargs)
         th_dict[name] = th_dict[cns[1]]
         scales[name] = ws
@@ -598,7 +625,7 @@ class Softmax(Transformer):
         X, xprec, xs = requant_operator(childs[0], oprec, xs,
                                         oname=name, **kwargs)
         axis = get_attr(attr, 'axis', -1)
-        lambd = MRT._SOFTMAX_LAMBD
+        lambd = kwargs['softmax_lambd']
         alpha = int(lambd*xs)
         var = nd_const(alpha, graph, params)
         max_axis = mx.sym.max(X, axis=axis, keepdims=True)

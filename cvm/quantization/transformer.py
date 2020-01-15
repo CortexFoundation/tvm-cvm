@@ -31,10 +31,12 @@ import sim_quant_helper as sim
 
 # TODO: collect hyper-parameters
 
-__all__ = ["Model", "init", "MRT", "compile_to_cvm",
-           "split_model", "merge_model",
+__all__ = ["Model", "MRT", "ModelSpliter", "ModelMerger",
+           # "init", "MRT", "compile_to_cvm",
+           # "split_model", "merge_model",
            # transformer helper pass
-           "convert_params_dtype"]
+           # "convert_params_dtype",
+]
 
 
 class Model:
@@ -84,6 +86,25 @@ class Model:
         params = nd.load(params_file)
         return Model(symbol, params)
 
+    def split(self, keys):
+        return split_model(self, keys)
+
+    @staticmethod
+    def merger(base, top, base_name_map=None):
+        return ModelMerger(base, top_model, base_name_map)
+
+    def prepare(self, input_shape=None):
+        model = init(self, input_shape)
+        self.symbol, self.params = model.symbol, model.params
+
+    def get_mrt(self):
+        return MRT(self)
+
+    def to_cvm(self, model_name, datadir="/data/stdout",
+                       input_shape=None, target="cuda"):
+        return compile_to_cvm(self, model_name, datadir,
+                              input_shape, target)
+
 def init(model, input_shape=None):
     logger = logging.getLogger("mrt.prepare")
     logger.info("Model initializing...")
@@ -123,9 +144,6 @@ class MRT:
             precision with scales, using the floading data simulate
             the realized environment of interger dataflow;
     """
-    _SOFTMAX_LAMBD = 10
-    _SHIFT_BIT = 5
-
     def __init__(self, model, input_prec=8):
         self.old_names = model.output_names()
         self.current_model = model
@@ -140,6 +158,8 @@ class MRT:
             raise RuntimeError("please invoke `init` function first")
         self.precs['data'][OUT_KEY] = input_prec
         self.scales = {}
+        self.softmax_lambd = 10
+        self.shift_bits = 5
 
     def set_data(self, data):
         self._data = data
@@ -178,10 +198,17 @@ class MRT:
             name = sym.attr('name')
             self.precs[name][name] = prec
 
+    def set_softmax_lambd(self, val):
+        self.softmax_lambd = val
+
+    def set_shift_bits(self, val):
+        self.shift_bits = val
+
     def quantize(self):
         _sym, _prm = quantize(
             self.current_model.symbol, self.current_model.params,
-            self.th_dict, self.precs, self.scales, self.op_input_precs)
+            self.th_dict, self.precs, self.scales, self.op_input_precs,
+            self.shift_bits, self.softmax_lambd)
         self.current_model = Model(_sym, _prm)
         return self.current_model
 
@@ -205,14 +232,6 @@ class MRT:
         sim.save_ext(ext_file, self.old_names, self.th_dict,
                      self.precs, self.scales)
         self.current_model.save(sym_file, params_file)
-
-    @staticmethod
-    def set_softmax_lambd(val):
-        MRT._SOFTMAX_LAMBD = val
-
-    @staticmethod
-    def set_shift_bit(val):
-        MRT._SHIFT_BIT = val
 
     @staticmethod
     def load(model_name, datadir="./data"):
@@ -249,9 +268,9 @@ def split_model(model, keys):
 
     return Model(base, base_params), Model(top, top_params)
 
-def merge_model(base_model, top_model, name_maps=None, callback=None):
-    name_maps = {} if name_maps is None else name_maps
-    graph = {name_maps.get(c.attr('name'), c.attr('name')):c \
+def merge_model(base_model, top_model, base_name_maps=None, callback=None):
+    base_name_maps = {} if base_name_maps is None else base_name_maps
+    graph = {base_name_maps.get(c.attr('name'), c.attr('name')):c \
         for c in base_model.symbol}
     for sym in topo_sort(top_model.symbol):
         name, op_name = sym.attr('name'), sym.attr('op_name')
@@ -271,6 +290,32 @@ def merge_model(base_model, top_model, name_maps=None, callback=None):
     params.update(top_model.params)
     return Model(symbol, params)
 
+
+class ModelSpliter:
+    def __init__(self, model, keys):
+        self.model = model
+        self.keys = keys
+
+    def split(self):
+        return split_model(self.model, self.keys)
+
+
+class ModelMerger:
+    def __init__(self, base_model, top_model, base_name_maps=None):
+        self.base, self.top = base_model, top_model
+        base_name_maps = {} if base_name_maps is None else base_name_maps
+        self.base_name_maps = base_name_maps
+
+    def merge(self, callback=None):
+        return merge_model(
+            self.base, self.top, self.base_name_maps, callback)
+
+    def get_output_scales(self, base_oscales, maps):
+        name_idx = {self.base_name_map.get(
+            s.attr("name"), s.attr("name")): i \
+            for i, s in enumerate(self.base)}
+        return [1 if v is None else base_oscales[name_idx[k]] \
+            for k, v in maps.items()]
 
 def compile_to_cvm(model, model_name, datadir="/data/std_out",
                    input_shape=None, target="cuda"):
