@@ -12,6 +12,45 @@ from transformer import Model, MRT # , init, compile_to_cvm
 import sim_quant_helper as sim
 import utils
 
+def validate_data(net, data, label, eval_metric):
+    det_ids, det_scores, det_bboxes = [], [], []
+    gt_ids, gt_bboxes, gt_difficults = [], [], []
+
+    # get prediction results
+    x, y = data, label
+    ids, scores, bboxes = net(x)
+    det_ids.append(ids)
+    det_scores.append(scores)
+    # clip to image size
+    det_bboxes.append(bboxes.clip(0, x.shape[2]))
+    # split ground truths
+    gt_ids.append(y.slice_axis(axis=-1, begin=4, end=5))
+    gt_bboxes.append(y.slice_axis(axis=-1, begin=0, end=4))
+    gt_difficults.append(y.slice_axis(
+        axis=-1, begin=5, end=6) if y.shape[-1] > 5 else None)
+
+    # update metric
+    eval_metric.update(det_bboxes, det_ids, det_scores,
+                       gt_bboxes, gt_ids, gt_difficults)
+    map_name, mean_ap = eval_metric.get()
+    acc = {k:v for k, v in zip(map_name, mean_ap)}['mAP']
+    return acc
+
+def load_yolov3_quantize(model, ctx, qctx, inputs_qext, oscale):
+    net = model.to_graph(ctx=ctx)
+
+    net_metric = ds.load_voc_metric()
+    net_metric.reset()
+    def model_func(data, label):
+        def net(data):
+            data = sim.load_real_data(data, 'data', inputs_qext)
+            outs = net(data.as_in_context(qctx))
+            outs = [o.as_in_context(ctx) / oscales[i] \
+                    for i, o in enumerate(outs)]
+            return outs
+        acc = validate_data(net, data, label, net_metric)
+        return "{:6.2%}".format(acc)
+
 def load_model(model, ctx, inputs_qext=None):
     net = model.to_graph(ctx=ctx)
 
