@@ -11,74 +11,22 @@ import dataset as ds
 from transformer import Model, MRT # , init, compile_to_cvm
 import sim_quant_helper as sim
 import utils
-import sutils
+import sym_utils as sutils
 
-def get_mergefunc_yolo(oscales):
+def get_merge_func(base_oscales, attribute_deps):
     def mergefunc(node, params, graph):
         name, op_name = node.attr('name'), node.attr('op_name')
         childs, attr = sutils.sym_iter(
             node.get_children()), node.list_attr()
-        if op_name == '_contrib_box_nms':
-            valid_thresh = sutils.get_attr(attr, 'valid_thresh', 0)
-            attr['valid_thresh'] = int(valid_thresh * oscales[3])
+        if op_name in attribute_deps:
+            attr_deps = attribute_deps[op_name]
+            for attr_name, entry in attr_deps.items():
+                val = sutils.get_attr(attr, attr_name, 0)
+                attr[attr_name] = int(val*base_oscales[entry])
             node = sutils.get_mxnet_op(op_name)(
                 *childs, **attr, name=name)
         return node
     return mergefunc
-
-def validate_data(net, data, label, eval_metric):
-    det_ids, det_scores, det_bboxes = [], [], []
-    gt_ids, gt_bboxes, gt_difficults = [], [], []
-
-    # get prediction results
-    x, y = data, label
-    ids, scores, bboxes = net(x)
-    det_ids.append(ids)
-    det_scores.append(scores)
-    # clip to image size
-    det_bboxes.append(bboxes.clip(0, x.shape[2]))
-    # split ground truths
-    gt_ids.append(y.slice_axis(axis=-1, begin=4, end=5))
-    gt_bboxes.append(y.slice_axis(axis=-1, begin=0, end=4))
-    gt_difficults.append(y.slice_axis(
-        axis=-1, begin=5, end=6) if y.shape[-1] > 5 else None)
-
-    # update metric
-    eval_metric.update(det_bboxes, det_ids, det_scores,
-                       gt_bboxes, gt_ids, gt_difficults)
-    map_name, mean_ap = eval_metric.get()
-    acc = {k:v for k, v in zip(map_name, mean_ap)}['mAP']
-    return acc
-
-def get_evalfunc_yolo(ctx, **kwargs):
-    metric = ds.load_voc_metric()
-    metric.reset()
-
-    inputs_qext = kwargs.get('is_quantize', None)
-    if inputs_qext is not None:
-        qctx = kwargs.get('qctx', ctx)
-        model_graph = kwargs.get('model').to_graph(ctx=qctx)
-        oscales = kwargs.get('oscales')
-        def evalfunc(data, label):
-            def net(data):
-                data = sim.load_real_data(data, 'data', inputs_qext)
-                outs = model_graph(data.as_in_context(qctx))
-                outs = [o.as_in_context(ctx) / oscales[i] \
-                        for i, o in enumerate(outs)]
-                return outs
-            acc = validate_data(net, data, label, metric)
-            return "{:6.2%}".format(acc)
-    else:
-        top_graph = kwargs.get('top').to_graph(ctx=ctx)
-        base_graph = kwargs.get('base').to_graph(ctx=ctx)
-        def evalfunc(data, label):
-            def net(data):
-                tmp = base_graph(data.as_in_context(ctx))
-                outs = top_graph(*tmp)
-                return outs
-            acc = validate_data(net, data, label, metric)
-            return "{:6.2%}".format(acc)
-    return evalfunc
 
 def load_model(model, ctx, inputs_qext=None):
     net = model.to_graph(ctx=ctx)

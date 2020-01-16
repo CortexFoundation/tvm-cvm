@@ -2,6 +2,7 @@ import sys
 from os import path
 import configparser
 import logging
+import numpy as np
 
 import mxnet as mx
 
@@ -9,9 +10,10 @@ from transformer import Model
 import dataset as ds
 import sim_quant_helper as sim
 import utils
+import model_utils as mutils
 
-def _check(exp, section, option, message='Not a valid value'):
-    assert exp, message + '.\noption `%s` in section `%s`' \
+def _check(expression, section, option, message='Not a valid value'):
+    assert expression, message + '.\noption `%s` in section `%s`' \
         % (option, section)
 
 NoneType = object()
@@ -72,21 +74,12 @@ def _get_val(config, section, option, dtype='str', dval=NoneType):
             entries = [_cast_val(section, option, entry_, dtype=etypes[level]) \
                 for level, entry_ in enumerate(entries_)]
             cur = val
-            for level, entry in enumerate(entries[:-1]):
-                _check(entry not in cur, section, option,
-                       message="Duplicate key `%s`" % entry)
-                cur[entry] = entries[level+1] if level+2 == len(etypes)\
-                    else {entries[level+1]: {}}
+            for level, entry in enumerate(entries[:-2]):
+                cur[entry] = {} if entry not in cur else cur[entry]
                 cur = cur[entry]
-        return val
-        '''
-        for x in val_.split(','):
-            k_, v_ = x.split(':')
-            k = _cast_val(section, option, k_.strip(), dtype=dtype1)
-            _check(k not in val, section, option,
-                   message="Duplicate key `%s`" % k_.strip())
-            val[k] = _cast_val(section, option, v_.strip(), dtype=dtype2)
-        '''
+            _check(entries[-2] not in cur, section, option,
+                   message="Duplicate key `%s`" % entries[:-1])
+            cur[entries[-2]] = entries[-1]
     return val
 
 def _cast_val(section, option, val_, dtype='str'):
@@ -109,9 +102,6 @@ def _load_fname(directory, suffix=None, with_ext=False):
     return utils.extend_fname(directory+suffix, with_ext)
 
 if __name__ == "__main__":
-    utils.log_init()
-    logger = logging.getLogger("log.main")
-
     assert len(sys.argv) == 2, "Please enter 2 python arguments."
     cfgPath = sys.argv[1]
     baseDir = path.abspath(path.dirname(cfgPath))
@@ -123,10 +113,16 @@ if __name__ == "__main__":
 
     # default
     sec = 'DEFAULT'
-    sym_path = _get_path(cfg, sec, 'Symbol')
-    prm_path = _get_path(cfg, sec, 'Params')
-    model_dir = path.dirname(sym_path)
-    model_name, _ = path.splitext(path.basename(sym_path))
+    verbosity = _get_val(cfg, sec, 'Verbosity',
+                         dtype='int', dval=logging.NOTSET)
+    utils.log_init(level=verbosity)
+    logger = logging.getLogger("log.main")
+    default_dir = path.expanduser("~/tvm-cvm/data")
+    assert path.exists(default_dir), \
+        "Please create the folder `data` in the working directory first"
+    model_dir = _get_val(cfg, sec, 'Model_dir', dval=default_dir)
+    model_name = _get_val(cfg, sec, 'Model_name')
+    sym_path, prm_path = _load_fname(path.join(model_dir, model_name))
     model_ctx = _get_ctx(cfg, sec)
     org_model = Model.load(sym_path, prm_path)
 
@@ -213,19 +209,26 @@ if __name__ == "__main__":
         for name, threshold in thresholds.items():
             mrt.set_threshold(name, threshold)
     mrt.quantize()
+    model = mrt.current_model
     dump_dir = _get_path(
         cfg, sec, 'Dump_dir', is_dir=True, dpath=model_dir)
     mrt.save(model_name+'base.quantize', datadir=dump_dir)
-    oscales = mrt.get_output_scales()
-    maps = mrt.get_maps()
     logger.info("Quantization finihed")
 
     # merge_model
+    sec = 'MERGE_MODEL'
     dump_dir = _get_path(
         cfg, sec, 'Dump_dir', is_dir=True, dpath=model_dir)
     if keys != '':
-        model_merger = Model.merger(base, top, maps)
-        model = model_merger.merge(callback=None)
+        model_merger = Model.merger(model, top, mrt.get_maps())
+        base_oscales = mrt.get_output_scales()
+        attribute_deps = _get_val(
+            cfg, sec, 'Attribute_deps', dtype='{str:str:int}')
+        mergefunc = mutils.get_merge_func(
+            base_oscales, attribute_deps)
+        model = model_merger.merge(callback=mergefunc)
+        oscale_maps = _get_val(cfg, sec, 'Oscale_maps', dtype='{str:str}')
+        oscales = model_merger.get_output_scales(base_oscales, oscale_maps)
         sym_file, prm_file = _load_fname(dump_dir, suffix='all.quantize')
         model.save(sym_file, prm_file)
         logger.info("Merge model finihed")
@@ -235,4 +238,18 @@ if __name__ == "__main__":
     iter_num = _get_val(cfg, sec, 'Iter_num', dtype='int', dval=10)
 
     # compilation
+    sec = 'COMPILATION'
+    dump_shape = _get_val(cfg, sec, 'Input_shape',
+                          dtype='tuple', dval=input_shape)
+    dump_dir = _get_path(
+        cfg, sec, 'Dump_dir', is_dir=True, dpath=model_dir)
+    model_name_tfm = model_name + "_tfm"
+    model.to_cvm(model_name_tfm, datadir=dump_dir, input_shape=dump_shape)
+    dump_data = data[0].reshape(dump_shape)
+    dump_data = sim.load_real_data(
+        dump_data.astype("float64"), 'data', mrt.get_inputs_ext())
+    np.save(path.join(dump_dir, model_name_tfm, "data.npy"),
+            dump_data.astype('int8').asnumpy())
+    logger.info("Compilation finihed")
+
 

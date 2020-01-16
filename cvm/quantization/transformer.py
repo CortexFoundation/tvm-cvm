@@ -311,10 +311,10 @@ class ModelMerger:
             self.base, self.top, self.base_name_maps, callback)
 
     def get_output_scales(self, base_oscales, maps):
-        name_idx = {self.base_name_map.get(
+        name_idx = {self.base_name_maps.get(
             s.attr("name"), s.attr("name")): i \
             for i, s in enumerate(self.base)}
-        return [1 if v is None else base_oscales[name_idx[k]] \
+        return [1 if v is None else base_oscales[name_idx[v]] \
             for k, v in maps.items()]
 
 def compile_to_cvm(model, model_name, datadir="/data/std_out",
