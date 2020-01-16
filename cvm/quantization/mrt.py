@@ -359,14 +359,12 @@ def _realize(sym, params, graph, inputs_ext):
     sb, prec = get_attr(attr, 'sb'), get_attr(attr, 'prec')
     if sb == 0:
         sym = mx.sym.Custom(X, precision=prec,
-                cvm_name=name,
                 name=name, op_type='cvm_clip')
     elif sb < 0:
         sym = mx.sym.Custom(X, shift_bit=-sb, precision=prec,
                 name=name, op_type='cvm_left_shift')
     else:
         sym = mx.sym.Custom(X, shift_bit=sb, precision=prec,
-                cvm_name=name,
                 name=name, op_type='cvm_right_shift')
     return sym, params
 

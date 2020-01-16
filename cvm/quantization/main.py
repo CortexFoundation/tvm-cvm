@@ -128,7 +128,7 @@ if __name__ == "__main__":
     utils.log_init()
     logger = logging.getLogger("log.main")
 
-    assert len(sys.argv) == 2
+    assert len(sys.argv) == 2, cfg.usage()
     cfgPath = sys.argv[1]
     baseDir = path.abspath(path.dirname(cfgPath))
     logger.info("Load config file: %s", cfgPath)

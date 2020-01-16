@@ -52,6 +52,7 @@ def get_model(name, **kwargs):
     """
     return cv.model_zoo.get_model(name, pretrained=True,
             ctx=mx.gpu(), **kwargs)
+
 def save_model(name, **kwargs):
     net = get_model(name, **kwargs)
     sym = net(mx.sym.var('data'))

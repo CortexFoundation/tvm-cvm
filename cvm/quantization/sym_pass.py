@@ -8,7 +8,6 @@ from mxnet import ndarray as nd
 import nnvm as nnvm
 import tvm
 from tvm import relay
-
 from sym_utils import *
 from utils import *
 
@@ -97,6 +96,8 @@ def mxnet_build(sym, params, inputs_ext, dump_sym, dump_params,
 def mxnet_to_nnvm(sym, params, inputs_ext, logger=logging):
     sym, params = prepare_for_cvm(sym, params, inputs_ext)
     nnvm_sym, _ = nnvm.frontend.from_mxnet(sym)
+
+
     # nnvm_sym, params = nnvm_realize(nnvm_sym, params, inputs_ext)
 
     args = nnvm_sym.list_input_names()
@@ -119,7 +120,6 @@ def cvm_build(nnvm_sym, nnvm_params, inputs_ext, dump_sym, dump_params,
     logger.debug("Compile nnvm graph to %s", runtime)
     tvm_ctx = tvm.context(target, 0)
     inputs_shape = {k:v['shape'] for k,v in inputs_ext.items()}
-    print (inputs_shape)
 
     with nnvm.compiler.build_config(opt_level=0, runtime=runtime):
         deploy_graph, lib, real_params = nnvm.compiler.build(
@@ -143,13 +143,11 @@ def mxnet_to_tvm(sym, params, inputs_ext, dump_sym, dump_params,
     relay_sym, relay_params = relay.frontend.from_mxnet(sym, inputs_shape,
             arg_params=params)
     real_params = tvm_params_reduce(sym, relay_params, inputs_ext, tvm.context("cpu"))
-
     # TODO: conv and dense layer dump without precision
     logger.debug("Compiling into CVM Executor Graph")
     with relay.build_config(opt_level=0):
         graph_json, lib, graph_params = relay.build(relay_sym, "cvm")
     assert len(graph_params.keys()) == 0, graph_params.keys()
-
     logger.debug("Dump json & params to file")
     open(dump_sym, "w").write(graph_json)
     param_bytes = nnvm.compiler.save_param_dict(real_params)
@@ -405,7 +403,7 @@ def sym_robust_infer_shape(symbol, params, inputs_ext):
         args = sym.list_inputs()
         inputs_shape = {k:tuple(v['shape']) for k,v in inputs_ext.items() if k in args}
         _, out_shapes, _ = sym.infer_shape(**inputs_shape)
-        
+
         # assert len(out_shapes) == 1, 'Infer shape %s'%(name)
         if name in infer_shapes:
             logger.warn("Symbol:%s has been infered shape in graph", out_shapes)

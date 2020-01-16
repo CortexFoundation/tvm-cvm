@@ -23,6 +23,17 @@ def is_inputs(sym, params):
     return is_var(sym, params) and \
         (sym.attr('name') not in params)
 
+def nd_array(source_array, ctx=None, dtype="float64"):
+    return nd.array(source_array, ctx=ctx, dtype=dtype)
+def nd_arange(*args, **kwargs):
+    return nd.arange(*args, dtype="float64", **kwargs)
+def nd_full(*args, **kwargs):
+    return nd.full(*args, dtype="float64", **kwargs)
+def nd_zeros(*args, **kwargs):
+    return nd.zeros(*args, dtype="float64", **kwargs)
+def nd_ones(*args, **kwargs):
+    return nd.ones(*args, dtype="float64", **kwargs)
+
 DATA_NAME = "data"
 _name_dict = {}
 def gen_name(name):
@@ -156,9 +167,18 @@ def examine_parameters(symbol, params, inputs_ext, allows=[], callback=None):
             new_params[name] = params[name]
     return new_params
 
+def nd_const(number, graph, params):
+    name = 'const_var_' + str(number)
+    prec = math.ceil(math.log2(math.fabs(number)+1)) + 1
+    if name not in graph:
+        attr = { 'precision': str(prec) }
+        graph[name] = mx.sym.var(name, shape=(1,), attr=attr)
+        params[name] = nd_array([number])
+    return graph[name]
+
 def mx_const(number, graph, params):
     name = 'const_var_' + str(number)
-    prec = math.ceil(math.log2(number)) + 1
+    prec = math.ceil(math.log2(number+1)) + 1
     if name not in graph:
         attr = { 'precision': str(prec) }
         graph[name] = mx.sym.var(name, shape=(1,), attr=attr)
@@ -173,15 +193,6 @@ def op_const(number, graph, var=mx.sym.var):
 
 def topo_sort(symbol, logger=logging, with_deps=False):
     """Sort all symbols in the mxnet graph in topological order.
-
-    Parameters
-    ----------
-    symbol : mxnet.sym.Symbol
-
-    Returns:
-    -------
-    list
-        List of mxnet symbol
     """
     queue = []
     symbol_map = {}
@@ -239,7 +250,9 @@ def sym_collect_attr(symbol, attr_name='op_name'):
     return {sym.attr(attr_name) for sym in topo_sort(symbol)}
 
 MULTIPYE_OUTS_NODE = [
-    'get_valid_counts', 'SliceChannel'
+    'get_valid_counts', 'SliceChannel',
+    # group's op_name is None
+    'None',
 ]
 def get_entry_id(sym):
     oindex = 0

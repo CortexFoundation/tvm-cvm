@@ -71,9 +71,11 @@ def test_sym_pass(batch_size=10, iter_num=10):
         return "top1={:6.2%} top5={:6.2%}".format(top1, top5)
 
     sym_fname, param_fname = load_fname(version)
+    print(sym_fname, param_fname)
+    exit()
     sym, params = mx.sym.load(sym_fname), nd.load(param_fname)
     sym, params = spass.sym_quant_prepare(sym, params, inputs_ext)
-    if False:
+    if True:
         mrt = _mrt.MRT(sym, params, inputs_ext)
         mrt.set_data('data', data)
         mrt.calibrate(ctx=calib_ctx)
@@ -112,7 +114,8 @@ if __name__ == "__main__":
 
     zoo.save_model('vgg19')
 
-    test_sym_pass(batch_size=160, iter_num=100000)
+    test_sym_pass(batch_size=16, iter_num=100)
+    # test_sym_pass(batch_size=160, iter_num=100000)
     # test_sym_nnvm(batch_size=1, iter_num=0)
 
 

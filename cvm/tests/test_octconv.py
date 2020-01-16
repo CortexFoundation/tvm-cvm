@@ -160,7 +160,7 @@ def save_data():
 if __name__ == "__main__":
     utils.log_init()
 
-    # resnet.save_graph(mx.gpu())
+    resnet.save_graph(mx.gpu())
     # zoo.save_model('resnet50_v1', 1000)
     # zoo.save_model('resnet18_v1')
     # zoo.save_model('resnet50_v1d_0.86')
@@ -168,7 +168,7 @@ if __name__ == "__main__":
 
     # save_data()
 
-    # test_sym_pass(batch_size=160, iter_num=20)
-    test_sym_nnvm(batch_size=1, iter_num=1)
+    test_sym_pass(batch_size=160, iter_num=20)
+    # test_sym_nnvm(batch_size=1, iter_num=1)
 
 
