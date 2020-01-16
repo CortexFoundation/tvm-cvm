@@ -7,6 +7,7 @@ import numpy as np
 import mxnet as mx
 
 from transformer import Model
+from gluon_zoo import save_model
 import dataset as ds
 import sim_quant_helper as sim
 import utils
@@ -123,6 +124,8 @@ if __name__ == "__main__":
     model_dir = _get_val(cfg, sec, 'Model_dir', dval=default_dir)
     model_name = _get_val(cfg, sec, 'Model_name')
     sym_path, prm_path = _load_fname(path.join(model_dir, model_name))
+    if not path.exists(sym_path) or not exists(prm_path):
+        save_model(model_name, sym_path=sym_path, prm_path=prm_path)
     model_ctx = _get_ctx(cfg, sec)
     org_model = Model.load(sym_path, prm_path)
 
@@ -251,5 +254,4 @@ if __name__ == "__main__":
     np.save(path.join(dump_dir, model_name_tfm, "data.npy"),
             dump_data.astype('int8').asnumpy())
     logger.info("Compilation finihed")
-
 
