@@ -5,74 +5,91 @@ import logging
 
 import mxnet as mx
 
-from transformer import Model, MRT
+from transformer import Model
 import dataset as ds
 import sim_quant_helper as sim
 import utils
 
-def _check(exp, sec, opt, message='Not a valid value'):
-    assert exp, message + '.\noption `%s` in section `%s`' % (opt, sec)
+def _check(exp, section, option, message='Not a valid value'):
+    assert exp, message + '.\noption `%s` in section `%s`' \
+        % (option, section)
 
 NoneType = object()
 
-def _get_path(config, sec, opt, is_dir=False, dpath=NoneType):
-    pth_ = _get_val(config, sec, opt, dval=dpath)
+def _get_path(config, section, option, is_dir=False, dpath=NoneType):
+    pth_ = _get_val(config, section, option, dval=dpath)
     pth = path.abspath(path.expanduser(pth_))
     if is_dir:
-        _check(path.isdir(pth), sec, opt,
+        _check(path.isdir(pth), section, option,
                message='Not a valid dir `%s`' % pth_)
         if not path.exists(pth):
             path.makedirs(pth)
     else:
-        _check(path.exists(pth), sec, opt,
+        _check(path.exists(pth), section, option,
                message='File `%s` not found' % pth_)
     return pth
 
-def _get_ctx(config, sec, dctx=mx.cpu()):
-    ctx = dctx
-    device_type = _get_val(config, sec, 'Device_type', dval='cpu')
-    _check(device_type in ['', 'gpu', 'cpu'], sec, 'Device_type',
+def _get_ctx(config, section, dctx=mx.cpu()):
+    contex = dctx
+    device_type = _get_val(config, section, 'Device_type', dval='cpu')
+    _check(device_type in ['', 'gpu', 'cpu'], section, 'Device_type',
            message='Only support `gpu`, `cpu` and null value')
     if device_type == 'gpu':
-        device_ids = _get_val(config, sec, 'Device_ids',
-                              dtype='list', dtype1='int')
-        ctx = mx.gpu(device_ids[0]) if len(device_ids) == 1 \
+        device_ids = _get_val(
+            config, section, 'Device_ids', dtype='[int]')
+        contex = mx.gpu(device_ids[0]) if len(device_ids) == 1 \
               else [mx.gpu(i) for i in device_ids]
-        if sec == 'CALIBRATION':
-            _check(type(ctx).__name__ != 'list', sec, 'Device_ids',
+        if section == 'CALIBRATION':
+            _check(type(contex).__name__ != 'list', section, 'Device_ids',
                    message='`Device_ids` should be an integer in Calibration')
     else:
-        device_ids = _get_val(config, sec, 'Device_ids', dval='')
+        device_ids = _get_val(config, section, 'Device_ids', dval='')
         print(device_ids)
-        _check(device_ids == '', sec, 'Device_ids',
+        _check(device_ids == '', section, 'Device_ids',
                message='`Device_ids` should be null given `cpu` device type')
-    return ctx
+    return contex
 
-def _get_val(config, sec, opt, dtype='str', dval=NoneType,
-             dtype1='str', dtype2='str'):
-    val_ = config[sec][opt]
+def _get_val(config, section, option, dtype='str', dval=NoneType):
+    val_ = config[section][option]
     if val_ == '':
-        _check(dval != NoneType, sec, opt,
+        _check(dval != NoneType, section, option,
                message="Please specify the value")
         val = dval
     elif dtype in ['str', 'int', 'tuple', 'float']:
-        val = _cast_val(sec, opt, val_, dtype=dtype)
-    elif dtype == 'list':
-        val = [_cast_val(sec, opt, x.strip(), dtype=dtype1) \
+        val = _cast_val(section, option, val_, dtype=dtype)
+    elif dtype.startswith('['):
+        etype=dtype.replace('[', '').replace(']', '')
+        val = [_cast_val(section, option, x.strip(), dtype=etype) \
                for x in val_.split(',')]
-    elif dtype == 'dict':
+    elif dtype.startswith('{'):
+        etypes = dtype.replace('{', '').replace('}', '').split(':')
+        items = val_.split(',')
         val = {}
+        for item in items:
+            entries_ = [it.strip() for it in item.split(':')]
+            _check(len(entries_) == len(etypes), section, option,
+                   message="Dict level not consistent")
+            entries = [_cast_val(section, option, entry_, dtype=etypes[level]) \
+                for level, entry_ in enumerate(entries_)]
+            cur = val
+            for level, entry in enumerate(entries[:-1]):
+                _check(entry not in cur, section, option,
+                       message="Duplicate key `%s`" % entry)
+                cur[entry] = entries[level+1] if level+2 == len(etypes)\
+                    else {entries[level+1]: {}}
+                cur = cur[entry]
+        return val
+        '''
         for x in val_.split(','):
             k_, v_ = x.split(':')
-            k = _cast_val(sec, opt, k_.strip(), dtype=dtype1)
-            _check(k not in val, sec, opt,
+            k = _cast_val(section, option, k_.strip(), dtype=dtype1)
+            _check(k not in val, section, option,
                    message="Duplicate key `%s`" % k_.strip())
-            val[k] = _cast_val(sec, opt, v_.strip(), dtype=dtype2)
-    # else:
-    #     _check(False, sec, opt, message="Unknown data type")
+            val[k] = _cast_val(section, option, v_.strip(), dtype=dtype2)
+        '''
     return val
 
-def _cast_val(sec, opt, val_, dtype='str'):
+def _cast_val(section, option, val_, dtype='str'):
     if dtype == 'str':
         val = val_
     elif dtype in ['int', 'tuple', 'float']:
@@ -80,10 +97,10 @@ def _cast_val(sec, opt, val_, dtype='str'):
             val = float(eval(val_)) if dtype == 'float' else eval(val_)
         except SyntaxError:
             print("Not a valid value, " + \
-                  "option `%s` in section `%s`" % (opt, sec))
+                  "option `%s` in section `%s`" % (option, section))
             sys.exit(0)
         if dtype == 'int':
-            _check(type(val).__name__ == dtype, sec, opt,
+            _check(type(val).__name__ == dtype, section, option,
                    message="Only support integer value")
     return val
 
@@ -101,36 +118,34 @@ if __name__ == "__main__":
     fileName = path.basename(cfgPath)
     absCfgPath = path.join(baseDir, fileName)
 
-    config = configparser.ConfigParser()
-    config.read(absCfgPath)
-    print([(k, v) for k, v in config['TEST'].items()])
-    exit()
+    cfg = configparser.ConfigParser()
+    cfg.read(absCfgPath)
 
     # default
     sec = 'DEFAULT'
-    sym_path = _get_path(config, sec, 'Symbol')
-    prm_path = _get_path(config, sec, 'Params')
+    sym_path = _get_path(cfg, sec, 'Symbol')
+    prm_path = _get_path(cfg, sec, 'Params')
     model_dir = path.dirname(sym_path)
     model_name, _ = path.splitext(path.basename(sym_path))
-    model_ctx = _get_ctx(config, sec)
+    model_ctx = _get_ctx(cfg, sec)
     org_model = Model.load(sym_path, prm_path)
 
     # prepare
     sec = 'PREPARE'
     model = Model.load(sym_path, prm_path)
-    input_shape = _get_val(config, sec, 'Input_shape', dtype='tuple')
+    input_shape = _get_val(cfg, sec, 'Input_shape', dtype='tuple')
     model.prepare(input_shape)
     dump_dir = _get_path(
-        config, sec, 'Dump_dir', is_dir=True, dpath=model_dir)
+        cfg, sec, 'Dump_dir', is_dir=True, dpath=model_dir)
     sym_file, prm_file = _load_fname(dump_dir, suffix='prepare')
     model.save(sym_file, prm_file)
     logger.info("Prepare finihed")
 
     # split model
     sec = 'SPLIT_MODEL'
-    keys = _get_val(config, sec, 'Keys', dtype='list', dval='')
+    keys = _get_val(cfg, sec, 'Keys', dtype='[str]', dval='')
     dump_dir = _get_path(
-        config, sec, 'Dump_dir', is_dir=True, dpath=model_dir)
+        cfg, sec, 'Dump_dir', is_dir=True, dpath=model_dir)
     if keys == '':
         mrt = model.get_mrt()
     else:
@@ -144,9 +159,9 @@ if __name__ == "__main__":
 
     # calibration
     sec = 'CALIBRATION'
-    calibrate_num = _get_val(config, sec, 'Calibrate_num', dtype='int')
-    lambd = _get_val(config, sec, 'Lambda', dtype='float', dval=None)
-    dataset = _get_val(config, sec, 'dataset')
+    calibrate_num = _get_val(cfg, sec, 'Calibrate_num', dtype='int')
+    lambd = _get_val(cfg, sec, 'Lambda', dtype='float', dval=None)
+    dataset = _get_val(cfg, sec, 'dataset')
     if dataset in ['voc', 'imagenet', 'mnist', \
                    'quickdraw', 'cifar10']:
         _check(input_shape[2] == input_shape[3], 'PREPARE', 'Input_shape',
@@ -161,13 +176,13 @@ if __name__ == "__main__":
         data_iter_func = ds.load_trec(batch_size)
     else:
         _check(False, sec, 'Dataset')
-    ctx = _get_ctx(config, sec, dctx=model_ctx)
+    ctx = _get_ctx(cfg, sec, dctx=model_ctx)
     for i in range(calibrate_num):
         data, _ = data_iter_func()
         mrt.set_data(data)
         th_dict = mrt.calibrate(lambd=lambd, ctx=ctx)
     dump_dir = _get_path(
-        config, sec, 'Dump_dir', is_dir=True, dpath=model_dir)
+        cfg, sec, 'Dump_dir', is_dir=True, dpath=model_dir)
     _, _, ext_file = _load_fname(
         dump_dir, suffix='th_dict', with_ext=True)
     sim.save_ext(ext_file, th_dict)
@@ -176,30 +191,30 @@ if __name__ == "__main__":
     # quantization
     sec = 'QUANTIZATION'
     input_precision = _get_val(
-        config, sec, 'Input_precision', dtype='int', dval=None)
+        cfg, sec, 'Input_precision', dtype='int', dval=None)
     if input_precision is not None:
         mrt.set_input_prec(input_precision)
     output_precision = _get_val(
-        config, sec, 'Output_precision', dtype='int', dval=None)
+        cfg, sec, 'Output_precision', dtype='int', dval=None)
     if output_precision is not None:
         mrt.set_output_prec(output_precision)
-    ctx = _get_ctx(config, sec, dctx=model_ctx)
+    ctx = _get_ctx(cfg, sec, dctx=model_ctx)
     softmax_lambd = _get_val(
-        config, sec, 'softmax_lambd', dtype='float', dval=None)
+        cfg, sec, 'softmax_lambd', dtype='float', dval=None)
     if softmax_lambd is not None:
         mrt.set_softmax_lambd(softmax_lambd)
     shift_bits = _get_val(
-        config, sec, 'shift_bits', dtype='int', dval=None)
+        cfg, sec, 'shift_bits', dtype='int', dval=None)
     if shift_bits is not None:
         mrt.set_shift_bits(shift_bits)
     thresholds = _get_val(
-        config, sec, 'Thresholds', dtype='dict', dval=None, dtype2='float')
+        cfg, sec, 'Thresholds', dtype='{str:float}', dval=None)
     if thresholds is not None:
         for name, threshold in thresholds.items():
             mrt.set_threshold(name, threshold)
     mrt.quantize()
     dump_dir = _get_path(
-        config, sec, 'Dump_dir', is_dir=True, dpath=model_dir)
+        cfg, sec, 'Dump_dir', is_dir=True, dpath=model_dir)
     mrt.save(model_name+'base.quantize', datadir=dump_dir)
     oscales = mrt.get_output_scales()
     maps = mrt.get_maps()
@@ -207,17 +222,17 @@ if __name__ == "__main__":
 
     # merge_model
     dump_dir = _get_path(
-        config, sec, 'Dump_dir', is_dir=True, dpath=model_dir)
+        cfg, sec, 'Dump_dir', is_dir=True, dpath=model_dir)
     if keys != '':
         model_merger = Model.merger(base, top, maps)
-        model = model_merger.merge_model(callback=None)
+        model = model_merger.merge(callback=None)
         sym_file, prm_file = _load_fname(dump_dir, suffix='all.quantize')
         model.save(sym_file, prm_file)
         logger.info("Merge model finihed")
 
     # evaluation
     sec = 'EVALUATION'
-    iter_num = _get_val(config, sec, 'Iter_num', dtype='int', dval=10)
+    iter_num = _get_val(cfg, sec, 'Iter_num', dtype='int', dval=10)
 
     # compilation
 

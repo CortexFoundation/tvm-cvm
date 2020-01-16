@@ -11,6 +11,20 @@ import dataset as ds
 from transformer import Model, MRT # , init, compile_to_cvm
 import sim_quant_helper as sim
 import utils
+import sutils
+
+def get_mergefunc_yolo(oscales):
+    def mergefunc(node, params, graph):
+        name, op_name = node.attr('name'), node.attr('op_name')
+        childs, attr = sutils.sym_iter(
+            node.get_children()), node.list_attr()
+        if op_name == '_contrib_box_nms':
+            valid_thresh = sutils.get_attr(attr, 'valid_thresh', 0)
+            attr['valid_thresh'] = int(valid_thresh * oscales[3])
+            node = sutils.get_mxnet_op(op_name)(
+                *childs, **attr, name=name)
+        return node
+    return mergefunc
 
 def validate_data(net, data, label, eval_metric):
     det_ids, det_scores, det_bboxes = [], [], []
@@ -36,20 +50,35 @@ def validate_data(net, data, label, eval_metric):
     acc = {k:v for k, v in zip(map_name, mean_ap)}['mAP']
     return acc
 
-def load_yolov3_quantize(model, ctx, qctx, inputs_qext, oscale):
-    net = model.to_graph(ctx=ctx)
+def get_evalfunc_yolo(ctx, **kwargs):
+    metric = ds.load_voc_metric()
+    metric.reset()
 
-    net_metric = ds.load_voc_metric()
-    net_metric.reset()
-    def model_func(data, label):
-        def net(data):
-            data = sim.load_real_data(data, 'data', inputs_qext)
-            outs = net(data.as_in_context(qctx))
-            outs = [o.as_in_context(ctx) / oscales[i] \
-                    for i, o in enumerate(outs)]
-            return outs
-        acc = validate_data(net, data, label, net_metric)
-        return "{:6.2%}".format(acc)
+    inputs_qext = kwargs.get('is_quantize', None)
+    if inputs_qext is not None:
+        qctx = kwargs.get('qctx', ctx)
+        model_graph = kwargs.get('model').to_graph(ctx=qctx)
+        oscales = kwargs.get('oscales')
+        def evalfunc(data, label):
+            def net(data):
+                data = sim.load_real_data(data, 'data', inputs_qext)
+                outs = model_graph(data.as_in_context(qctx))
+                outs = [o.as_in_context(ctx) / oscales[i] \
+                        for i, o in enumerate(outs)]
+                return outs
+            acc = validate_data(net, data, label, metric)
+            return "{:6.2%}".format(acc)
+    else:
+        top_graph = kwargs.get('top').to_graph(ctx=ctx)
+        base_graph = kwargs.get('base').to_graph(ctx=ctx)
+        def evalfunc(data, label):
+            def net(data):
+                tmp = base_graph(data.as_in_context(ctx))
+                outs = top_graph(*tmp)
+                return outs
+            acc = validate_data(net, data, label, metric)
+            return "{:6.2%}".format(acc)
+    return evalfunc
 
 def load_model(model, ctx, inputs_qext=None):
     net = model.to_graph(ctx=ctx)
@@ -136,8 +165,8 @@ def validate_model(sym_path, prm_path, ctx, num_channel=3,
     # validate
     org_model = load_model(Model.load(sym_path, prm_path), ctx)
     cvm_quantize = load_model(
-            mrt.current_model, ctx,
-            inputs_qext=mrt.get_inputs_ext())
+        mrt.current_model, ctx,
+        inputs_qext=mrt.get_inputs_ext())
 
     utils.multi_validate(org_model, data_iter_func, cvm_quantize,
                          iter_num=iter_num,

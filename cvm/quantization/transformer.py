@@ -91,7 +91,7 @@ class Model:
 
     @staticmethod
     def merger(base, top, base_name_map=None):
-        return ModelMerger(base, top_model, base_name_map)
+        return ModelMerger(base, top, base_name_map)
 
     def prepare(self, input_shape=None):
         model = init(self, input_shape)
