@@ -28,8 +28,6 @@ which maps the class methods:
 
 The Calibration and Quantization pass is achieved in class MRT.
 
----
-
 ### Split && Merge
 
 MRT has supported lots of mxnet operators while there still exists some unsupported. And all the unsupported operators are unquantifiable. So we just advise splitting the model into two sub-graph if there are some unsupported operators and only quantizing the half model (named base_model, indicating the input nodes to split operators generally). In other words, it's the user's responsibility to select the split keys of splitting the original model, while the half model is ignored to quantization pass if necessary. 
@@ -50,9 +48,6 @@ The list operators have already been considered by MRT developers, which operato
 |           | :heavy_check_mark: |          | :heavy_check_mark: |
 |           | :heavy_check_mark: |          | :heavy_check_mark: |
 
-
-
----
 
 ### Public Interface
 
