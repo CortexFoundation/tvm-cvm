@@ -53,14 +53,16 @@ def get_model(name, **kwargs):
     return cv.model_zoo.get_model(name, pretrained=True,
             ctx=mx.gpu(), **kwargs)
 
-def save_model(name, **kwargs):
+def save_model(name, sym_path=None, prm_path=None, **kwargs):
     net = get_model(name, **kwargs)
     sym = net(mx.sym.var('data'))
     if isinstance(sym, tuple):
         sym = mx.sym.Group([*sym])
-    with open("./data/%s.json"%name, "w") as fout:
+    sym_path = sym_path if sym_path else "./data/%s.json"%name
+    prm_path = prm_path if prm_path else "./data/%s.params"%name
+    with open(sym_path, "w") as fout:
         fout.write(sym.tojson())
-    net.collect_params().save("./data/%s.params"%name)
+    net.collect_params().save(prm_path)
 
 """ Model List
 resnet18_v1, resnet34_v1, resnet50_v1, resnet101_v1, resnet152_v1, resnet18_v2, resnet34_v2, resnet50_v2, resnet101_v2, resnet152_v2,

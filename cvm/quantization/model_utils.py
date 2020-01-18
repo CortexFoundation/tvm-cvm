@@ -88,9 +88,6 @@ def validate_model(sym_path, prm_path, ctx, num_channel=3,
         dump_shape = (1, num_channel, input_size, input_size)
         mrt.current_model.to_cvm(
             model_name, datadir=datadir, input_shape=input_shape)
-        compile_to_cvm(
-            mrt.current_model, model_name,
-            datadir=datadir, input_shape=dump_shape)
         data = data[0].reshape(dump_shape)
         data = sim.load_real_data(
             data.astype("float64"), 'data', mrt.get_inputs_ext())
@@ -100,8 +97,8 @@ def validate_model(sym_path, prm_path, ctx, num_channel=3,
     # validate
     org_model = load_model(Model.load(sym_path, prm_path), ctx)
     cvm_quantize = load_model(
-            mrt.current_model, ctx,
-            inputs_qext=mrt.get_inputs_ext())
+        mrt.current_model, ctx,
+        inputs_qext=mrt.get_inputs_ext())
 
     utils.multi_validate(org_model, data_iter_func, cvm_quantize,
                          iter_num=iter_num,
