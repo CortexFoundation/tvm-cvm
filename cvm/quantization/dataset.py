@@ -248,6 +248,8 @@ class TrecDataset(Dataset):
         fname = path.join(
             self.root_dir, self.download_deps[0] \
             if self.is_train else self.download_deps[1])
+
+        # (38, batch), (batch,)
         with open(fname, "rb") as fin:
             self.data = pickle.load(fin)
 
@@ -261,8 +263,7 @@ class TrecDataset(Dataset):
                 data.append(x)
                 label.append(y)
             else:
-                yield nd.transpose(nd.array(data), \
-                    nd.transpose(nd.array(label)))
+                yield nd.transpose(nd.array(data), nd.array(label)
 
                 data, label = [], []
 
@@ -270,8 +271,6 @@ class TrecDataset(Dataset):
         return {"acc": 0, "total": 0}
 
     def validate(self, metrics, predict, label):
-        predict = nd.transpose(predict)
-        label = nd.transpose(label)
         for idx in range(predict.shape[0]):
             res_label = predict[idx].asnumpy().argmax()
             data_label = label[idx].asnumpy()
