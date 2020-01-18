@@ -200,7 +200,7 @@ class Cifar10Dataset(VisionDataset):
         self.data = gluon.data.DataLoader(
             gluon.data.vision.CIFAR10(root=self.root_dir,
                 train=False).transform_first(transform_test),
-            batch_size=N, shuffle=False, num_workers=num_workers)
+            batch_size=N, shuffle=False, num_workers=4)
 
 class QuickDrawDataset(VisionDataset):
     name = "quickdraw"
@@ -247,8 +247,8 @@ class TrecDataset(Dataset):
     download_deps = ["TREC.train.pk", "TREC.test.pk"]
 
     def __init__(self, input_shape, is_train=False, **kwargs):
-        super().__init__(input_shape, **kwargs)
         self.is_train = is_train
+        super().__init__(input_shape, **kwargs)
 
     def _load_data(self):
         fname = path.join(
@@ -267,8 +267,8 @@ class TrecDataset(Dataset):
                 data.append(x)
                 label.append(y)
             else:
-                yield nd.transpose(nd.array(data), \
-                    nd.transpose(nd.array(label)))
+                yield nd.transpose(nd.array(data)), \
+                    nd.transpose(nd.array(label))
 
                 data, label = [], []
 
