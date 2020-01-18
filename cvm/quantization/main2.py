@@ -11,7 +11,15 @@ from gluon_zoo import save_model
 import dataset as ds
 import sim_quant_helper as sim
 import utils
-import model_utils as mutils
+import sym_utils as sutils
+
+def set_batch(input_shape, batch):
+    return [batch if s == -1 else s for s in input_shape]
+
+def batch_axis(input_shape):
+    idx = [i for i, s in enumerate(input_shape) if s == -1]
+    assert len(idx) == 1
+    return idx[0]
 
 def _check(expression, section, option, message='Not a valid value'):
     assert expression, message + '.\noption `%s` in section `%s`' \
@@ -124,16 +132,17 @@ if __name__ == "__main__":
     model_dir = _get_val(cfg, sec, 'Model_dir', dval=default_dir)
     model_name = _get_val(cfg, sec, 'Model_name')
     sym_path, prm_path = _load_fname(path.join(model_dir, model_name))
-    if not path.exists(sym_path) or not exists(prm_path):
+    if not path.exists(sym_path) or not path.exists(prm_path):
         save_model(model_name, sym_path=sym_path, prm_path=prm_path)
     model_ctx = _get_ctx(cfg, sec)
     org_model = Model.load(sym_path, prm_path)
+    input_shape = _get_val(cfg, sec, 'Input_shape', dtype='tuple')
 
     # prepare
     sec = 'PREPARE'
     model = Model.load(sym_path, prm_path)
-    input_shape = _get_val(cfg, sec, 'Input_shape', dtype='tuple')
-    model.prepare(input_shape)
+    batch = _get_val(cfg, sec, 'Batch', dtype='int', dval=1)
+    model.prepare(set_batch(input_shape, 16))
     dump_dir = _get_path(
         cfg, sec, 'Dump_dir', is_dir=True, dpath=model_dir)
     sym_file, prm_file = _load_fname(dump_dir, suffix='prepare')
@@ -160,7 +169,12 @@ if __name__ == "__main__":
     sec = 'CALIBRATION'
     calibrate_num = _get_val(cfg, sec, 'Calibrate_num', dtype='int')
     lambd = _get_val(cfg, sec, 'Lambda', dtype='float', dval=None)
-    dataset = _get_val(cfg, sec, 'dataset')
+    ds_name = _get_val(cfg, sec, 'dataset')
+    batch = _get_val(cfg, sec, 'Batch', dtype='int', dval=batch)
+    shp = set_batch(input_shape, batch)
+    dataset = ds.DS_REG[ds_name](shp)
+    data_iter_func = dataset.iter_func()
+    '''
     if dataset in ['voc', 'imagenet', 'mnist', \
                    'quickdraw', 'cifar10']:
         _check(input_shape[2] == input_shape[3], 'PREPARE', 'Input_shape',
@@ -175,6 +189,7 @@ if __name__ == "__main__":
         data_iter_func = ds.load_trec(batch_size)
     else:
         _check(False, sec, 'Dataset')
+    '''
     ctx = _get_ctx(cfg, sec, dctx=model_ctx)
     for i in range(calibrate_num):
         data, _ = data_iter_func()
@@ -212,7 +227,7 @@ if __name__ == "__main__":
         for name, threshold in thresholds.items():
             mrt.set_threshold(name, threshold)
     mrt.quantize()
-    model = mrt.current_model
+    qmodel = mrt.current_model
     dump_dir = _get_path(
         cfg, sec, 'Dump_dir', is_dir=True, dpath=model_dir)
     mrt.save(model_name+'base.quantize', datadir=dump_dir)
@@ -223,32 +238,69 @@ if __name__ == "__main__":
     dump_dir = _get_path(
         cfg, sec, 'Dump_dir', is_dir=True, dpath=model_dir)
     if keys != '':
-        model_merger = Model.merger(model, top, mrt.get_maps())
+        model_merger = Model.merger(qmodel, top, mrt.get_maps())
         base_oscales = mrt.get_output_scales()
         attribute_deps = _get_val(
             cfg, sec, 'Attribute_deps', dtype='{str:str:int}')
-        mergefunc = mutils.get_merge_func(
-            base_oscales, attribute_deps)
-        model = model_merger.merge(callback=mergefunc)
+
+        def mergefunc(node, params, graph):
+            name, op_name = node.attr('name'), node.attr('op_name')
+            childs, attr = sutils.sym_iter(
+                node.get_children()), node.list_attr()
+            if op_name in attribute_deps:
+                attr_deps = attribute_deps[op_name]
+                for attr_name, entry in attr_deps.items():
+                    val = sutils.get_attr(attr, attr_name, 0)
+                    attr[attr_name] = int(val*base_oscales[entry])
+                node = sutils.get_mxnet_op(op_name)(
+                    *childs, **attr, name=name)
+            return node
+
+        qmodel = model_merger.merge(callback=mergefunc)
         oscale_maps = _get_val(cfg, sec, 'Oscale_maps', dtype='{str:str}')
         oscales = model_merger.get_output_scales(base_oscales, oscale_maps)
         sym_file, prm_file = _load_fname(dump_dir, suffix='all.quantize')
-        model.save(sym_file, prm_file)
+        qmodel.save(sym_file, prm_file)
         logger.info("Merge model finihed")
 
     # evaluation
     sec = 'EVALUATION'
-    iter_num = _get_val(cfg, sec, 'Iter_num', dtype='int', dval=10)
+    iter_num = _get_val(cfg, sec, 'Iter_num', dtype='int', dval=0)
+    batch = _get_val(cfg, sec, 'Batch', dtype='int', dval=batch)
+    ctx = _get_ctx(cfg, sec, dctx=model_ctx)
+    graph = model.to_graph(ctx=ctx)
+    dataset = ds.DS_REG[ds_name](set_batch(input_shape, batch))
+    metric = dataset.metrics()
+
+    def evalfunc(data, label):
+        outs = graph(data.as_in_context(ctx))
+        acc = dataset.validate(metric, outs, label)
+        return acc
+
+    qgraph = qmodel.to_graph(ctx=ctx)
+    qmetric = dataset.metrics()
+
+    def quantize(data, label):
+        data = sim.load_real_data(data, 'data', mrt.get_inputs_ext())
+        outs = qgraph(data.as_in_context(ctx))
+        acc = dataset.validate(metric, outs, label)
+        return acc
+
+    if iter_num > 0:
+        utils.multi_validate(evalfunc, data_iter_func, quantize,
+                             iter_num=iter_num,
+                             logger=logging.getLogger('mrt.validate'))
+
 
     # compilation
     sec = 'COMPILATION'
-    dump_shape = _get_val(cfg, sec, 'Input_shape',
-                          dtype='tuple', dval=input_shape)
     dump_dir = _get_path(
         cfg, sec, 'Dump_dir', is_dir=True, dpath=model_dir)
+    batch = _get_val(cfg, sec, 'Batch', dtype='int', dval=batch)
     model_name_tfm = model_name + "_tfm"
-    model.to_cvm(model_name_tfm, datadir=dump_dir, input_shape=dump_shape)
-    dump_data = data[0].reshape(dump_shape)
+    qmodel.to_cvm(model_name_tfm, datadir=dump_dir,
+                  input_shape=set_batch(input_shape, batch))
+    dump_data = data[0].reshape(set_batch(input_shape, batch))
     dump_data = sim.load_real_data(
         dump_data.astype("float64"), 'data', mrt.get_inputs_ext())
     np.save(path.join(dump_dir, model_name_tfm, "data.npy"),

@@ -183,6 +183,7 @@ def test_nnvm_pass(iter_num=10):
 
 print ("Test mnist", version)
 # train_mnist()
+
 utils.log_init()
 test_sym_pass(1000)
 # test_nnvm_pass(10)

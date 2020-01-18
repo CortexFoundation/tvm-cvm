@@ -55,7 +55,7 @@ def download_files(category, files, base_url=src, root=dataset_dir):
 class Dataset:
     name = None
 
-    def __init__(self, input_shape, base_url=src, root=root_dir):
+    def __init__(self, input_shape, base_url=src, root=dataset_dir):
         self.ishape = input_shape
 
         self.root_dir = download_files(
@@ -104,27 +104,31 @@ class VOCDataset(Dataset):
             last_batch='keep', num_workers=30)
 
     def metrics(self):
-        return VOC07MApMetric(
+        metric = VOC07MApMetric(
             iou_thresh=0.5, class_names=gdata.VOCDetection.CLASSES)
+        metric.reset()
+        return metric
 
     def validate(self, metrics, predict, label, key="mAP"):
         det_ids, det_scores, det_bboxes = [], [], []
         gt_ids, gt_bboxes, gt_difficults = [], [], []
 
+        _, _, H, W = self.ishape
+        assert H == W
         ids, scores, bboxes = predict
         det_ids.append(ids)
         det_scores.append(scores)
         # clip to image size
-        det_bboxes.append(bboxes.clip(0, x.shape[2]))
+        det_bboxes.append(bboxes.clip(0, H))
         gt_ids.append(label.slice_axis(axis=-1, begin=4, end=5))
         gt_difficults.append(
             label.slice_axis(axis=-1, begin=5, end=6) \
-            if y.shape[-1] > 5 else None)
+            if label.shape[-1] > 5 else None)
         gt_bboxes.append(label.slice_axis(axis=-1, begin=0, end=4))
 
         metrics.update(det_bboxes, det_ids, det_scores,
                             gt_bboxes, gt_ids, gt_difficults)
-        map_name, mean_ap = self.metrics.get()
+        map_name, mean_ap = metrics.get()
         acc = {k:v for k,v in zip(map_name, mean_ap)}['mAP']
         return "{:6.2%}".format(acc)
 
@@ -145,16 +149,18 @@ class ImageNetDataset(VisionDataset):
     download_deps = ["rec/val.rec", "rec/val.idx"]
 
     def _load_data(self):
+        assert len(self.ishape) == 4
+        N, C, H, W = self.ishape
+        assert C == 3
+        assert H == W
+
         crop_ratio = 0.875
-        resize = int(math.ceil(input_size / crop_ratio))
+        resize = int(math.ceil(H / crop_ratio))
         mean_rgb = [123.68, 116.779, 103.939]
         std_rgb = [58.393, 57.12, 57.375]
         rec_val = path.join(self.root_dir, self.download_deps[0])
         rec_val_idx = path.join(self.root_dir, self.download_deps[1])
 
-        assert len(self.ishape) == 4
-        N, C, H, W = self.ishape
-        assert C == 3
 
         self.data = mx.io.ImageRecordIter(
             path_imgrec         = rec_val,

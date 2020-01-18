@@ -11,22 +11,6 @@ import dataset as ds
 from transformer import Model, MRT # , init, compile_to_cvm
 import sim_quant_helper as sim
 import utils
-import sym_utils as sutils
-
-def get_merge_func(base_oscales, attribute_deps):
-    def mergefunc(node, params, graph):
-        name, op_name = node.attr('name'), node.attr('op_name')
-        childs, attr = sutils.sym_iter(
-            node.get_children()), node.list_attr()
-        if op_name in attribute_deps:
-            attr_deps = attribute_deps[op_name]
-            for attr_name, entry in attr_deps.items():
-                val = sutils.get_attr(attr, attr_name, 0)
-                attr[attr_name] = int(val*base_oscales[entry])
-            node = sutils.get_mxnet_op(op_name)(
-                *childs, **attr, name=name)
-        return node
-    return mergefunc
 
 def load_model(model, ctx, inputs_qext=None):
     net = model.to_graph(ctx=ctx)
