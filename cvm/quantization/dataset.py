@@ -79,8 +79,14 @@ class Dataset:
         pass
 
     def __iter__(self):
-        """ Returns (data, label) """
+        """ Returns (data, label) iterator """
         return iter(self.data)
+
+    def iter_func(self):
+        data_iter = iter(self)
+        def _wrapper():
+            return next(data_iter)
+        return _wrapper
 
 class VOCDataset(Dataset):
     name = "voc"
@@ -170,6 +176,9 @@ class ImageNetDataset(VisionDataset):
         )
 
     def __iter__(self):
+        return self
+
+    def __next__(self):
         data = self.data.next()
         return data.data[0], data.label[0]
 
