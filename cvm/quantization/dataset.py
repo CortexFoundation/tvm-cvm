@@ -276,6 +276,14 @@ class TrecDataset(Dataset):
         acc = 1. * metric["acc"] / metric["total"]
         return [acc]
 
+DS_REG = {
+    "voc": VOCDataset,
+    "imagenet": ImageNetDataset,
+    "cifar10": Cifar10Dataset,
+    "quickdraw": QuickDrawDataset,
+    "mnist": MnistDataset,
+    "trec": TrecDataset,
+}
 
 # max value: 2.64
 def load_voc(batch_size, input_size=416, **kwargs):
