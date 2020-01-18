@@ -66,16 +66,14 @@ class Dataset:
 
         self.data = None
         self._load_data()
-        self.metrics = []
-        self._init_metrics()
 
-    def validate(self, predicts, labels):
+    def metrics(self):
+        pass
+
+    def validate(self, metrics, predicts, labels):
         pass
 
     def _load_data(self):
-        pass
-
-    def _init_metrics(self):
         pass
 
     def __iter__(self):
@@ -105,11 +103,11 @@ class VOCDataset(Dataset):
             N, False, batchify_fn=val_batchify_fn,
             last_batch='keep', num_workers=30)
 
-    def _init_metrics(self):
-        self.metrics.append(VOC07MApMetric(
-            iou_thresh=0.5, class_names=gdata.VOCDetection.CLASSES))
+    def metrics(self):
+        return VOC07MApMetric(
+            iou_thresh=0.5, class_names=gdata.VOCDetection.CLASSES)
 
-    def validate(self, predict, label):
+    def validate(self, metrics, predict, label, key="mAP"):
         det_ids, det_scores, det_bboxes = [], [], []
         gt_ids, gt_bboxes, gt_difficults = [], [], []
 
@@ -124,23 +122,23 @@ class VOCDataset(Dataset):
             if y.shape[-1] > 5 else None)
         gt_bboxes.append(label.slice_axis(axis=-1, begin=0, end=4))
 
-        self.metrics[0].update(det_bboxes, det_ids, det_scores,
+        metrics.update(det_bboxes, det_ids, det_scores,
                             gt_bboxes, gt_ids, gt_difficults)
-        map_name, mean_ap = self.metrics[0].get()
+        map_name, mean_ap = self.metrics.get()
         acc = {k:v for k,v in zip(map_name, mean_ap)}['mAP']
-        return [acc]
+        return "{:6.2%}".format(acc)
 
 class VisionDataset(Dataset):
-    def _init_metrics(self):
-        self.metrics.append(mx.metric.Accuracy())
-        self.metrics.append(mx.metric.TopKAccuracy(5))
+    def metrics(self):
+        return [mx.metric.Accuracy(),
+                mx.metric.TopKAccuracy(5)]
 
-    def validate(self, predict, label):
-        self.metrics[0].update(label, predict)
-        self.metrics[1].update(label, predict)
-        _, top1 = self.metrics[0].get()
-        _, top5 = self.metrics[1].get()
-        return [top1, top5]
+    def validate(self, metrics, predict, label):
+        metrics[0].update(label, predict)
+        metrics[1].update(label, predict)
+        _, top1 = metrics[0].get()
+        _, top5 = metrics[1].get()
+        return "top1={:6.2%} top5={:6.2%}".format(top1, top5)
 
 class ImageNetDataset(VisionDataset):
     name = "imagenet"
@@ -210,7 +208,7 @@ class QuickDrawDataset(VisionDataset):
 
     def _load_data(self):
         N, C, H, W = self.ishape
-        assert C == 1 and H = 28 and W = 28
+        assert C == 1 and H == 28 and W == 28
         X = nd.array(np.load(path.join(self.root_dir, self.download_deps[0])))
         Y = nd.array(np.load(path.join(self.root_dir, self.download_deps[1])))
         val_data = gluon.data.DataLoader(
@@ -268,22 +266,21 @@ class TrecDataset(Dataset):
 
                 data, label = [], []
 
-    def _init_metrics(self):
-        self.metrics.append({"acc": 0, "total": 0})
+    def metrics(self):
+        return {"acc": 0, "total": 0}
 
-    def validate(self, predict, label):
+    def validate(self, metrics, predict, label):
         predict = nd.transpose(predict)
         label = nd.transpose(label)
-        metric = self.metrics[0]
         for idx in range(predict.shape[0]):
             res_label = predict[idx].asnumpy().argmax()
             data_label = label[idx].asnumpy()
             if res_label == data_label:
-                metric["acc"] += 1
-            metric["total"] += 1
+                metrics["acc"] += 1
+            metrics["total"] += 1
 
-        acc = 1. * metric["acc"] / metric["total"]
-        return [acc]
+        acc = 1. * metrics["acc"] / metrics["total"]
+        return "{:6.2%}".format(acc)
 
 DS_REG = {
     "voc": VOCDataset,
