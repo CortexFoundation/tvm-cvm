@@ -135,7 +135,6 @@ if __name__ == "__main__":
     if not path.exists(sym_path) or not path.exists(prm_path):
         save_model(model_name, sym_path=sym_path, prm_path=prm_path)
     model_ctx = _get_ctx(cfg, sec)
-    org_model = Model.load(sym_path, prm_path)
     input_shape = _get_val(cfg, sec, 'Input_shape', dtype='tuple')
 
     # prepare
@@ -143,10 +142,10 @@ if __name__ == "__main__":
     model = Model.load(sym_path, prm_path)
     batch = _get_val(cfg, sec, 'Batch', dtype='int', dval=1)
     model.prepare(set_batch(input_shape, 16))
-    dump_dir = _get_path(
-        cfg, sec, 'Dump_dir', is_dir=True, dpath=model_dir)
-    sym_file, prm_file = _load_fname(dump_dir, suffix='prepare')
-    model.save(sym_file, prm_file)
+    # dump_dir = _get_path(
+        # cfg, sec, 'Dump_dir', is_dir=True, dpath=model_dir)
+    # sym_file, prm_file = _load_fname(dump_dir, suffix='prepare')
+    # model.save(sym_file, prm_file)
     logger.info("Prepare finihed")
 
     # split model
@@ -268,7 +267,8 @@ if __name__ == "__main__":
     iter_num = _get_val(cfg, sec, 'Iter_num', dtype='int', dval=0)
     batch = _get_val(cfg, sec, 'Batch', dtype='int', dval=batch)
     ctx = _get_ctx(cfg, sec, dctx=model_ctx)
-    graph = model.to_graph(ctx=ctx)
+    org_model = Model.load(sym_path, prm_path)
+    graph = org_model.to_graph(ctx=ctx)
     dataset = ds.DS_REG[ds_name](set_batch(input_shape, batch))
     metric = dataset.metrics()
 
@@ -283,7 +283,7 @@ if __name__ == "__main__":
     def quantize(data, label):
         data = sim.load_real_data(data, 'data', mrt.get_inputs_ext())
         outs = qgraph(data.as_in_context(ctx))
-        acc = dataset.validate(metric, outs, label)
+        acc = dataset.validate(qmetric, outs, label)
         return acc
 
     if iter_num > 0:
@@ -300,7 +300,9 @@ if __name__ == "__main__":
     model_name_tfm = model_name + "_tfm"
     qmodel.to_cvm(model_name_tfm, datadir=dump_dir,
                   input_shape=set_batch(input_shape, batch))
-    dump_data = data[0].reshape(set_batch(input_shape, batch))
+
+    dataset = ds.DS_REG[ds_name](set_batch(input_shape, batch))
+    dump_data, _ = dataset.iter_func()()
     dump_data = sim.load_real_data(
         dump_data.astype("float64"), 'data', mrt.get_inputs_ext())
     np.save(path.join(dump_dir, model_name_tfm, "data.npy"),

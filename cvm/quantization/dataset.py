@@ -268,7 +268,7 @@ class TrecDataset(Dataset):
                 data.append(x)
                 label.append(y)
             else:
-                yield nd.transpose(nd.array(data), nd.array(label)
+                yield nd.transpose(nd.array(data)), nd.array(label)
 
                 data, label = [], []
 
