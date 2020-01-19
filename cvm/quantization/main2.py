@@ -173,22 +173,6 @@ if __name__ == "__main__":
     shp = set_batch(input_shape, batch)
     dataset = ds.DS_REG[ds_name](shp)
     data_iter_func = dataset.iter_func()
-    '''
-    if dataset in ['voc', 'imagenet', 'mnist', \
-                   'quickdraw', 'cifar10']:
-        _check(input_shape[2] == input_shape[3], 'PREPARE', 'Input_shape',
-               message='Inconsistent input size')
-        batch_size, num_channel, input_size, _ = input_shape
-        data_iter_func = ds.data_iter(
-            dataset, batch_size, input_size=input_size)
-    elif dataset in ['trec']:
-        _check(input_shape[0] == 38, 'PREPARE', 'Input_shape',
-               message='Invalid input shape for Trec')
-        batch_size = input_shape[1]
-        data_iter_func = ds.load_trec(batch_size)
-    else:
-        _check(False, sec, 'Dataset')
-    '''
     ctx = _get_ctx(cfg, sec, dctx=model_ctx)
     for i in range(calibrate_num):
         data, _ = data_iter_func()
@@ -227,6 +211,7 @@ if __name__ == "__main__":
             mrt.set_threshold(name, threshold)
     mrt.quantize()
     qmodel = mrt.current_model
+    oscales = mrt.get_output_scales()
     dump_dir = _get_path(
         cfg, sec, 'Dump_dir', is_dir=True, dpath=model_dir)
     mrt.save(model_name+'base.quantize', datadir=dump_dir)
@@ -238,7 +223,6 @@ if __name__ == "__main__":
         cfg, sec, 'Dump_dir', is_dir=True, dpath=model_dir)
     if keys != '':
         model_merger = Model.merger(qmodel, top, mrt.get_maps())
-        base_oscales = mrt.get_output_scales()
         attribute_deps = _get_val(
             cfg, sec, 'Attribute_deps', dtype='{str:str:int}')
 
@@ -250,14 +234,14 @@ if __name__ == "__main__":
                 attr_deps = attribute_deps[op_name]
                 for attr_name, entry in attr_deps.items():
                     val = sutils.get_attr(attr, attr_name, 0)
-                    attr[attr_name] = int(val*base_oscales[entry])
+                    attr[attr_name] = int(val*oscales[entry])
                 node = sutils.get_mxnet_op(op_name)(
                     *childs, **attr, name=name)
             return node
 
         qmodel = model_merger.merge(callback=mergefunc)
         oscale_maps = _get_val(cfg, sec, 'Oscale_maps', dtype='{str:str}')
-        oscales = model_merger.get_output_scales(base_oscales, oscale_maps)
+        oscales = model_merger.get_output_scales(oscales, oscale_maps)
         sym_file, prm_file = _load_fname(dump_dir, suffix='all.quantize')
         qmodel.save(sym_file, prm_file)
         logger.info("Merge model finihed")
@@ -301,7 +285,8 @@ if __name__ == "__main__":
     def quantize(data, label):
         data = sim.load_real_data(data, 'data', mrt.get_inputs_ext())
         outs = forward(qgraph, data, ctx)
-        outs = [(t / oscales[i]) for i, t in enumerate(outs)]
+        outs = outs / oscales[0] if olen == 1 \
+            else [(t / oscales[i]) for i, t in enumerate(outs)]
         acc = dataset.validate(qmetric, outs, label)
         return acc
 
