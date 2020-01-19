@@ -66,7 +66,7 @@ def _get_val(config, section, option, dtype='str', dval=NoneType):
         _check(dval != NoneType, section, option,
                message="Please specify the value")
         val = dval
-    elif dtype in ['str', 'int', 'tuple', 'float']:
+    elif dtype in ['str', 'int', 'tuple', 'float', 'bool']:
         val = _cast_val(section, option, val_, dtype=dtype)
     elif dtype.startswith('['):
         etype=dtype.replace('[', '').replace(']', '')
@@ -94,7 +94,7 @@ def _get_val(config, section, option, dtype='str', dval=NoneType):
 def _cast_val(section, option, val_, dtype='str'):
     if dtype == 'str':
         val = val_
-    elif dtype in ['int', 'tuple', 'float']:
+    elif dtype in ['int', 'tuple', 'float', 'bool']:
         try:
             val = float(eval(val_)) if dtype == 'float' else eval(val_)
         except SyntaxError:
@@ -106,9 +106,9 @@ def _cast_val(section, option, val_, dtype='str'):
                    message="Only support integer value")
     return val
 
-def _load_fname(directory, suffix=None, with_ext=False):
+def _load_fname(prefix, suffix=None, with_ext=False):
     suffix = "."+suffix if suffix is not None else ""
-    return utils.extend_fname(directory+suffix, with_ext)
+    return utils.extend_fname(prefix+suffix, with_ext)
 
 if __name__ == "__main__":
     assert len(sys.argv) == 2, "Please enter 2 python arguments."
@@ -136,32 +136,42 @@ if __name__ == "__main__":
         save_model(model_name, sym_path=sym_path, prm_path=prm_path)
     model_ctx = _get_ctx(cfg, sec)
     input_shape = _get_val(cfg, sec, 'Input_shape', dtype='tuple')
+    start_pos = {'PREPARE': 1, 'SPLIT_MODEL': 2, \
+                 'CALIBRATION': 3, 'QUANTIZATION': 4, \
+                 'MERGE_MODEL': 5}
+    start = _get_val(cfg, sec, 'Start', dtype='str')
+    start_point = start_pos[start]
 
     # prepare
-    sec = 'PREPARE'
-    model = Model.load(sym_path, prm_path)
-    batch = _get_val(cfg, sec, 'Batch', dtype='int', dval=1)
-    model.prepare(set_batch(input_shape, 16))
-    # dump_dir = _get_path(
-        # cfg, sec, 'Dump_dir', is_dir=True, dpath=model_dir)
-    # sym_file, prm_file = _load_fname(dump_dir, suffix='prepare')
-    # model.save(sym_file, prm_file)
+    if start_point > 1:
+        sec = 'PREPARE'
+        model_prefix = path.join(model_dir, model_name)
+        model = Model.load(sym_path, prm_path)
+        model.prepare(set_batch(input_shape, 1))
+        dump = _get_val(cfg, sec, 'Dump', dtype='bool', dval=False)
+        if dump:
+            sym_file, prm_file = _load_fname(model_prefix, suffix='prepare')
+            model.save(sym_file, prm_file)
+    else:
+        sym_file, prm_file = _load_fname(model_prefix, suffix='prepare')
+        model = Model.load(sym_file, prm_file)
     logger.info("Prepare finihed")
 
     # split model
+    if start_point > 2:
     sec = 'SPLIT_MODEL'
     keys = _get_val(cfg, sec, 'Keys', dtype='[str]', dval='')
-    dump_dir = _get_path(
-        cfg, sec, 'Dump_dir', is_dir=True, dpath=model_dir)
+    dump = _get_val(cfg, sec, 'Dump', dtype='bool', dval=False)
     if keys == '':
         mrt = model.get_mrt()
     else:
         base, top = model.split(keys)
         mrt = base.get_mrt()
-        sym_file, prm_file = _load_fname(dump_dir, suffix='top')
-        top.save(sym_file, prm_file)
-        sym_file, prm_file = _load_fname(dump_dir, suffix='base')
-        base.save(sym_file, prm_file)
+        if dump:
+            sym_file, prm_file = _load_fname(dump_dir, suffix='top')
+            top.save(sym_file, prm_file)
+            sym_file, prm_file = _load_fname(dump_dir, suffix='base')
+            base.save(sym_file, prm_file)
         logger.info("Split model finihed")
 
     # calibration
@@ -169,36 +179,21 @@ if __name__ == "__main__":
     calibrate_num = _get_val(cfg, sec, 'Calibrate_num', dtype='int')
     lambd = _get_val(cfg, sec, 'Lambda', dtype='float', dval=None)
     ds_name = _get_val(cfg, sec, 'dataset')
-    batch = _get_val(cfg, sec, 'Batch', dtype='int', dval=batch)
+    batch = _get_val(cfg, sec, 'Batch', dtype='int', dval=1)
     shp = set_batch(input_shape, batch)
     dataset = ds.DS_REG[ds_name](shp)
     data_iter_func = dataset.iter_func()
-    '''
-    if dataset in ['voc', 'imagenet', 'mnist', \
-                   'quickdraw', 'cifar10']:
-        _check(input_shape[2] == input_shape[3], 'PREPARE', 'Input_shape',
-               message='Inconsistent input size')
-        batch_size, num_channel, input_size, _ = input_shape
-        data_iter_func = ds.data_iter(
-            dataset, batch_size, input_size=input_size)
-    elif dataset in ['trec']:
-        _check(input_shape[0] == 38, 'PREPARE', 'Input_shape',
-               message='Invalid input shape for Trec')
-        batch_size = input_shape[1]
-        data_iter_func = ds.load_trec(batch_size)
-    else:
-        _check(False, sec, 'Dataset')
-    '''
     ctx = _get_ctx(cfg, sec, dctx=model_ctx)
     for i in range(calibrate_num):
         data, _ = data_iter_func()
         mrt.set_data(data)
         th_dict = mrt.calibrate(lambd=lambd, ctx=ctx)
-    dump_dir = _get_path(
-        cfg, sec, 'Dump_dir', is_dir=True, dpath=model_dir)
-    _, _, ext_file = _load_fname(
-        dump_dir, suffix='th_dict', with_ext=True)
-    # sim.save_ext(ext_file, th_dict)
+    dump = _get_val(cfg, sec, 'Dump', dtype='bool', dval=False)
+    if dump:
+        _, _, ext_file = utils.extend_fname(
+            path.join(model_dir, model_name, 'mrt.calibrate'),
+            with_ext=True)
+        sim.save_ext(ext_file, th_dict)
     logger.info("Calibration finihed")
 
     # quantization
@@ -227,16 +222,16 @@ if __name__ == "__main__":
             mrt.set_threshold(name, threshold)
     mrt.quantize()
     qmodel = mrt.current_model
-    dump_dir = _get_path(
-        cfg, sec, 'Dump_dir', is_dir=True, dpath=model_dir)
-    mrt.save(model_name+'base.quantize', datadir=dump_dir)
+    oscales = mrt.get_output_scales()
+    dump = _get_val(cfg, sec, 'Dump', dtype='bool', dval=False)
+    if dump:
+        mrt.save(model_name+'base.quantize', datadir=dump_dir)
     oscales = mrt_oscales = mrt.get_output_scales()
     logger.info("Quantization finihed")
 
     # merge_model
     sec = 'MERGE_MODEL'
-    dump_dir = _get_path(
-        cfg, sec, 'Dump_dir', is_dir=True, dpath=model_dir)
+    dump = _get_val(cfg, sec, 'Dump', dtype='bool', dval=False)
     if keys != '':
         model_merger = Model.merger(qmodel, top, mrt.get_maps())
         attribute_deps = _get_val(
@@ -258,8 +253,10 @@ if __name__ == "__main__":
         qmodel = model_merger.merge(callback=mergefunc)
         oscale_maps = _get_val(cfg, sec, 'Oscale_maps', dtype='{str:str}')
         oscales = model_merger.get_output_scales(mrt_oscales, oscale_maps)
-        sym_file, prm_file = _load_fname(dump_dir, suffix='all.quantize')
-        qmodel.save(sym_file, prm_file)
+        if dump:
+            sym_file, prm_file = _load_fname(
+                dump_dir, suffix='all.quantize')
+            qmodel.save(sym_file, prm_file)
         logger.info("Merge model finihed")
 
     # evaluation
@@ -301,10 +298,8 @@ if __name__ == "__main__":
     def quantize(data, label):
         data = sim.load_real_data(data, 'data', mrt.get_inputs_ext())
         outs = forward(qgraph, data, ctx)
-        if type(outs).__name__ != 'list':
-            outs = [outs]
-        else:
-            outs = [(t / oscales[i]) for i, t in enumerate(outs)]
+        outs = outs / oscales[0] if olen == 1 \
+            else [(t / oscales[i]) for i, t in enumerate(outs)]
         acc = dataset.validate(qmetric, outs, label)
         return acc
 
