@@ -198,7 +198,7 @@ if __name__ == "__main__":
         cfg, sec, 'Dump_dir', is_dir=True, dpath=model_dir)
     _, _, ext_file = _load_fname(
         dump_dir, suffix='th_dict', with_ext=True)
-    sim.save_ext(ext_file, th_dict)
+    # sim.save_ext(ext_file, th_dict)
     logger.info("Calibration finihed")
 
     # quantization
