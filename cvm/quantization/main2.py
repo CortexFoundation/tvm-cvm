@@ -229,6 +229,7 @@ if __name__ == "__main__":
     dump_dir = _get_path(
         cfg, sec, 'Dump_dir', is_dir=True, dpath=model_dir)
     mrt.save(model_name+'base.quantize', datadir=dump_dir)
+    oscales = mrt_oscales = mrt.get_output_scales()
     logger.info("Quantization finihed")
 
     # merge_model
@@ -237,7 +238,6 @@ if __name__ == "__main__":
         cfg, sec, 'Dump_dir', is_dir=True, dpath=model_dir)
     if keys != '':
         model_merger = Model.merger(qmodel, top, mrt.get_maps())
-        base_oscales = mrt.get_output_scales()
         attribute_deps = _get_val(
             cfg, sec, 'Attribute_deps', dtype='{str:str:int}')
 
@@ -249,14 +249,14 @@ if __name__ == "__main__":
                 attr_deps = attribute_deps[op_name]
                 for attr_name, entry in attr_deps.items():
                     val = sutils.get_attr(attr, attr_name, 0)
-                    attr[attr_name] = int(val*base_oscales[entry])
+                    attr[attr_name] = int(val*mrt_oscales[entry])
                 node = sutils.get_mxnet_op(op_name)(
                     *childs, **attr, name=name)
             return node
 
         qmodel = model_merger.merge(callback=mergefunc)
         oscale_maps = _get_val(cfg, sec, 'Oscale_maps', dtype='{str:str}')
-        oscales = model_merger.get_output_scales(base_oscales, oscale_maps)
+        oscales = model_merger.get_output_scales(mrt_oscales, oscale_maps)
         sym_file, prm_file = _load_fname(dump_dir, suffix='all.quantize')
         qmodel.save(sym_file, prm_file)
         logger.info("Merge model finihed")
@@ -283,6 +283,7 @@ if __name__ == "__main__":
     def quantize(data, label):
         data = sim.load_real_data(data, 'data', mrt.get_inputs_ext())
         outs = qgraph(data.as_in_context(ctx))
+        exit()
         outs = [(t / oscales[i]) for i, t in enumerate(outs)]
         acc = dataset.validate(qmetric, outs, label)
         return acc
