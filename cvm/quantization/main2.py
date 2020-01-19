@@ -5,6 +5,7 @@ import logging
 import numpy as np
 
 import mxnet as mx
+from mxnet import gluon, ndarray as nd
 
 from transformer import Model
 from gluon_zoo import save_model
@@ -272,8 +273,25 @@ if __name__ == "__main__":
     data_iter_func = dataset.iter_func()
     metric = dataset.metrics()
 
+    baxis = batch_axis(input_shape)
+    olen = len(org_model.symbol)
+    def forward(net, data, ctx):
+        """ Multiple xpu run support.
+        """
+        if isinstance(ctx, mx.Context):
+            ctx = [ctx]
+        data = gluon.utils.split_and_load(
+            data, ctx_list=ctx, batch_axis=baxis, even_split=False)
+        outs = [net(d) for d in data]
+        if olen == 1:
+            outs = nd.concatenate(outs)
+        else:
+            outs = [nd.concatenate([outs[i][j] \
+                for i in range(len(outs))]) for j in range(olen)]
+        return outs
+
     def evalfunc(data, label):
-        outs = graph(data.as_in_context(ctx))
+        outs = forward(graph, data, ctx=ctx)
         acc = dataset.validate(metric, outs, label)
         return acc
 
@@ -282,12 +300,13 @@ if __name__ == "__main__":
 
     def quantize(data, label):
         data = sim.load_real_data(data, 'data', mrt.get_inputs_ext())
-        outs = qgraph(data.as_in_context(ctx))
+        outs = forward(qgraph, data, ctx)
         outs = [(t / oscales[i]) for i, t in enumerate(outs)]
         acc = dataset.validate(qmetric, outs, label)
         return acc
 
     if iter_num > 0:
+        logger.info("Validating...")
         utils.multi_validate(evalfunc, data_iter_func, quantize,
                              iter_num=iter_num,
                              logger=logging.getLogger('mrt.validate'))
