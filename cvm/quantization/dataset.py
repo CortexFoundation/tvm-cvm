@@ -101,7 +101,7 @@ class VOCDataset(Dataset):
         self.data = gluon.data.DataLoader(
             val_dataset.transform(YOLO3DefaultValTransform(W, H)),
             N, False, batchify_fn=val_batchify_fn,
-            last_batch='keep', num_workers=30)
+            last_batch='discard', num_workers=30)
 
     def metrics(self):
         metric = VOC07MApMetric(
@@ -109,7 +109,7 @@ class VOCDataset(Dataset):
         metric.reset()
         return metric
 
-    def validate(self, metrics, predict, label, key="mAP"):
+    def validate(self, metrics, predict, label):
         det_ids, det_scores, det_bboxes = [], [], []
         gt_ids, gt_bboxes, gt_difficults = [], [], []
 

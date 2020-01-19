@@ -55,7 +55,6 @@ def _get_ctx(config, section, dctx=mx.cpu()):
                    message='`Device_ids` should be an integer in Calibration')
     else:
         device_ids = _get_val(config, section, 'Device_ids', dval='')
-        print(device_ids)
         _check(device_ids == '', section, 'Device_ids',
                message='`Device_ids` should be null given `cpu` device type')
     return contex
@@ -270,6 +269,7 @@ if __name__ == "__main__":
     org_model = Model.load(sym_path, prm_path)
     graph = org_model.to_graph(ctx=ctx)
     dataset = ds.DS_REG[ds_name](set_batch(input_shape, batch))
+    data_iter_func = dataset.iter_func()
     metric = dataset.metrics()
 
     def evalfunc(data, label):
@@ -283,6 +283,7 @@ if __name__ == "__main__":
     def quantize(data, label):
         data = sim.load_real_data(data, 'data', mrt.get_inputs_ext())
         outs = qgraph(data.as_in_context(ctx))
+        outs = [(t / oscales[i]) for i, t in enumerate(outs)]
         acc = dataset.validate(qmetric, outs, label)
         return acc
 
