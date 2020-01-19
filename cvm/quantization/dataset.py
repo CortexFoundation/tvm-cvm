@@ -209,21 +209,20 @@ class QuickDrawDataset(VisionDataset):
         self.download_deps = [
             "quickdraw_X.npy", "quickdraw_y.npy"] if is_train else \
             ["quickdraw_X_test.npy", "quickdraw_y_test.npy"]
+        self.is_train = is_train
         super().__init__(input_shape, **kwargs)
-        self.is_train = self.is_train
 
     def _load_data(self):
         N, C, H, W = self.ishape
         assert C == 1 and H == 28 and W == 28
         X = nd.array(np.load(path.join(self.root_dir, self.download_deps[0])))
         Y = nd.array(np.load(path.join(self.root_dir, self.download_deps[1])))
-        val_data = gluon.data.DataLoader(
+        self.data = gluon.data.DataLoader(
                 mx.gluon.data.dataset.ArrayDataset(X, Y),
                 batch_size=N,
                 last_batch='discard',
                 shuffle=self.is_train,
                 num_workers=4)
-        return val_data
 
 class MnistDataset(VisionDataset):
     name = "mnist"
