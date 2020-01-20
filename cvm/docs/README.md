@@ -34,19 +34,40 @@ MRT has supported lots of mxnet operators while there still exists some unsuppor
 
 The list operators have already been considered by MRT developers, which operators over the list is not allowed in quantization. Contact the MRT developers in the github for more help.
 
-#### Currently Supported Operators (TODO)
+#### Currently Supported Operators
 
-| Operator  | Supported          | Operator | Supported          |
-| --------- | ------------------ | -------- | ------------------ |
-| SliceAxis | :heavy_check_mark: |          | :heavy_check_mark: |
-| Slice     | :x:                |          | :heavy_check_mark: |
-| SliceLike | :heavy_check_mark: |          | :heavy_check_mark: |
-|           | :heavy_check_mark: |          | :heavy_check_mark: |
-|           | :heavy_check_mark: |          | :heavy_check_mark: |
-|           | :heavy_check_mark: |          | :heavy_check_mark: |
-|           | :heavy_check_mark: |          | :heavy_check_mark: |
-|           | :heavy_check_mark: |          | :heavy_check_mark: |
-|           | :heavy_check_mark: |          | :heavy_check_mark: |
+| Operator      | Supported          | Operator          | Supported          |
+| ------------- | ------------------ | ----------------- | ------------------ |
+| SliceAxis     | :heavy_check_mark: | Convolution       | :heavy_check_mark: |
+| Slice         | :heavy_check_mark: | Pad               | :heavy_check_mark: |
+| SliceLike     | :x:                | Expand_dims       | :heavy_check_mark: |
+| Transpose     | :heavy_check_mark: | Embedding         | :heavy_check_mark: |
+| relu          | :heavy_check_mark: | repeat            | :heavy_check_mark: |
+| LeakyReLU     | :x:                | _contrib_box_nms  | :x:                |
+| _mul_scalar   | :x:                | SliceChannel      | :x:                |
+| _div_scalar   | :x:                | UpSampling        | :x:                |
+| Activation    | :heavy_check_mark: | FullyConnected    | :heavy_check_mark: |
+| sigmoid       | :heavy_check_mark: | broadcast_div     | :x:                |
+| exp           | :heavy_check_mark: | broadcast_sub     | :x:                |
+| softmax       | :heavy_check_mark: | broadcast_to      | :x:                |
+| Pooling       | :heavy_check_mark: | broadcast_greater | :x:                |
+| broadcast_mul | :heavy_check_mark: | Concat            | :heavy_check_mark: |
+| broadcast_add | :heavy_check_mark: | sum               | :heavy_check_mark: |
+| BatchNorm     | :x:                | ceil              | :x:                |
+| Flatten       | :heavy_check_mark: | round             | :x:                |
+| floor         | :x:                | fix               | :x:                |
+| Cast          | :x:                | clip              | :heavy_check_mark: |
+| Reshape       | :heavy_check_mark: | _minimum          | :x:                |
+| Custom        | :x:                | _maximum          | :heavy_check_mark: |
+| max           | :heavy_check_mark: | min               | :x:                |
+| argmax        | :x:                | argmin            | :x:                |
+| abs           | :x:                | elemwise_add      | :heavy_check_mark: |
+| elemwise_sub  | :heavy_check_mark: | Dropout           | :heavy_check_mark: |
+| _arange       | :heavy_check_mark: | tile              | :heavy_check_mark: |
+| negative      | :heavy_check_mark: | SwapAxis          | :x:                |
+| _plus_scalar  | :x:                | zeros_like        | :x:                |
+| ones_like     | :x:                | _greater_scalar   | :x:                |
+| where         | :x:                | squeeze           | :heavy_check_mark: |
 
 
 ### Public Interface
@@ -67,9 +88,37 @@ A wrapper class for mxnet symbol and params which indicates model. All the quant
 | prepare([input_shape])                             | Model preparation passes, do operator checks, operator fusing, operator rewrite, ...etc. |
 | to_cvm(model_name[, datadir, input_shape, target]) | Compile current mxnet quantization model into CVM accepted JSON&BINARY format. |
 
-#### MRT(TODO)
+#### MRT
 
-#### ModelMerger(TODO)
+A wrapper class for model transformation tool which simulates deep learning network integer computation within a float-point context. Model calibration and quantization are performed based on a specified model. This class has wrapped some user-friendly functions API introduced as below.
+
+| func name                        | usage                                                        |
+| -------------------------------- | ------------------------------------------------------------ |
+| set_data(data)                   | Set the data before calibration.                             |
+| calibrate([ctx, lambd, old_ths]) | Calibrate the current model after setting mrt data.<br />Contex on which intermediate result would be stored, hyperparameter lambd and reference threshold dict could also be specified. <br />Return the threshold dict of node-level output. |
+| set_threshold(name, threshold)   | Manually set the threshold of the node output, given node name. |
+| set_th_dict(th_dict)             | Manually set the threshold dict.                             |
+| set_input_prec(prec)             | Set the input precision before quantization.                 |
+| set_out_prec(prec)               | Set the output precision before quantization.                |
+| set_softmax_lambd(val)           | Set the hyperparameter softmax_lambd before quantization.    |
+| set_shift_bits(val)              | Set the hyperparameter shift_bits before quantization.       |
+| quantize()                       | Quantize the current model after calibration.<br />Return the quantized model. |
+| get_output_scales()              | Get the output scale of the model after quantization.        |
+| get_maps()                       | Get the current name to old name map of the outputs after calibration or quantization. |
+| get_inputs_ext()                 | Get the input_ext of the input after quantization.           |
+| save(model_name[, datadir])      | save the current mrt instance into disk.                     |
+| load(model_name[, datadir])      | [**staticmethod**]Return the mrt instance.<br />The given path should contain corresponding '.json' and '.params' file storing model information and '.ext' file storing mrt information. |
+
+
+
+#### ModelMerger
+
+A wrapper class for model merge tool. This class has wrapped some user-friendly functions API introduced as below.
+
+| func name                             | usage                                                        |
+| ------------------------------------- | ------------------------------------------------------------ |
+| merge([callback])                     | Return the merged model. <br />Callback function could also be specified for updating the top node attributes. |
+| get_output_scales(base_oscales, maps) | Get the model output scales after merge.<br />Base model output scales and base name maps should be specified. |
 
 
 
