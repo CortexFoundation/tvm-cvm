@@ -131,108 +131,143 @@ if __name__ == "__main__":
         "Please create the folder `data` in the working directory first"
     model_dir = _get_val(cfg, sec, 'Model_dir', dval=default_dir)
     model_name = _get_val(cfg, sec, 'Model_name')
-    sym_path, prm_path = _load_fname(path.join(model_dir, model_name))
-    if not path.exists(sym_path) or not path.exists(prm_path):
-        save_model(model_name, sym_path=sym_path, prm_path=prm_path)
+    model_prefix = path.join(model_dir, model_name)
     model_ctx = _get_ctx(cfg, sec)
     input_shape = _get_val(cfg, sec, 'Input_shape', dtype='tuple')
     start_pos = {'PREPARE': 1, 'SPLIT_MODEL': 2, \
                  'CALIBRATION': 3, 'QUANTIZATION': 4, \
                  'MERGE_MODEL': 5}
-    start = _get_val(cfg, sec, 'Start', dtype='str')
+    start = _get_val(cfg, sec, 'Start', dtype='str', dval='PREPARE')
+    _check(start in start_pos.keys(), sec, 'Start',
+           message="Please choose a value from `%s`" % start_pos.keys())
     start_point = start_pos[start]
 
     # prepare
-    if start_point > 1:
-        sec = 'PREPARE'
-        model_prefix = path.join(model_dir, model_name)
+    sec = 'PREPARE'
+    sym_file, prm_file = _load_fname(model_prefix, suffix='prepare')
+    if start_point <= 1:
+        sym_path, prm_path = _load_fname(model_prefix)
+        if not path.exists(sym_path) or not path.exists(prm_path):
+            save_model(model_name, sym_path=sym_path, prm_path=prm_path)
         model = Model.load(sym_path, prm_path)
         model.prepare(set_batch(input_shape, 1))
         dump = _get_val(cfg, sec, 'Dump', dtype='bool', dval=False)
         if dump:
-            sym_file, prm_file = _load_fname(model_prefix, suffix='prepare')
             model.save(sym_file, prm_file)
+        logger.info("`%s` stage finihed" % sec)
     else:
         sym_file, prm_file = _load_fname(model_prefix, suffix='prepare')
+        _check(path.exists(sym_file) and path.exists(prm_file), 'DEFAULT',
+               'Start', message="Check point of `%s` not found, " % sec + \
+               "please move the start point earlier")
         model = Model.load(sym_file, prm_file)
-    logger.info("Prepare finihed")
+        logger.info("`%s` stage checked" % sec)
 
     # split model
-    if start_point > 2:
     sec = 'SPLIT_MODEL'
     keys = _get_val(cfg, sec, 'Keys', dtype='[str]', dval='')
-    dump = _get_val(cfg, sec, 'Dump', dtype='bool', dval=False)
+    sym_top_file, prm_top_file = _load_fname(model_prefix, suffix='top')
+    sym_base_file, prm_base_file = _load_fname(model_prefix, suffix='base')
     if keys == '':
         mrt = model.get_mrt()
-    else:
+        logger.info("`%s` stage skipped" % sec)
+    elif start_point <= 2:
         base, top = model.split(keys)
         mrt = base.get_mrt()
+        dump = _get_val(cfg, sec, 'Dump', dtype='bool', dval=False)
         if dump:
-            sym_file, prm_file = _load_fname(dump_dir, suffix='top')
-            top.save(sym_file, prm_file)
-            sym_file, prm_file = _load_fname(dump_dir, suffix='base')
+            top.save(sym_top_file, prm_top_file)
+            sym_file, prm_file = _load_fname(model_prefix, suffix='base')
             base.save(sym_file, prm_file)
-        logger.info("Split model finihed")
+        logger.info("`%s` stage finished" % sec)
+    else:
+        _check(path.exists(sym_top_file) and \
+               path.exists(prm_top_file), 'DEFAULT',
+               'Start', message="Check point of `%s` not found, " % sec + \
+               "please move the start point earlier")
+        top = Model.load(sym_top_file, prm_top_file)
+        _check(path.exists(sym_base_file) and \
+               path.exists(prm_base_file), 'DEFAULT',
+               'Start', message="Check point of `%s` not found, " % sec + \
+               "please move the start point earlier")
+        base = Model.load(sym_base_file, prm_base_file)
+        mrt = base.get_mrt()
+        logger.info("`%s` stage checked" % sec)
 
     # calibration
     sec = 'CALIBRATION'
-    calibrate_num = _get_val(cfg, sec, 'Calibrate_num', dtype='int')
-    lambd = _get_val(cfg, sec, 'Lambda', dtype='float', dval=None)
-    ds_name = _get_val(cfg, sec, 'dataset')
-    batch = _get_val(cfg, sec, 'Batch', dtype='int', dval=1)
-    shp = set_batch(input_shape, batch)
-    dataset = ds.DS_REG[ds_name](shp)
-    data_iter_func = dataset.iter_func()
-    ctx = _get_ctx(cfg, sec, dctx=model_ctx)
-    for i in range(calibrate_num):
-        data, _ = data_iter_func()
-        mrt.set_data(data)
-        th_dict = mrt.calibrate(lambd=lambd, ctx=ctx)
-    dump = _get_val(cfg, sec, 'Dump', dtype='bool', dval=False)
-    if dump:
-        _, _, ext_file = utils.extend_fname(
-            path.join(model_dir, model_name, 'mrt.calibrate'),
-            with_ext=True)
-        sim.save_ext(ext_file, th_dict)
-    logger.info("Calibration finihed")
+    _, _, ext_file = utils.extend_fname(
+        model_prefix+'.mrt.calibrate', with_ext=True)
+    if start_point <= 3:
+        calibrate_num = _get_val(cfg, sec, 'Calibrate_num', dtype='int')
+        lambd = _get_val(cfg, sec, 'Lambda', dtype='float', dval=None)
+        ds_name = _get_val(cfg, sec, 'dataset')
+        batch = _get_val(cfg, sec, 'Batch', dtype='int', dval=1)
+        shp = set_batch(input_shape, batch)
+        dataset = ds.DS_REG[ds_name](shp)
+        data_iter_func = dataset.iter_func()
+        ctx = _get_ctx(cfg, sec, dctx=model_ctx)
+        for i in range(calibrate_num):
+            data, _ = data_iter_func()
+            mrt.set_data(data)
+            th_dict = mrt.calibrate(lambd=lambd, ctx=ctx)
+        dump = _get_val(cfg, sec, 'Dump', dtype='bool', dval=False)
+        if dump:
+            sim.save_ext(ext_file, th_dict)
+        logger.info("`%s` stage finished" % sec)
+    else:
+        _check(path.exists(ext_file), 'DEFAULT', 'Start',
+               message="Check point of `%s` not found, " % sec + \
+               "please move the start point earlier")
+        th_dict = sim.load_ext(ext_file)
+        logger.info("`%s` stage checkd" % sec)
 
     # quantization
     sec = 'QUANTIZATION'
-    input_precision = _get_val(
-        cfg, sec, 'Input_precision', dtype='int', dval=None)
-    if input_precision is not None:
-        mrt.set_input_prec(input_precision)
-    output_precision = _get_val(
-        cfg, sec, 'Output_precision', dtype='int', dval=None)
-    if output_precision is not None:
-        mrt.set_output_prec(output_precision)
-    ctx = _get_ctx(cfg, sec, dctx=model_ctx)
-    softmax_lambd = _get_val(
-        cfg, sec, 'softmax_lambd', dtype='float', dval=None)
-    if softmax_lambd is not None:
-        mrt.set_softmax_lambd(softmax_lambd)
-    shift_bits = _get_val(
-        cfg, sec, 'shift_bits', dtype='int', dval=None)
-    if shift_bits is not None:
-        mrt.set_shift_bits(shift_bits)
-    thresholds = _get_val(
-        cfg, sec, 'Thresholds', dtype='{str:float}', dval=None)
-    if thresholds is not None:
-        for name, threshold in thresholds.items():
-            mrt.set_threshold(name, threshold)
-    mrt.quantize()
+    if start_point <= 4:
+        input_precision = _get_val(
+            cfg, sec, 'Input_precision', dtype='int', dval=None)
+        if input_precision is not None:
+            mrt.set_input_prec(input_precision)
+        output_precision = _get_val(
+            cfg, sec, 'Output_precision', dtype='int', dval=None)
+        if output_precision is not None:
+            mrt.set_output_prec(output_precision)
+        ctx = _get_ctx(cfg, sec, dctx=model_ctx)
+        softmax_lambd = _get_val(
+            cfg, sec, 'softmax_lambd', dtype='float', dval=None)
+        if softmax_lambd is not None:
+            mrt.set_softmax_lambd(softmax_lambd)
+        shift_bits = _get_val(
+            cfg, sec, 'shift_bits', dtype='int', dval=None)
+        if shift_bits is not None:
+            mrt.set_shift_bits(shift_bits)
+        thresholds = _get_val(
+            cfg, sec, 'Thresholds', dtype='{str:float}', dval=None)
+        if thresholds is not None:
+            for name, threshold in thresholds.items():
+                mrt.set_threshold(name, threshold)
+        mrt.quantize()
+        dump = _get_val(cfg, sec, 'Dump', dtype='bool', dval=False)
+        if dump:
+            mrt.save(model_name+'.base.quantize',
+                     datadir=model_dir)
+        logger.info("`%s` stage finished" % sec)
+    else:
+        mrt = MRT.load(model_name+'.base.quantize',
+                       datadir=model_dir)
+        logger.info("`%s` stage checkd" % sec)
     qmodel = mrt.current_model
-    oscales = mrt.get_output_scales()
-    dump = _get_val(cfg, sec, 'Dump', dtype='bool', dval=False)
-    if dump:
-        mrt.save(model_name+'base.quantize', datadir=dump_dir)
-    oscales = mrt_oscales = mrt.get_output_scales()
-    logger.info("Quantization finihed")
 
     # merge_model
     sec = 'MERGE_MODEL'
-    dump = _get_val(cfg, sec, 'Dump', dtype='bool', dval=False)
-    if keys != '':
+    sym_file, prm_file, ext_file = \
+        _load_fname(dump_dir, suffix='all.quantize', with_ext=True)
+    if keys == '':
+        oscales = mrt.get_output_scales()
+        logger.info("`%s` stage skipped" % sec)
+    elif start_point <= 5:
+        mrt_oscales = mrt.get_output_scales()
         model_merger = Model.merger(qmodel, top, mrt.get_maps())
         attribute_deps = _get_val(
             cfg, sec, 'Attribute_deps', dtype='{str:str:int}')
@@ -253,11 +288,15 @@ if __name__ == "__main__":
         qmodel = model_merger.merge(callback=mergefunc)
         oscale_maps = _get_val(cfg, sec, 'Oscale_maps', dtype='{str:str}')
         oscales = model_merger.get_output_scales(mrt_oscales, oscale_maps)
+        dump = _get_val(cfg, sec, 'Dump', dtype='bool', dval=False)
         if dump:
-            sym_file, prm_file = _load_fname(
-                dump_dir, suffix='all.quantize')
             qmodel.save(sym_file, prm_file)
-        logger.info("Merge model finihed")
+        sim.save_(ext_file, oscales)
+        logger.info("`%s` stage finished" % sec)
+    else:
+        qmodel = Model.load(sym_file, prm_file)
+        oscales = sim.load_ext(ext_file)
+        logger.info("`%s` stage checked" % sec)
 
     # evaluation
     sec = 'EVALUATION'
