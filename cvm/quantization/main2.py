@@ -300,69 +300,72 @@ if __name__ == "__main__":
 
     # evaluation
     sec = 'EVALUATION'
-    iter_num = _get_val(cfg, sec, 'Iter_num', dtype='int', dval=0)
-    batch = _get_val(cfg, sec, 'Batch', dtype='int', dval=batch)
-    ctx = _get_ctx(cfg, sec, dctx=model_ctx)
-    org_model = Model.load(sym_path, prm_path)
-    graph = org_model.to_graph(ctx=ctx)
-    dataset = ds.DS_REG[ds_name](set_batch(input_shape, batch))
-    data_iter_func = dataset.iter_func()
-    metric = dataset.metrics()
+    if sec in cfg.sections():
+        iter_num = _get_val(cfg, sec, 'Iter_num', dtype='int', dval=0)
+        batch = _get_val(cfg, sec, 'Batch', dtype='int', dval=batch)
+        ctx = _get_ctx(cfg, sec, dctx=model_ctx)
+        org_model = Model.load(sym_path, prm_path)
+        graph = org_model.to_graph(ctx=ctx)
+        dataset = ds.DS_REG[ds_name](set_batch(input_shape, batch))
+        data_iter_func = dataset.iter_func()
+        metric = dataset.metrics()
 
-    baxis = batch_axis(input_shape)
-    olen = len(org_model.symbol)
-    def forward(net, data, ctx):
-        """ Multiple xpu run support.
-        """
-        if isinstance(ctx, mx.Context):
-            ctx = [ctx]
-        data = gluon.utils.split_and_load(
-            data, ctx_list=ctx, batch_axis=baxis, even_split=False)
-        outs = [net(d) for d in data]
-        if olen == 1:
-            outs = nd.concatenate(outs)
-        else:
-            outs = [nd.concatenate([outs[i][j] \
-                for i in range(len(outs))]) for j in range(olen)]
-        return outs
+        baxis = batch_axis(input_shape)
+        olen = len(org_model.symbol)
+        def forward(net, data, ctx):
+            """ Multiple xpu run support.
+            """
+            if isinstance(ctx, mx.Context):
+                ctx = [ctx]
+            data = gluon.utils.split_and_load(
+                data, ctx_list=ctx, batch_axis=baxis, even_split=False)
+            outs = [net(d) for d in data]
+            if olen == 1:
+                outs = nd.concatenate(outs)
+            else:
+                outs = [nd.concatenate([outs[i][j] \
+                    for i in range(len(outs))]) for j in range(olen)]
+            return outs
 
-    def evalfunc(data, label):
-        outs = forward(graph, data, ctx=ctx)
-        acc = dataset.validate(metric, outs, label)
-        return acc
+        def evalfunc(data, label):
+            outs = forward(graph, data, ctx=ctx)
+            acc = dataset.validate(metric, outs, label)
+            return acc
 
-    qgraph = qmodel.to_graph(ctx=ctx)
-    qmetric = dataset.metrics()
+        qgraph = qmodel.to_graph(ctx=ctx)
+        qmetric = dataset.metrics()
 
-    def quantize(data, label):
-        data = sim.load_real_data(data, 'data', mrt.get_inputs_ext())
-        outs = forward(qgraph, data, ctx)
-        outs = outs / oscales[0] if olen == 1 \
-            else [(t / oscales[i]) for i, t in enumerate(outs)]
-        acc = dataset.validate(qmetric, outs, label)
-        return acc
+        def quantize(data, label):
+            data = sim.load_real_data(data, 'data', mrt.get_inputs_ext())
+            outs = forward(qgraph, data, ctx)
+            outs = outs / oscales[0] if olen == 1 \
+                else [(t / oscales[i]) for i, t in enumerate(outs)]
+            acc = dataset.validate(qmetric, outs, label)
+            return acc
 
-    if iter_num > 0:
-        logger.info("Validating...")
-        utils.multi_validate(evalfunc, data_iter_func, quantize,
-                             iter_num=iter_num,
-                             logger=logging.getLogger('mrt.validate'))
+        if iter_num > 0:
+            logger.info("Validating...")
+            utils.multi_validate(evalfunc, data_iter_func, quantize,
+                                 iter_num=iter_num,
+                                 logger=logging.getLogger('mrt.validate'))
+            logger.info("`%s` stage finished" % sec)
 
 
     # compilation
     sec = 'COMPILATION'
-    dump_dir = _get_path(
-        cfg, sec, 'Dump_dir', is_dir=True, dpath=model_dir)
-    batch = _get_val(cfg, sec, 'Batch', dtype='int', dval=batch)
-    model_name_tfm = model_name + "_tfm"
-    qmodel.to_cvm(model_name_tfm, datadir=dump_dir,
-                  input_shape=set_batch(input_shape, batch))
+    if sec in cfg.sections():
+        dump_dir = _get_path(
+            cfg, sec, 'Dump_dir', is_dir=True, dpath=model_dir)
+        batch = _get_val(cfg, sec, 'Batch', dtype='int', dval=batch)
+        model_name_tfm = model_name + "_tfm"
+        qmodel.to_cvm(model_name_tfm, datadir=dump_dir,
+                      input_shape=set_batch(input_shape, batch))
 
-    dataset = ds.DS_REG[ds_name](set_batch(input_shape, batch))
-    dump_data, _ = dataset.iter_func()()
-    dump_data = sim.load_real_data(
-        dump_data.astype("float64"), 'data', mrt.get_inputs_ext())
-    np.save(path.join(dump_dir, model_name_tfm, "data.npy"),
-            dump_data.astype('int8').asnumpy())
-    logger.info("Compilation finihed")
+        dataset = ds.DS_REG[ds_name](set_batch(input_shape, batch))
+        dump_data, _ = dataset.iter_func()()
+        dump_data = sim.load_real_data(
+            dump_data.astype("float64"), 'data', mrt.get_inputs_ext())
+        np.save(path.join(dump_dir, model_name_tfm, "data.npy"),
+                dump_data.astype('int8').asnumpy())
+        logger.info("`%s` stage finished" % sec)
 
