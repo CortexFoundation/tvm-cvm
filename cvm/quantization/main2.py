@@ -346,6 +346,8 @@ if __name__ == "__main__":
 
         if iter_num > 0:
             logger.info("Validating...")
+            # TODO: calculate the total sample,
+            #   currently sum the shape[0] as the number just for simplify
             utils.multi_validate(evalfunc, data_iter_func, quantize,
                                  iter_num=iter_num,
                                  logger=logging.getLogger('mrt.validate'))
