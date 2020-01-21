@@ -347,7 +347,6 @@ if __name__ == "__main__":
                                  logger=logging.getLogger('mrt.validate'))
             logger.info("`%s` stage finished" % sec)
 
-
     # compilation
     sec = 'COMPILATION'
     if sec in cfg.sections():
