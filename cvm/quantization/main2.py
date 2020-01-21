@@ -197,7 +197,8 @@ if __name__ == "__main__":
     _, _, ext_file = utils.extend_fname(
         model_prefix+'.mrt.calibrate', with_ext=True)
     if start_point <= 3:
-        calibrate_num = _get_val(cfg, sec, 'Calibrate_num', dtype='int')
+        calibrate_num = _get_val(
+            cfg, sec, 'Calibrate_num', dtype='int', dval=1)
         lambd = _get_val(cfg, sec, 'Lambda', dtype='float', dval=None)
         ds_name = _get_val(cfg, sec, 'dataset')
         batch = _get_val(cfg, sec, 'Batch', dtype='int', dval=1)
@@ -267,17 +268,20 @@ if __name__ == "__main__":
         mrt_oscales = mrt.get_output_scales()
         model_merger = Model.merger(qmodel, top, mrt.get_maps())
         attribute_deps = _get_val(
-            cfg, sec, 'Attribute_deps', dtype='{str:str:int}')
+            cfg, sec, 'Attribute_deps', dtype='{str:str:str}')
 
+        name_idx = {mrt.get_maps().get(
+            s.attr("name"), s.attr("name")): i \
+            for i, s in enumerate(qmodel.symbol)}
         def mergefunc(node, params, graph):
             name, op_name = node.attr('name'), node.attr('op_name')
             childs, attr = sutils.sym_iter(
                 node.get_children()), node.list_attr()
             if op_name in attribute_deps:
                 attr_deps = attribute_deps[op_name]
-                for attr_name, entry in attr_deps.items():
+                for attr_name, v in attr_deps.items():
                     val = sutils.get_attr(attr, attr_name, 0)
-                    attr[attr_name] = int(val*mrt_oscales[entry])
+                    attr[attr_name] = int(val*mrt_oscales[name_idx[v]])
                 node = sutils.get_mxnet_op(op_name)(
                     *childs, **attr, name=name)
             return node
