@@ -201,7 +201,7 @@ if __name__ == "__main__":
             cfg, sec, 'Calibrate_num', dtype='int', dval=1)
         lambd = _get_val(cfg, sec, 'Lambda', dtype='float', dval=None)
         ds_name = _get_val(cfg, sec, 'dataset')
-        batch = _get_val(cfg, sec, 'Batch', dtype='int', dval=1)
+        batch = _get_val(cfg, sec, 'Batch', dtype='int', dval=16)
         shp = set_batch(input_shape, batch)
         dataset = ds.DS_REG[ds_name](shp)
         data_iter_func = dataset.iter_func()
