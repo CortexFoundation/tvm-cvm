@@ -150,7 +150,7 @@ if __name__ == '__main__':
     Total Sample: 49984
     '''
 
-    # test_alexnet()
+    test_alexnet()
     '''
     2020-01-10 16:23:24
     top1: 55.92% --> 55.15%
@@ -260,7 +260,7 @@ if __name__ == '__main__':
     Total Sample: 277296
     '''
 
-    test_trec()
+    # test_trec()
     '''
     2020-01-10 
     top1: --> 

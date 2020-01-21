@@ -156,7 +156,6 @@ if __name__ == "__main__":
             model.save(sym_file, prm_file)
         logger.info("`%s` stage finihed" % sec)
     else:
-        sym_file, prm_file = _load_fname(model_prefix, suffix='prepare')
         _check(path.exists(sym_file) and path.exists(prm_file), 'DEFAULT',
                'Start', message="Check point of `%s` not found, " % sec + \
                "please move the start point earlier")
@@ -177,8 +176,7 @@ if __name__ == "__main__":
         dump = _get_val(cfg, sec, 'Dump', dtype='bool', dval=False)
         if dump:
             top.save(sym_top_file, prm_top_file)
-            sym_file, prm_file = _load_fname(model_prefix, suffix='base')
-            base.save(sym_file, prm_file)
+            base.save(sym_base_file, prm_base_file)
         logger.info("`%s` stage finished" % sec)
     else:
         _check(path.exists(sym_top_file) and \
@@ -250,8 +248,7 @@ if __name__ == "__main__":
         mrt.quantize()
         dump = _get_val(cfg, sec, 'Dump', dtype='bool', dval=False)
         if dump:
-            mrt.save(model_name+'.base.quantize',
-                     datadir=model_dir)
+            mrt.save(model_name+'.base.quantize', datadir=model_dir)
         logger.info("`%s` stage finished" % sec)
     else:
         mrt = MRT.load(model_name+'.base.quantize',
@@ -262,7 +259,7 @@ if __name__ == "__main__":
     # merge_model
     sec = 'MERGE_MODEL'
     sym_file, prm_file, ext_file = \
-        _load_fname(dump_dir, suffix='all.quantize', with_ext=True)
+        _load_fname(model_prefix, suffix='all.quantize', with_ext=True)
     if keys == '':
         oscales = mrt.get_output_scales()
         logger.info("`%s` stage skipped" % sec)
@@ -291,7 +288,7 @@ if __name__ == "__main__":
         dump = _get_val(cfg, sec, 'Dump', dtype='bool', dval=False)
         if dump:
             qmodel.save(sym_file, prm_file)
-        sim.save_(ext_file, oscales)
+        sim.save_ext(ext_file, oscales)
         logger.info("`%s` stage finished" % sec)
     else:
         qmodel = Model.load(sym_file, prm_file)
