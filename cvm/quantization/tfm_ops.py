@@ -1033,31 +1033,31 @@ class Flatten(Transformer):
         return sym
 
 
-@register_transformer('floor')
+@register_transformer("floor")
 class Floor(Transformer):
     def compile(self, op, **kwargs):
         return kwargs['childs'][0]
 
 
-@register_transformer('ceil')
+@register_transformer("ceil")
 class Ceil(Transformer):
     def compile(self, op, **kwargs):
         return kwargs['childs'][0]
 
 
-@register_transformer('round')
+@register_transformer("round")
 class Round(Transformer):
     def compile(self, op, **kwargs):
         return kwargs['childs'][0]
 
 
-@register_transformer('fix')
+@register_transformer("fix")
 class Fix(Transformer):
     def compile(self, op, **kwargs):
         return kwargs['childs'][0]
 
 
-@register_transformer('Cast')
+@register_transformer("Cast")
 class Cast(Transformer):
     def compile(self, op, **kwargs):
         return kwargs['childs'][0]
