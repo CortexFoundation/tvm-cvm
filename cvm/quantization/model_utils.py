@@ -97,8 +97,8 @@ def validate_model(sym_path, prm_path, ctx, num_channel=3,
     # validate
     org_model = load_model(Model.load(sym_path, prm_path), ctx)
     cvm_quantize = load_model(
-            mrt.current_model, ctx,
-            inputs_qext=mrt.get_inputs_ext())
+        mrt.current_model, ctx,
+        inputs_qext=mrt.get_inputs_ext())
 
     utils.multi_validate(org_model, data_iter_func, cvm_quantize,
                          iter_num=iter_num,
