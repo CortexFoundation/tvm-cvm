@@ -50,7 +50,7 @@ model = tfm.Model(sym, params)
 
 # model = tfm.Model(sym, params)
 
-graph = model.to_graph(ctx=ctx)
+# graph = model.to_graph(ctx=ctx)
 
 # cat_img = os.path.expanduser(
     # "~/.keras/datasets/cats_and_dogs_filtered/validation/cats/cat.2000.jpg")
@@ -75,6 +75,11 @@ graph = model.to_graph(ctx=ctx)
 # exit()
 
 
+
+model.prepare()
+model.save("/tmp/tf_model.json", "/tmp/tf_model.params")
+
+graph = model.to_graph(ctx=ctx)
 metric = dataset.metrics()
 def eval_func(data, label):
     # data = gluon.utils.split_and_load(
@@ -85,8 +90,8 @@ def eval_func(data, label):
     acc = dataset.validate(metric, outs, label)
     return acc
 
-model.prepare()
-model.save("/tmp/tf_model.json", "/tmp/tf_model.params")
+print("Quantization")
+print(tpass.collect_op_names(model.symbol, model.params))
 mrt = model.get_mrt()
 data, _ = iter_func()
 mrt.set_data(data)

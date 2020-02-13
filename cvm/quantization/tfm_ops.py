@@ -76,13 +76,7 @@ class Transpose(Transformer):
 @register_transformer("relu")
 class Relu(Transformer):
     def fuse_transpose(self, op, **kwargs):
-        X, name = op.get_children()[0], op.attr('name')
-        if X.attr('op_name') == Transpose.op_name:
-            t_name, t_attr = X.attr('name'), X.list_attr()
-            X = X.get_children()[0]
-            op = mx.sym.relu(X, name=name)
-            op = mx.sym.transpose(op, name=t_name, **t_attr)
-        return op
+        return reverse_transpose(op)
 
 
 @register_pass("calculate_ops")
@@ -96,13 +90,7 @@ class LeakyReLU(Transformer):
         return op
 
     def fuse_transpose(self, op, **kwargs):
-        X, name = op.get_children()[0], op.attr('name')
-        if X.attr('op_name') == Transpose.op_name:
-            t_name, t_attr = X.attr('name'), X.list_attr()
-            X = X.get_children()[0]
-            op = mx.sym.relu(X, name=name)
-            op = mx.sym.transpose(op, name=t_name, **t_attr)
-        return op
+        return reverse_transpose(op)
 
     def rewrite(self, op, **kwargs):
         childs, attr = sym_iter(op.get_children()), op.list_attr()
@@ -315,12 +303,12 @@ class Convolution(Transformer):
 
 @register_pass("validate")
 @register_pass("calculate_ops")
+@register_pass("fuse_transpose")
 @register_pass("rewrite")
 @register_pass("quantize")
 @register_transformer('Pad')
 class Pad(Transformer):
-    def fuse_transpose(self, op, **kwargs):
-        return op
+    pass
 
 
 @register_pass("validate")
@@ -1145,12 +1133,24 @@ class Custom(Transformer):
 
 
 @register_pass("validate")
-@register_pass("fuse_transpose")
 @register_pass("rewrite")
-@register_pass("quantize")
 @register_pass("calculate_ops")
 @register_transformer("clip")
 class Clip(Transformer):
+    def fuse_transpose(self, op, **kwargs):
+        return reverse_transpose(op)
+
+    def quantize(self, op, **kwargs):
+        precs, scales = kwargs['precs'], kwargs['scales']
+        name, X = op.attr('name'), op.get_children()[0]
+        attrs = op.list_attr()
+
+        precs[name][OUT_KEY] = precs[X.attr('name')][OUT_KEY]
+        scales[name] = iscale = scales[X.attr('name')]
+        a_min = sutils.get_attr(attrs, "a_min") * iscale
+        a_max = sutils.get_attr(attrs, "a_max") * iscale
+        return mx.sym.clip(X, a_min=int(a_min), a_max=int(a_max), name=name)
+
     def compile(self, op, **kwargs):
         childs = kwargs['childs']
         attrs = kwargs['attr']
@@ -1266,14 +1266,7 @@ class Dropout(Transformer):
         return childs[0]
 
     def fuse_transpose(self, op, **kwargs):
-        X, name = op.get_children()[0], op.attr('name')
-        op_name = op.attr('name')
-        if X.attr('op_name') == Transpose.op_name:
-            t_name, t_attr = X.attr('name'), X.list_attr()
-            X = X.get_children()[0]
-            op = get_mxnet_op(op_name)(X, name=name)
-            op = mx.sym.transpose(op, name=t_name, **t_attr)
-        return op
+        return reverse_transpose(op)
 
 
 @register_pass("validate")
@@ -1540,4 +1533,16 @@ def _quantize_table(op, **kwargs):
     logger = logging.getLogger('log.mrt.realize')
     logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
                  op_name, name, scales[name], cns)
+    return op
+
+def reverse_transpose(op):
+    name, op_name = op.attr('name'), op.attr('op_name')
+    childs, attrs = sutils.sym_iter(op.get_children()), op.list_attr()
+    assert len(childs) == 1
+    X = childs[0]
+    if X.attr('op_name') == Transpose.op_name:
+        t_name, t_attr = X.attr('name'), X.list_attr()
+        X = X.get_children()[0]
+        op = get_mxnet_op(op_name)(X, **attrs, name=name)
+        op = mx.sym.transpose(op, name=t_name, **t_attr)
     return op
