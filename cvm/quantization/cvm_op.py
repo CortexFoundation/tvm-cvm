@@ -284,7 +284,8 @@ class PadProp(mx.operator.CustomOpProp):
         return ['output']
     def infer_shape(self, in_shape):
         X_shape = in_shape[0]
-        out_shape = in_shape[0]
+        pad = [s[0]+s[1] for s in eval(self.padding)]
+        out_shape = [s + pad[i] for i, s in enumerate(X_shape)]
         return [X_shape], [out_shape], []
     def infer_type(self, in_type):
         X_type = in_type[0]
