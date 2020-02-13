@@ -2,13 +2,13 @@
 
 ## Configuration File API | User Interface
 
-MRT has separated model quantization configurations from source code for simplifying the user-usage. So one can quantize themself model quickly via configuring the .ini file. The running command script is as below.
+MRT has separated model quantization configurations from source code for simplifying the user-usage. So one can quantize their model quickly via configuring the .ini file. The running command script is as below.
 
 ``` bash
 python cvm/quantization/main2.py config/file/path
 ```
 
-Please refer to the example file: cvm/quantization/docs/example.ini for more configuration details. Copy the example file and configure yourself model's quantization settings.
+Please refer to the example file: cvm/quantization/docs/example.ini for more configuration details. Copy the example file and configure  model's quantization settings by yourself.
 
 The unify quantization procedure is defined in file: cvm/quantization/main2.py, refer to [main2](https://github.com) for more quantization details.
 
@@ -16,15 +16,15 @@ The unify quantization procedure is defined in file: cvm/quantization/main2.py, 
 
 Mainly public quantization API is in file cvm/quantization/transformer.py, see the detail interface in the following sections. And the main quantization procedure is: 
 
-​	Model Load >>> Preparation >>> [Optional] Model Split >>>
-
-​	Calibration >>> Quantization >>> [Optional] Model Merge >>> Compilation to CVM,
+	Model Load >>> Preparation >>> [Optional] Model Split >>>
+	
+	Calibration >>> Quantization >>> [Optional] Model Merge >>> Compilation to CVM,
 
 which maps the class methods: 
 
-​	Model.load >>> Model.prepare >>> [Optional] Model.split >>> 
-
-​	MRT.calibrate >>> MRT.quantize >>> [Optional] ModelMerger.merge >>> Model.to_cvm.
+	Model.load >>> Model.prepare >>> [Optional] Model.split >>> 
+	
+	MRT.calibrate >>> MRT.quantize >>> [Optional] ModelMerger.merge >>> Model.to_cvm.
 
 The Calibration and Quantization pass is achieved in class MRT.
 
@@ -109,8 +109,6 @@ A wrapper class for model transformation tool which simulates deep learning netw
 | save(model_name[, datadir])      | save the current mrt instance into disk.                     |
 | load(model_name[, datadir])      | [**staticmethod**]Return the mrt instance.<br />The given path should contain corresponding '.json' and '.params' file storing model information and '.ext' file storing mrt information. |
 
-
-
 #### ModelMerger
 
 A wrapper class for model merge tool. This class has wrapped some user-friendly functions API introduced as below.
@@ -120,7 +118,28 @@ A wrapper class for model merge tool. This class has wrapped some user-friendly 
 | merge([callback])                     | Return the merged model. <br />Callback function could also be specified for updating the top node attributes. |
 | get_output_scales(base_oscales, maps) | Get the model output scales after merge.<br />Base model output scales and base name maps should be specified. |
 
+## Model Testing
 
+Some models have been tested and the precision before and after quantization are provided in the following chart for reference.
+
+| model name          | Iteration | evalfunc                     | quantize                     | total sample |
+| ------------------- | --------- | ---------------------------- | ---------------------------- | ------------ |
+| resnet50_v1         | 312       | top1=77.39%<br />top5=93.59% | top1=76.45%<br />top5=93.27% | 50080        |
+| resnet50_v2         | 312       | top1=77.15%<br />top5=93.44% | top1=70.76%<br />top5=89.56% | 50080        |
+| resnet18_v1         | 312       | top1=70.96%<br />top5=89.93% | top1=70.10%<br />top5=89.59% | 50080        |
+| resnet18v1_b_0.89   | 312       | top1=67.21%<br />top5=87.45% | top1=63.80%<br />top5=85.61% | 50080        |
+| quickdraw_wlt       | 349       | top1=81.90%<br />top5=98.26% | top1=81.83%<br />top5=98.24% | 56000        |
+| qd10_resnetv1_20    | 349       | top1=85.79%<br />top5=98.73% | top1=85.79%<br />top5=98.73% | 56000        |
+| densenet161         | 312       | top1=77.62%<br />top5=93.82% | top1=77.32%<br />top5=93.63% | 50080        |
+| alexnet             | 312       | top1=55.91%<br />top5=78.75% | top1=51.69%<br />top5=77.99% | 50080        |
+| cifar_resnet20_v1   | 62        | top1=92.88%<br />top5=99.78% | top1=92.82%<br />top5=99.75% | 10000        |
+| mobilenet1_0.ini    | 312       | top1=70.77%<br />top5=59.97% | top1=66.11%<br />top5=87.35% | 50080        |
+| shufflenet_v1       | 312       | top1=63.48%<br />top5=85.12% | top1=60.45%<br />top5=82.95% | 50080        |
+| squeezenet1.0       | 312       | top1=57.20%<br />top5=80.04% | top1=55.16%<br />top5=78.67% | 50080        |
+| tf_inception_v3     | 312       | top1=55.58%<br />top5=77.56% | top1=50.76%<br />top5=75.91% | 50080        |
+| trec                | 28        | 97.84%                       | 97.63%                       | 1102         |
+| vgg19               | 312       | top1=74.14%<br />top5=91.78% | top1=73.75%<br />top5=91.67% | 50080        |
+| yolo3_darknet53_voc | 29        | 81.37%                       | 82.08%                       | 4800         |
 
 
 
