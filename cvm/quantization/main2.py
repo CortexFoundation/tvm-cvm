@@ -256,6 +256,8 @@ if __name__ == "__main__":
                        datadir=model_dir)
         logger.info("`%s` stage checkd" % sec)
     qmodel = mrt.current_model
+    mks = ['mrt_quantize_clip_101',
+           'ssd0_multiperclassdecoder0_zeros_like0']
 
     # merge_model
     sec = 'MERGE_MODEL'
