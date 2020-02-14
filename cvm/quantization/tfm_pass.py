@@ -315,12 +315,26 @@ def _get_opt(out, lambd):
     if lambd is None:
         return absmax
     mean = nd.mean(out).asscalar()
-    std = nd.norm(out - mean).asscalar() / math.sqrt(np.product(out.shape))
+    sqrt_n = math.sqrt(np.product(out.shape))
+    std = nd.norm(out - mean).asscalar() / sqrt_n
     alpha = abs(mean) + lambd * std
+
+    #  pos_out = nd.abs(out)
+    #  pos_mean = nd.mean(pos_out).asscalar()
+    #  pos_std = nd.norm(pos_out - pos_mean).asscalar() / sqrt_n
+    #  pos_alpha = abs(pos_mean) + lambd * pos_std
+
+    opt = absmax
     if alpha < 0.95 * absmax:
-        print ("[", mean, std, "]", alpha, absmax)
-        return alpha
-    return absmax
+        print ("mean, std = [", mean, std, "]", "alpha=", alpha,
+               "absmax=", absmax)
+        opt = alpha
+    #  if opt > 30:
+        #  print ("mean, std = [", mean, std, "]", "alpha=", alpha,
+               #  "absmax=", absmax)
+        #  print ("ABS mean, std = [", pos_mean, pos_std, "]",
+               #  "alpha=", pos_alpha, "absmax=", absmax)
+    return opt
 
 def sym_calibrate(symbol, params, data, **kwargs):
     logger = logging.getLogger('log.mrt')

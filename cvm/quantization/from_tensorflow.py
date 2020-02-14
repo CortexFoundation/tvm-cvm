@@ -144,8 +144,14 @@ def _conv2d(opname):
             dilated_kernel_w = (kernel_w - 1) * dilation_w + 1
             pad_v = _get_pad_pair(in_h, dilated_kernel_h, stride_h)
             pad_h = _get_pad_pair(in_w, dilated_kernel_w, stride_w)
-            assert pad_v[0] == pad_v[1]
-            assert pad_h[0] == pad_h[1]
+            #  if pad_v[0] == pad_v[1] and pad_h[0] == pad_h[1]:
+                #  padding = (pad_v[0], pad_h[0])
+            #  else:
+                #  padding = (pad_v[0], pad_v[1], pad_h[0], pad_h[1])
+            # TODO(wlt): mxnet not supported four-dimension padding
+            # padding = (max(pad_v), max(pad_h))
+            assert pad_v[0] == pad_v[1], pad_v
+            assert pad_h[0] == pad_h[1], pad_h
             padding = (pad_v[0], pad_h[0])
 
         assert data_shp[1] % weight_shp[1] == 0
@@ -250,15 +256,17 @@ def _batch_normalization(inputs, attrs, params):
 
     bn_attr = {
         'eps': attrs["epsilon"],
+        #  'use_global_stats': True,
+        'fix_gamma': False, # TODO: the attribute is requisite, why?
     }
-    sym = mx.sym.BatchNorm(*inputs, **bn_attr)
+    sym = mx.sym.BatchNorm(*inputs, **bn_attr, name=attrs['name'])
 
     if data_format == "NHWC":
         sym = mx.sym.transpose(sym, axes=(0, 2, 3, 1))
     return sym
 
 def _relu(inputs, attrs, params):
-    return mx.sym.relu(*inputs)
+    return mx.sym.relu(*inputs, name=attrs['name'])
 
 def _concat_v2(inputs, attrs, params):
     axis_sym = inputs.pop(len(inputs) - 1)
@@ -369,7 +377,23 @@ def _strided_slice(inputs, attrs, params):
 
 def _pack(inputs, attrs, params):
     axis = attrs['axis']
-    inputs_reshped = [mx.sym.expand_dims(i, axis=axis) for i in inputs]
+    inputs_reshped = []
+    for s in inputs:
+        if sutils.is_params(s, params):
+            name = s.attr('name')
+            new_name = name + '_const'
+            if params[name].shape == ():
+                assert axis == 0
+                params[new_name] = nd.array([params[name].asnumpy()],
+                                            dtype=params[name].dtype)
+            else:
+                params[new_name] = nd.expand_dims(params[name], axis=axis)
+            inputs_reshped.append(
+                    mx.sym.var(new_name, shape=params[new_name].shape))
+        else:
+            inputs_reshped.append(mx.sym.expand_dims(s, axis=axis))
+
+    # inputs_reshped = [mx.sym.expand_dims(i, axis=axis) for i in inputs]
     op = mx.sym.concat(*inputs_reshped, dim=axis)
     return mx.sym.cast(op, attrs['T'])
 
@@ -409,6 +433,14 @@ def _reshape(inputs, attrs, params):
     shape[0] = -1 # since dim zero is batch, set -1 for flexiblity.
     return mx.sym.reshape(X, shape)
 
+def _squeeze(inputs, attrs, params):
+    new_attrs = {}
+    if len(attrs['squeeze_dims']) == 0:
+        new_attrs['axis'] = None
+    else:
+        new_attrs['axis'] = attrs['squeeze_dims']
+    return mx.sym.squeeze(*inputs, **new_attrs)
+
 
 _convert_map = {
     'Add'                               : _elemwise('elemwise_add'),
@@ -434,6 +466,7 @@ _convert_map = {
     'Reshape'                           : _reshape,
     'Shape'                             : _shape,
     'Softmax'                           : _softmax,
+    'Squeeze'                           : _squeeze,
     'Sub'                               : _elemwise('subtract'),
     'StridedSlice'                      : _strided_slice,
 }
@@ -534,7 +567,8 @@ currSupportedOps = {
                        'Fill',
                        'ConcatV2',
                        'StridedSlice',
-                       'Pack'
+                       'Pack',
+                       'Squeeze',
                    }
 
 import tensor_util
@@ -582,6 +616,7 @@ def convert_tfnode(tfnode, graph, params, infer_shapes, logger=logging):
         parsed_attrs = _parse_attr(attr)
         parsed_attrs["_input_eids"] = input_eids
         parsed_attrs["_infer_shapes"] = infer_shapes
+        parsed_attrs["name"] = name
         sym = convert_operator(op_name, inputs, parsed_attrs, params)
         graph[name] = [sym]
         _, infer_shapes[sym.attr('name')], _ = sym.infer_shape()
@@ -660,17 +695,20 @@ def convert_model(pbfile, layout="NHWC", outputs=None):
 def _fuse_pad(sym, params):
     infer_shapes = infer_shape(sym, params)
 
+    def is_pad_op(sym):
+        attrs = sym.list_attr()
+        return sym.attr('op_name') == "Custom" and \
+            attrs.get("op_type", "") == "cvm_pad"
+
     def _fuse_custom_pad_transpose(sym, params, **kwargs):
         name, op_name = sym.attr('name'), sym.attr('op_name')
         attr, childs = sym.list_attr(), sutils.sym_iter(sym.get_children())
-        cattr = childs[0].list_attr() if childs else None
 
         ret = sym
-        if op_name != 'transpose' or childs[0].attr('op_name') != 'Custom' or \
-                not cattr or 'op_type' not in cattr or \
-                cattr['op_type'] != 'cvm_pad':
+        if op_name != 'transpose' or not is_pad_op(childs[0]):
             return ret, params
 
+        cattr = childs[0].list_attr()
         padding = sutils.get_attr(cattr, 'padding')
         axes = sutils.get_attr(attr, 'axes')
         cchilds = sutils.sym_iter(childs[0].get_children())
@@ -690,7 +728,6 @@ def _fuse_pad(sym, params):
 
         padding = nd.array(sutils.get_attr(attr, 'padding'))
         padding = padding.reshape((-1,)).asnumpy().astype(np.int32).tolist()
-        print(padding)
         ret = mx.sym.pad(*childs, mode='constant',
                 pad_width=tuple(padding))
 
@@ -725,8 +762,8 @@ def _fuse_pad(sym, params):
             _fuse_custom_pad_transpose, infer_shapes=infer_shapes)
     sym, params = sutils.topo_visit_transformer(sym, params, _fuse_custom_pad,
             infer_shapes=infer_shapes)
-    sym, params = sutils.topo_visit_transformer(sym, params, _fuse_pad_eq,
-            infer_shapes=infer_shapes)
+    # sym, params = sutils.topo_visit_transformer(sym, params, _fuse_pad_eq,
+            # infer_shapes=infer_shapes)
     return sym, params
 
 def dump(model, symbol, params):

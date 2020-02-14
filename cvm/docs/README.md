@@ -32,43 +32,76 @@ The Calibration and Quantization pass is achieved in class MRT.
 
 MRT has supported lots of mxnet operators while there still exists some unsupported. And all the unsupported operators are unquantifiable. So we just advise splitting the model into two sub-graph if there are some unsupported operators and only quantizing the half model (named base_model, indicating the input nodes to split operators generally). In other words, it's the user's responsibility to select the split keys of splitting the original model, while the half model is ignored to quantization pass if necessary. 
 
-The list operators have already been considered by MRT developers, which operators over the list is not allowed in quantization. Contact the MRT developers in the github for more help.
-
 #### Currently Supported Operators
 
-| Operator      | Supported          | Operator          | Supported          |
-| ------------- | ------------------ | ----------------- | ------------------ |
-| SliceAxis     | :heavy_check_mark: | Convolution       | :heavy_check_mark: |
-| Slice         | :heavy_check_mark: | Pad               | :heavy_check_mark: |
-| SliceLike     | :heavy_check_mark: | Expand_dims       | :heavy_check_mark: |
-| Transpose     | :heavy_check_mark: | Embedding         | :heavy_check_mark: |
-| relu          | :heavy_check_mark: | repeat            | :heavy_check_mark: |
-| LeakyReLU     | :x:                | _contrib_box_nms  | :x:                |
-| _mul_scalar   | :x:                | SliceChannel      | :x:                |
-| _div_scalar   | :x:                | UpSampling        | :x:                |
-| Activation    | :heavy_check_mark: | FullyConnected    | :heavy_check_mark: |
-| sigmoid       | :heavy_check_mark: | broadcast_div     | :x:                |
-| exp           | :heavy_check_mark: | broadcast_sub     | :x:                |
-| softmax       | :heavy_check_mark: | broadcast_to      | :x:                |
-| Pooling       | :heavy_check_mark: | broadcast_greater | :x:                |
-| broadcast_mul | :heavy_check_mark: | Concat            | :heavy_check_mark: |
-| broadcast_add | :heavy_check_mark: | sum               | :heavy_check_mark: |
-| BatchNorm     | :x:                | ceil              | :x:                |
-| Flatten       | :heavy_check_mark: | round             | :x:                |
-| floor         | :x:                | fix               | :x:                |
-| Cast          | :x:                | clip              | :heavy_check_mark: |
-| Reshape       | :heavy_check_mark: | _minimum          | :x:                |
-| Custom        | :x:                | _maximum          | :heavy_check_mark: |
-| max           | :heavy_check_mark: | min               | :x:                |
-| argmax        | :x:                | argmin            | :x:                |
-| abs           | :x:                | elemwise_add      | :heavy_check_mark: |
-| elemwise_sub  | :heavy_check_mark: | Dropout           | :heavy_check_mark: |
-| _arange       | :heavy_check_mark: | tile              | :heavy_check_mark: |
-| negative      | :heavy_check_mark: | SwapAxis          | :x:                |
-| _plus_scalar  | :x:                | zeros_like        | :x:                |
-| ones_like     | :x:                | _greater_scalar   | :x:                |
-| where         | :x:                | squeeze           | :heavy_check_mark: |
+The list operators have already been considered by MRT developers, which operators over the list is not allowed in quantization. Split the model for unsupported operators with disable-quantization attributes or contact the MRT developers in the github for operators needing quantization.
 
+##### Transformer
+
+| Operator     | Supported          | Operator    | Supported          |
+| ------------ | ------------------ | ----------- | ------------------ |
+| SliceAxis    | :heavy_check_mark: | SwapAxis    | :x:                |
+| Slice        | :heavy_check_mark: | Flatten     | :heavy_check_mark: |
+| SliceLike    | :heavy_check_mark: | Concat      | :heavy_check_mark: |
+| Transpose    | :heavy_check_mark: | where       | :x:                |
+| repeat       | :heavy_check_mark: | expand_dims | :heavy_check_mark: |
+| SliceChannel | :heavy_check_mark: | tile        | :heavy_check_mark: |
+| squeeze      | :heavy_check_mark: | Reshape     | :heavy_check_mark: |
+| clip         | :heavy_check_mark: | Embedding   | :heavy_check_mark: |
+
+##### NN
+
+| Operator       | Supported          | Operator | Supported                            |
+| -------------- | ------------------ | -------- | ------------------------------------ |
+| Convolution    | :heavy_check_mark: | Pad      | :x:                                  |
+| FullyConnected | :heavy_check_mark: | relu     | :heavy_check_mark:                   |
+| LeakyReLU      | :heavy_check_mark: | Pooling  | :heavy_check_mark:                   |
+| UpSampling     | :heavy_check_mark: | softmax  | :heavy_check_mark:                   |
+| BatchNorm      | :heavy_check_mark: | Dropout  | :heavy_check_mark::heavy_check_mark: |
+| Activation     | :heavy_check_mark: |          |                                      |
+
+##### Broadcast
+
+| Operator      | Supported | Operator          | Supported          |
+| ------------- | --------- | ----------------- | ------------------ |
+| broadcast_div | :x:       | broadcast_add     | :heavy_check_mark: |
+| broadcast_sub | :x:       | broadcast_mul     | :heavy_check_mark: |
+| broadcast_to  | :x:       | broadcast_greater | :x:                |
+
+##### Elemwise
+
+| Operator        | Supported          | Operator     | Supported          |
+| --------------- | ------------------ | ------------ | ------------------ |
+| _mul_scalar     | :heavy_check_mark: | _div_scalar  | :heavy_check_mark: |
+| elemwise_add    | :heavy_check_mark: | elemwise_sub | :heavy_check_mark: |
+| ceil            | :x:                | round        | :x:                |
+| fix             | :x:                | floor        | :x:                |
+| abs             | :heavy_check_mark: | sigmoid      | :heavy_check_mark: |
+| exp             | :heavy_check_mark: | negative     | ✔️                  |
+| _minimum        | :x:                | _maximum     | :x:                |
+| _plus_scalar    | ❌                  | zeros_like   | ❌                  |
+| _greater_scalar | :x:                | ones_like    | ✔️                  |
+
+##### Reduce
+
+| Operator | Supported          | Operator | Supported |
+| -------- | ------------------ | -------- | --------- |
+| max      | :heavy_check_mark: | min      | :x:       |
+| sum      | :heavy_check_mark: | argmin   | :x:       |
+| argmax   | :x:                |          |           |
+
+##### Vision
+
+| Operator         | Supported | Operator | Supported |
+| ---------------- | --------- | -------- | --------- |
+| _contrib_box_nms | :x:       |          |           |
+
+##### Others
+
+| Operator | Supported          | Operator | Supported |
+| -------- | ------------------ | -------- | --------- |
+| _arange  | :heavy_check_mark: | Custom   | ❌         |
+>>>>>>> origin/wlt
 
 ### Public Interface
 
