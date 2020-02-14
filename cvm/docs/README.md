@@ -140,6 +140,7 @@ Some models have been tested and the precision before and after quantization are
 | trec                | 28        | 97.84%                       | 97.63%                       | 1102         |
 | vgg19               | 312       | top1=74.14%<br />top5=91.78% | top1=73.75%<br />top5=91.67% | 50080        |
 | yolo3_darknet53_voc | 29        | 81.37%                       | 82.08%                       | 4800         |
+| ssd                 | 29        | 80.27%                       | 80.01%                       | 4800         |
 
 
 

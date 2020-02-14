@@ -796,11 +796,17 @@ class BroadcastMul(Transformer):
         X, xprec, xs = requant(childs[0], oprec, oname=name, **kwargs)
         B, bprec, bs = requant(childs[1], oprec, oname=name, **kwargs)
 
-        scales[name] = xs * bs
         op = get_mxnet_op(op_name)(X, B, **attr, name=name)
 
-        infer_prec = xprec + bprec
-        precs[name][OUT_KEY] = infer_prec
+        if bprec == 1 and bs == 1:
+            # special case: childs[1] is 0
+            scales[name] = 1
+            precs[name][OUT_KEY] = 1
+        else:
+            scales[name] = xs * bs
+            infer_prec = xprec + bprec
+            precs[name][OUT_KEY] = infer_prec
+
 
         logger = logging.getLogger('log.mrt.realize')
         logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
