@@ -11,6 +11,7 @@ import utils
 import dataset as ds
 import sim_quant_helper as sim
 
+import logging
 import os
 from os import path
 
@@ -95,7 +96,21 @@ print(tpass.collect_op_names(model.symbol, model.params))
 mrt = model.get_mrt()
 data, _ = iter_func()
 mrt.set_data(data)
-mrt.calibrate(ctx=mx.gpu(2))
+mrt.calibrate(ctx=mx.gpu(2), lambd=20)
+mrt.set_threshold("mrt_rewrite_transpose26_0", 20)
+mrt.set_threshold("mrt_rewrite_transpose6_0", 20)
+#  mrt.set_threshold("mrt_rewrite_bias_2", 20)
+#  mrt.set_threshold("mrt_rewrite_transpose16_0", 15)
+#  mrt.set_threshold("mrt_rewrite_bias_5", 13)
+#  mrt.set_threshold("mrt_rewrite_conv1_bn_1/FusedBatchNorm_0", 6)
+#  mrt.set_threshold("mrt_rewrite_conv_dw_1_bn_1/FusedBatchNorm_0", 6)
+#  mrt.set_threshold("mrt_rewrite_conv_pw_1_bn_1/FusedBatchNorm_0", 6)
+#  mrt.set_threshold("mrt_rewrite_conv_dw_2_bn_1/FusedBatchNorm_0", 6)
+#  mrt.set_threshold("mrt_rewrite_conv_pw_2_bn_1/FusedBatchNorm_0", 6)
+#  mrt.set_threshold("mrt_rewrite_conv_dw_3_bn_1/FusedBatchNorm_0", 6)
+#  mrt.set_threshold("mrt_rewrite_conv_pw_3_bn_1/FusedBatchNorm_0", 6)
+#  mrt.set_threshold("mrt_rewrite_conv_dw_4_bn_1/FusedBatchNorm_0", 6)
+#  mrt.set_threshold("mrt_rewrite_conv_pw_4_bn_1/FusedBatchNorm_0", 6)
 mrt.set_input_prec(8)
 mrt.quantize()
 mrt.save("tf_mobilenet", datadir="/tmp")

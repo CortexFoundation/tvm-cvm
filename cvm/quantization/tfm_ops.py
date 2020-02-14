@@ -1132,18 +1132,34 @@ class Custom(Transformer):
         return sym
 
 
-@register_pass("validate")
 @register_pass("rewrite")
 @register_pass("calculate_ops")
 @register_transformer("clip")
 class Clip(Transformer):
+    def validate(self, op, **kwargs):
+        return op
+        # For Relu6 transformer
+        # attrs = op.list_attr()
+        # a_min = sutils.get_attr(attrs, "a_min")
+        # a_max = sutils.get_attr(attrs, "a_max")
+        # assert a_min == 0 and a_max > a_min
+
     def fuse_transpose(self, op, **kwargs):
         return reverse_transpose(op)
 
     def quantize(self, op, **kwargs):
         precs, scales = kwargs['precs'], kwargs['scales']
-        name, X = op.attr('name'), op.get_children()[0]
+        th_dict = kwargs['th_dict']
+        X = op.get_children()[0]
+        name, X_name = op.attr('name'), X.attr('name')
         attrs = op.list_attr()
+
+        # a_max = sutils.get_attr(attrs, "a_max")
+        # out = mx.sym.relu(X, name=N.n('relu'))
+        # precs[out.attr('name')] = {
+            # OUT_KEY: precs[X_name][OUT_KEY]}
+        # scales[out.attr('name')] = scales[X_name]
+        # return out
 
         precs[name][OUT_KEY] = precs[X.attr('name')][OUT_KEY]
         scales[name] = iscale = scales[X.attr('name')]
