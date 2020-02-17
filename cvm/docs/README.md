@@ -10,7 +10,7 @@ python cvm/quantization/main2.py config/file/path
 
 Please refer to the example file: cvm/quantization/docs/example.ini for more configuration details. Copy the example file and configure  model's quantization settings by yourself.
 
-The unify quantization procedure is defined in file: cvm/quantization/main2.py, refer to [main2](https://github.com/CortexFoundation/tvm-cvm/tree/mrt/cvm/docs) for more quantization details.
+The unify quantization procedure is defined in file: cvm/quantization/main2.py, refer to [main2](https://github.com/CortexFoundation/tvm-cvm/blob/ryt_tmp/cvm/quantization/main2.py) for more quantization details.
 
 ## Developer API
 
