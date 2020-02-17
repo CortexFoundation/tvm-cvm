@@ -40,10 +40,10 @@ The list operators have already been considered by MRT developers, which operato
 
 | Operator     | Supported          | Operator    | Supported          |
 | ------------ | ------------------ | ----------- | ------------------ |
-| SliceAxis    | :heavy_check_mark: | SwapAxis    | :x:                |
+| SliceAxis    | :heavy_check_mark: | SwapAxis    | :heavy_check_mark: |
 | Slice        | :heavy_check_mark: | Flatten     | :heavy_check_mark: |
 | SliceLike    | :heavy_check_mark: | Concat      | :heavy_check_mark: |
-| Transpose    | :heavy_check_mark: | where       | :x:                |
+| Transpose    | :heavy_check_mark: | where       | :heavy_check_mark: |
 | repeat       | :heavy_check_mark: | expand_dims | :heavy_check_mark: |
 | SliceChannel | :heavy_check_mark: | tile        | :heavy_check_mark: |
 | squeeze      | :heavy_check_mark: | Reshape     | :heavy_check_mark: |
@@ -51,22 +51,22 @@ The list operators have already been considered by MRT developers, which operato
 
 ##### NN
 
-| Operator       | Supported          | Operator | Supported                            |
-| -------------- | ------------------ | -------- | ------------------------------------ |
-| Convolution    | :heavy_check_mark: | Pad      | :x:                                  |
-| FullyConnected | :heavy_check_mark: | relu     | :heavy_check_mark:                   |
-| LeakyReLU      | :heavy_check_mark: | Pooling  | :heavy_check_mark:                   |
-| UpSampling     | :heavy_check_mark: | softmax  | :heavy_check_mark:                   |
-| BatchNorm      | :heavy_check_mark: | Dropout  | :heavy_check_mark::heavy_check_mark: |
-| Activation     | :heavy_check_mark: |          |                                      |
+| Operator       | Supported          | Operator | Supported          |
+| -------------- | ------------------ | -------- | ------------------ |
+| Convolution    | :heavy_check_mark: | Pad      | :heavy_check_mark: |
+| FullyConnected | :heavy_check_mark: | relu     | :heavy_check_mark: |
+| LeakyReLU      | :heavy_check_mark: | Pooling  | :heavy_check_mark: |
+| UpSampling     | :x:                | softmax  | :heavy_check_mark: |
+| BatchNorm      | :heavy_check_mark: | Dropout  | :heavy_check_mark: |
+| Activation     | :heavy_check_mark: |          |                    |
 
 ##### Broadcast
 
-| Operator      | Supported | Operator          | Supported          |
-| ------------- | --------- | ----------------- | ------------------ |
-| broadcast_div | :x:       | broadcast_add     | :heavy_check_mark: |
-| broadcast_sub | :x:       | broadcast_mul     | :heavy_check_mark: |
-| broadcast_to  | :x:       | broadcast_greater | :x:                |
+| Operator      | Supported          | Operator          | Supported          |
+| ------------- | ------------------ | ----------------- | ------------------ |
+| broadcast_div | :x:                | broadcast_add     | :heavy_check_mark: |
+| broadcast_sub | :heavy_check_mark: | broadcast_mul     | :heavy_check_mark: |
+| broadcast_to  | :x:                | broadcast_greater | :x:                |
 
 ##### Elemwise
 
@@ -76,11 +76,11 @@ The list operators have already been considered by MRT developers, which operato
 | elemwise_add    | :heavy_check_mark: | elemwise_sub | :heavy_check_mark: |
 | ceil            | :x:                | round        | :x:                |
 | fix             | :x:                | floor        | :x:                |
-| abs             | :heavy_check_mark: | sigmoid      | :heavy_check_mark: |
+| abs             | :x:                | sigmoid      | :heavy_check_mark: |
 | exp             | :heavy_check_mark: | negative     | ✔️                  |
 | _minimum        | :x:                | _maximum     | :x:                |
-| _plus_scalar    | ❌                  | zeros_like   | ❌                  |
-| _greater_scalar | :x:                | ones_like    | ✔️                  |
+| _plus_scalar    | :heavy_check_mark: | zeros_like   | :heavy_check_mark: |
+| _greater_scalar | :heavy_check_mark: | ones_like    | ✔️                  |
 
 ##### Reduce
 
@@ -101,8 +101,6 @@ The list operators have already been considered by MRT developers, which operato
 | Operator | Supported          | Operator | Supported |
 | -------- | ------------------ | -------- | --------- |
 | _arange  | :heavy_check_mark: | Custom   | ❌         |
->>>>>>> origin/wlt
-
 ### Public Interface
 
 #### Model

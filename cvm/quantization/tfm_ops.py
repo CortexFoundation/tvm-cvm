@@ -843,7 +843,29 @@ class BroadcastDiv(Transformer):
 @register_pass("compile")
 @register_transformer("broadcast_sub")
 class BroadcastSub(Transformer):
-    pass
+    def quantize(self, op, **kwargs):
+        params = kwargs['params']
+        th_dict = kwargs['th_dict']
+        precs = kwargs['precs']
+        scales = kwargs['scales']
+
+        name = op.attr('name')
+        childs = sym_iter(op.get_children())
+        cns = [c.attr('name') for c in childs]
+        ths = [th_dict[cn] for cn in cns]
+
+        if ths[0] == 0 or ths[1] == 0:
+            if ths[0] == 0 and ths[1] == 0:
+                th_dict[name], precs[name], scales[name] = 0, {OUT_KEY: 1}, 1
+                return op
+            cn = cns[1] if ths[0] == 0 else cns[0]
+            bit = get_bit(params[cn]) if cn in params else precs[cn][OUT_KEY]
+            scales[name] = 1 if cn in params else scales[cn]
+            precs[name] = {OUT_KEY: bit}
+            th_dict[name] = get_range(bit)
+            return op
+
+        return _quantize_scale(op, **kwargs)
 
 
 @register_pass("compile")
