@@ -10,7 +10,7 @@ python cvm/quantization/main2.py config/file/path
 
 Please refer to the example file: cvm/quantization/docs/example.ini for more configuration details. Copy the example file and configure  model's quantization settings by yourself.
 
-The unify quantization procedure is defined in file: cvm/quantization/main2.py, refer to [main2](https://github.com) for more quantization details.
+The unify quantization procedure is defined in file: cvm/quantization/main2.py, refer to [main2](https://github.com/CortexFoundation/tvm-cvm/blob/ryt_tmp/cvm/quantization/main2.py) for more quantization details.
 
 ## Developer API
 
@@ -32,44 +32,75 @@ The Calibration and Quantization pass is achieved in class MRT.
 
 MRT has supported lots of mxnet operators while there still exists some unsupported. And all the unsupported operators are unquantifiable. So we just advise splitting the model into two sub-graph if there are some unsupported operators and only quantizing the half model (named base_model, indicating the input nodes to split operators generally). In other words, it's the user's responsibility to select the split keys of splitting the original model, while the half model is ignored to quantization pass if necessary. 
 
-The list operators have already been considered by MRT developers, which operators over the list is not allowed in quantization. Contact the MRT developers in the github for more help.
-
 #### Currently Supported Operators
+
+The list operators have already been considered by MRT developers, which operators over the list is not allowed in quantization. Split the model for unsupported operators with disable-quantization attributes or contact the MRT developers in the github for operators needing quantization.
+
+##### Transformer
+
+| Operator     | Supported          | Operator    | Supported          |
+| ------------ | ------------------ | ----------- | ------------------ |
+| SliceAxis    | :heavy_check_mark: | SwapAxis    | :heavy_check_mark: |
+| Slice        | :heavy_check_mark: | Flatten     | :heavy_check_mark: |
+| SliceLike    | :heavy_check_mark: | Concat      | :heavy_check_mark: |
+| Transpose    | :heavy_check_mark: | where       | :heavy_check_mark: |
+| repeat       | :heavy_check_mark: | expand_dims | :heavy_check_mark: |
+| SliceChannel | :heavy_check_mark: | tile        | :heavy_check_mark: |
+| squeeze      | :heavy_check_mark: | Reshape     | :heavy_check_mark: |
+| clip         | :heavy_check_mark: | Embedding   | :heavy_check_mark: |
+
+##### NN
+
+| Operator       | Supported          | Operator | Supported          |
+| -------------- | ------------------ | -------- | ------------------ |
+| Convolution    | :heavy_check_mark: | Pad      | :heavy_check_mark: |
+| FullyConnected | :heavy_check_mark: | relu     | :heavy_check_mark: |
+| LeakyReLU      | :heavy_check_mark: | Pooling  | :heavy_check_mark: |
+| UpSampling     | :x:                | softmax  | :heavy_check_mark: |
+| BatchNorm      | :heavy_check_mark: | Dropout  | :heavy_check_mark: |
+| Activation     | :heavy_check_mark: |          |                    |
+
+##### Broadcast
 
 | Operator      | Supported          | Operator          | Supported          |
 | ------------- | ------------------ | ----------------- | ------------------ |
-| SliceAxis     | :heavy_check_mark: | Convolution       | :heavy_check_mark: |
-| Slice         | :heavy_check_mark: | Pad               | :heavy_check_mark: |
-| SliceLike     | :x:                | Expand_dims       | :heavy_check_mark: |
-| Transpose     | :heavy_check_mark: | Embedding         | :heavy_check_mark: |
-| relu          | :heavy_check_mark: | repeat            | :heavy_check_mark: |
-| LeakyReLU     | :x:                | _contrib_box_nms  | :x:                |
-| _mul_scalar   | :x:                | SliceChannel      | :x:                |
-| _div_scalar   | :x:                | UpSampling        | :x:                |
-| Activation    | :heavy_check_mark: | FullyConnected    | :heavy_check_mark: |
-| sigmoid       | :heavy_check_mark: | broadcast_div     | :x:                |
-| exp           | :heavy_check_mark: | broadcast_sub     | :x:                |
-| softmax       | :heavy_check_mark: | broadcast_to      | :x:                |
-| Pooling       | :heavy_check_mark: | broadcast_greater | :x:                |
-| broadcast_mul | :heavy_check_mark: | Concat            | :heavy_check_mark: |
-| broadcast_add | :heavy_check_mark: | sum               | :heavy_check_mark: |
-| BatchNorm     | :x:                | ceil              | :x:                |
-| Flatten       | :heavy_check_mark: | round             | :x:                |
-| floor         | :x:                | fix               | :x:                |
-| Cast          | :x:                | clip              | :heavy_check_mark: |
-| Reshape       | :heavy_check_mark: | _minimum          | :x:                |
-| Custom        | :x:                | _maximum          | :heavy_check_mark: |
-| max           | :heavy_check_mark: | min               | :x:                |
-| argmax        | :x:                | argmin            | :x:                |
-| abs           | :x:                | elemwise_add      | :heavy_check_mark: |
-| elemwise_sub  | :heavy_check_mark: | Dropout           | :heavy_check_mark: |
-| _arange       | :heavy_check_mark: | tile              | :heavy_check_mark: |
-| negative      | :heavy_check_mark: | SwapAxis          | :x:                |
-| _plus_scalar  | :x:                | zeros_like        | :x:                |
-| ones_like     | :x:                | _greater_scalar   | :x:                |
-| where         | :x:                | squeeze           | :heavy_check_mark: |
+| broadcast_div | :x:                | broadcast_add     | :heavy_check_mark: |
+| broadcast_sub | :heavy_check_mark: | broadcast_mul     | :heavy_check_mark: |
+| broadcast_to  | :x:                | broadcast_greater | :x:                |
 
+##### Elemwise
 
+| Operator        | Supported          | Operator     | Supported          |
+| --------------- | ------------------ | ------------ | ------------------ |
+| _mul_scalar     | :heavy_check_mark: | _div_scalar  | :heavy_check_mark: |
+| elemwise_add    | :heavy_check_mark: | elemwise_sub | :heavy_check_mark: |
+| ceil            | :x:                | round        | :x:                |
+| fix             | :x:                | floor        | :x:                |
+| abs             | :x:                | sigmoid      | :heavy_check_mark: |
+| exp             | :heavy_check_mark: | negative     | ✔️                  |
+| _minimum        | :x:                | _maximum     | :x:                |
+| _plus_scalar    | :heavy_check_mark: | zeros_like   | :heavy_check_mark: |
+| _greater_scalar | :heavy_check_mark: | ones_like    | ✔️                  |
+
+##### Reduce
+
+| Operator | Supported          | Operator | Supported |
+| -------- | ------------------ | -------- | --------- |
+| max      | :heavy_check_mark: | min      | :x:       |
+| sum      | :heavy_check_mark: | argmin   | :x:       |
+| argmax   | :x:                |          |           |
+
+##### Vision
+
+| Operator         | Supported | Operator | Supported |
+| ---------------- | --------- | -------- | --------- |
+| _contrib_box_nms | :x:       |          |           |
+
+##### Others
+
+| Operator | Supported          | Operator | Supported |
+| -------- | ------------------ | -------- | --------- |
+| _arange  | :heavy_check_mark: | Custom   | ❌         |
 ### Public Interface
 
 #### Model
@@ -124,10 +155,10 @@ Some models have been tested and the precision before and after quantization are
 
 | model name          | Iteration | evalfunc                     | quantize                     | total sample |
 | ------------------- | --------- | ---------------------------- | ---------------------------- | ------------ |
-| resnet50_v1         | 312       | top1=77.39%<br />top5=93.59% | top1=76.45%<br />top5=93.27% | 50080        |
+| resnet50_v1         | 312       | top1=77.39%<br />top5=93.59% | top1=76.47%<br />top5=93.28% | 50080        |
 | resnet50_v2         | 312       | top1=77.15%<br />top5=93.44% | top1=70.76%<br />top5=89.56% | 50080        |
-| resnet18_v1         | 312       | top1=70.96%<br />top5=89.93% | top1=70.10%<br />top5=89.59% | 50080        |
-| resnet18v1_b_0.89   | 312       | top1=67.21%<br />top5=87.45% | top1=63.80%<br />top5=85.61% | 50080        |
+| resnet18_v1         | 312       | top1=70.96%<br />top5=89.93% | top1=70.11%<br />top5=89.60% | 50080        |
+| resnet18v1_b_0.89   | 312       | top1=67.21%<br />top5=87.45% | top1=63.75%<br />top5=85.63% | 50080        |
 | quickdraw_wlt       | 349       | top1=81.90%<br />top5=98.26% | top1=81.83%<br />top5=98.24% | 56000        |
 | qd10_resnetv1_20    | 349       | top1=85.79%<br />top5=98.73% | top1=85.79%<br />top5=98.73% | 56000        |
 | densenet161         | 312       | top1=77.62%<br />top5=93.82% | top1=77.32%<br />top5=93.63% | 50080        |
@@ -136,9 +167,9 @@ Some models have been tested and the precision before and after quantization are
 | mobilenet1_0.ini    | 312       | top1=70.77%<br />top5=59.97% | top1=66.11%<br />top5=87.35% | 50080        |
 | shufflenet_v1       | 312       | top1=63.48%<br />top5=85.12% | top1=60.45%<br />top5=82.95% | 50080        |
 | squeezenet1.0       | 312       | top1=57.20%<br />top5=80.04% | top1=55.16%<br />top5=78.67% | 50080        |
-| tf_inception_v3     | 312       | top1=55.58%<br />top5=77.56% | top1=50.76%<br />top5=75.91% | 50080        |
-| trec                | 28        | 97.84%                       | 97.63%                       | 1102         |
+| tf_inception_v3     | 312       | top1=55.58%<br />top5=77.56% | top1=55.54%<br />top5=83.03% | 50080        |
 | vgg19               | 312       | top1=74.14%<br />top5=91.78% | top1=73.75%<br />top5=91.67% | 50080        |
+| trec                | 28        | 97.84%                       | 97.63%                       | 1102         |
 | yolo3_darknet53_voc | 29        | 81.37%                       | 82.08%                       | 4800         |
 | ssd                 | 29        | 80.27%                       | 80.01%                       | 4800         |
 
