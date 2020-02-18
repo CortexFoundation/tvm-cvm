@@ -182,5 +182,6 @@ Some models have been tested and the precision before and after quantization is 
 | trec                | 28        | 97.84%                       | 97.63%                       | 1102         |
 | yolo3_darknet53_voc | 29        | 81.37%                       | 82.08%                       | 4800         |
 | ssd                 | 29        | 80.27%                       | 80.01%                       | 4800         |
+| mnist               | 62        | top1=99.18%<br />top5=100%   | 99.17%<br />top5=100%        | 10000        |
 
 
