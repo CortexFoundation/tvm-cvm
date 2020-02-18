@@ -66,7 +66,7 @@ Below operators are carefully selected by the MRT developers. The unsupported op
 | Convolution    | :heavy_check_mark: | Pad      | :heavy_check_mark: |
 | FullyConnected | :heavy_check_mark: | relu     | :heavy_check_mark: |
 | LeakyReLU      | :heavy_check_mark: | Pooling  | :heavy_check_mark: |
-| UpSampling     | :x:                | softmax  | :heavy_check_mark: |
+| UpSampling     | :x:(TODO)          | softmax  | :heavy_check_mark: |
 | BatchNorm      | :heavy_check_mark: | Dropout  | :heavy_check_mark: |
 | Activation     | :heavy_check_mark: |          |                    |
 
@@ -174,7 +174,7 @@ Some models have been tested and the precision before and after quantization is 
 | densenet161         | 312       | top1=77.62%<br />top5=93.82% | top1=77.32%<br />top5=93.63% | 50080        |
 | alexnet             | 312       | top1=55.91%<br />top5=78.75% | top1=51.69%<br />top5=77.99% | 50080        |
 | cifar_resnet20_v1   | 62        | top1=92.88%<br />top5=99.78% | top1=92.82%<br />top5=99.75% | 10000        |
-| mobilenet1_0.ini    | 312       | top1=70.77%<br />top5=59.97% | top1=66.11%<br />top5=87.35% | 50080        |
+| mobilenet1_0.ini    | 312       | top1=70.77%<br />top5=89.97% | top1=66.11%<br />top5=87.35% | 50080        |
 | shufflenet_v1       | 312       | top1=63.48%<br />top5=85.12% | top1=60.45%<br />top5=82.95% | 50080        |
 | squeezenet1.0       | 312       | top1=57.20%<br />top5=80.04% | top1=55.16%<br />top5=78.67% | 50080        |
 | tf_inception_v3     | 312       | top1=55.58%<br />top5=77.56% | top1=55.54%<br />top5=83.03% | 50080        |
