@@ -18,7 +18,7 @@ MRT has separated model quantization configurations from source code for simplif
 python cvm/quantization/main2.py config/file/path
 ```
 
-Please refer to the example file: cvm/quantization/docs/example.ini for more configuration details. Copy the example file and configure the model's quantization settings locally.
+Please refer to the example file: cvm/quantization/docs/example.ini [link](https://github.com/CortexFoundation/tvm-cvm/blob/wlt/cvm/models/config.example.ini) for more configuration details. Copy the example file and configure the model's quantization settings locally.
 
 The unify quantization procedure is defined in file: cvm/quantization/main2.py, refer to [main2](https://github.com/CortexFoundation/tvm-cvm/blob/ryt_tmp/cvm/quantization/main2.py) for more quantization details.
 
