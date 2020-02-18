@@ -136,7 +136,7 @@ A wrapper class for model transformation tool which simulates deep learning netw
 | func name                        | usage                                                        |
 | -------------------------------- | ------------------------------------------------------------ |
 | set_data(data)                   | Set the data before calibration.                             |
-| calibrate([ctx, lambd, old_ths]) | Calibrate the current model after setting mrt data.<br />Contex on which intermediate result would be stored, hyperparameter lambd and reference threshold dict could also be specified. <br />Return the threshold dict of node-level output. |
+| calibrate([ctx, lambd, old_ths]) | Calibrate the current model after setting mrt data.<br />Context on which intermediate result would be stored, hyperparameter lambd and reference threshold dict could also be specified. <br />Return the threshold dict of node-level output. |
 | set_threshold(name, threshold)   | Manually set the threshold of the node output, given node name. |
 | set_th_dict(th_dict)             | Manually set the threshold dict.                             |
 | set_input_prec(prec)             | Set the input precision before quantization.                 |
