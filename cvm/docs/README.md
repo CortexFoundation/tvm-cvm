@@ -1,6 +1,16 @@
 # Model Representation Tool Documentation
 
-## Configuration File API | User Interface
+[TOC]
+
+## Introdution
+
+MRT, short for **Model Representation Tool**, aims to convert floating model into a deterministic and non-data-overflow network. MRT links the off-chain developer community to the on-chain ecosystem, from Off-chain deep learning to MRT transformations, and then uploading to Cortex Blockchain for on-chain deterministic inference.
+
+A full deterministic deep learning framework designed by Cortex is ran within CVM, the Cortex Virtual Machine ,and the integral part in our Cortex Blockchain source is called CVM runtime. All data flow in CVM is an integer with some precision ranged in 0 and 32. We proposed approaches to certify the data non-flow over INT32. The model that goes under MRT transformation can be accepted by CVM, which we called it on-chain model.
+
+MRT transformation usage is simple to model-training programmer since we have separated model quantization procedures from source code. One can invoke MRT via programming or configuring the settings file, more detail usage is introduced as below.
+
+## Configuration File 
 
 MRT has separated model quantization configurations from source code for simplifying the user-usage. So one can quantize their model quickly via configuring the .ini file. The running command script is as below.
 
@@ -8,33 +18,33 @@ MRT has separated model quantization configurations from source code for simplif
 python cvm/quantization/main2.py config/file/path
 ```
 
-Please refer to the example file: cvm/quantization/docs/example.ini for more configuration details. Copy the example file and configure  model's quantization settings by yourself.
+Please refer to the example file: cvm/quantization/docs/example.ini for more configuration details. Copy the example file and configure the model's quantization settings locally.
 
 The unify quantization procedure is defined in file: cvm/quantization/main2.py, refer to [main2](https://github.com/CortexFoundation/tvm-cvm/blob/ryt_tmp/cvm/quantization/main2.py) for more quantization details.
 
 ## Developer API
 
-Mainly public quantization API is in file cvm/quantization/transformer.py, see the detail interface in the following sections. And the main quantization procedure is: 
+The Main public quantization API is located at cvm/quantization/transformer.py, see the detail interface in the following sections. And the main quantization procedure is: 
 
-	Model Load >>> Preparation >>> [Optional] Model Split >>>
-	
-	Calibration >>> Quantization >>> [Optional] Model Merge >>> Compilation to CVM,
+    Model Load >>> Preparation >>> [Optional] Model Split >>>
+    
+    Calibration >>> Quantization >>> [Optional] Model Merge >>> Compilation to CVM,
 
 which maps the class methods: 
 
-	Model.load >>> Model.prepare >>> [Optional] Model.split >>> 
-	
-	MRT.calibrate >>> MRT.quantize >>> [Optional] ModelMerger.merge >>> Model.to_cvm.
+    Model.load >>> Model.prepare >>> [Optional] Model.split >>> 
+    
+    MRT.calibrate >>> MRT.quantize >>> [Optional] ModelMerger.merge >>> Model.to_cvm.
 
 The Calibration and Quantization pass is achieved in class MRT.
 
-### Split && Merge
+### Split & Merge
 
-MRT has supported lots of mxnet operators while there still exists some unsupported. And all the unsupported operators are unquantifiable. So we just advise splitting the model into two sub-graph if there are some unsupported operators and only quantizing the half model (named base_model, indicating the input nodes to split operators generally). In other words, it's the user's responsibility to select the split keys of splitting the original model, while the half model is ignored to quantization pass if necessary. 
+MRT supports for most of MXNet operators while there still exists some unsupported. We advise splitting the model into two sub-graph if there are some unsupported operators and only quantizing the half model (named base_model, indicating the input nodes to split operators generally). In other words, it's the user's responsibility to select the split keys of splitting the original model, while the half model is ignored to quantization pass if necessary. 
 
 #### Currently Supported Operators
 
-The list operators have already been considered by MRT developers, which operators over the list is not allowed in quantization. Split the model for unsupported operators with disable-quantization attributes or contact the MRT developers in the github for operators needing quantization.
+Below operators are carefully selected by the MRT developers. The unsupported oprators are the ones that are unquantifiable. For the unsupported operators, you can either split the model with disable-quantization attributes or contact the MRT developers through GitHub for assitance.
 
 ##### Transformer
 
@@ -105,7 +115,7 @@ The list operators have already been considered by MRT developers, which operato
 
 #### Model
 
-A wrapper class for mxnet symbol and params which indicates model. All the quantization passes return the class instance for unify representation. Besides, the class has wrapped some user-friendly functions API introduced as below.
+A wrapper class for MXNet symbol and params which indicates model. All the quantization passes return the class instance for unify representation. Besides, the class has wrapped some user-friendly functions API  listed as below.
 
 | func name                                          | usage                                                        |
 | -------------------------------------------------- | ------------------------------------------------------------ |
@@ -151,7 +161,7 @@ A wrapper class for model merge tool. This class has wrapped some user-friendly 
 
 ## Model Testing
 
-Some models have been tested and the precision before and after quantization are provided in the following chart for reference.
+Some models have been tested and the precision before and after quantization is provided in the following chart for reference.
 
 | model name          | Iteration | evalfunc                     | quantize                     | total sample |
 | ------------------- | --------- | ---------------------------- | ---------------------------- | ------------ |
@@ -172,8 +182,5 @@ Some models have been tested and the precision before and after quantization are
 | trec                | 28        | 97.84%                       | 97.63%                       | 1102         |
 | yolo3_darknet53_voc | 29        | 81.37%                       | 82.08%                       | 4800         |
 | ssd                 | 29        | 80.27%                       | 80.01%                       | 4800         |
-
-
-
 
 
