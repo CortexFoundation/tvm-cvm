@@ -8,6 +8,8 @@ MRT, short for **Model Representation Tool**, aims to convert floating model int
 
 A full deterministic deep learning framework designed by Cortex is ran within CVM, the Cortex Virtual Machine ,and the integral part in our Cortex Blockchain source is called CVM runtime. All data flow in CVM is an integer with some precision ranged in 0 and 32. We proposed approaches to certify the data non-flow over INT32. The model that goes under MRT transformation can be accepted by CVM, which we called it on-chain model.
 
+MRT is based on the MXNet symbol, doing operations on the whole operators with topological order in models. Besides, for scalability, we've researched the model transformation from TensorFlow into MXNet, models such as mobilenet, inception_v3 have been successfully converted and more operators will be supported in the future. Other deep learning frameworks like PyTorch and Caffe is in the roadmap of our plan.
+
 MRT transformation usage is simple to model-training programmer since we have separated model quantization procedures from source code. One can invoke MRT via programming or configuring the settings file, more detail usage is introduced as below.
 
 ## Configuration File 
@@ -18,7 +20,7 @@ MRT has separated model quantization configurations from source code for simplif
 python cvm/quantization/main2.py config/file/path
 ```
 
-Please refer to the example file: cvm/quantization/docs/example.ini [link](https://github.com/CortexFoundation/tvm-cvm/blob/wlt/cvm/models/config.example.ini) for more configuration details. Copy the example file and configure the model's quantization settings locally.
+Please refer to the example file: cvm/quantization/models/config.example.ini [link](https://github.com/CortexFoundation/tvm-cvm/blob/wlt/cvm/models/config.example.ini) for more configuration details. Copy the example file and configure the model's quantization settings locally. We have quantized and tested accuracy for some available models in MXNet gluon zoo with configurations file, whose settings are located in [link](https://github.com/CortexFoundation/tvm-cvm/blob/wlt/cvm/models/) cvm/quantization/models for reference. These accuracies are organized into a chart for analysis in section [Model Testing](#Model Testing).
 
 The unify quantization procedure is defined in file: cvm/quantization/main2.py, refer to [main2](https://github.com/CortexFoundation/tvm-cvm/blob/ryt_tmp/cvm/quantization/main2.py) for more quantization details.
 
