@@ -1240,7 +1240,9 @@ class Max(Transformer):
 class Min(Transformer):
     pass
 
-
+@register_pass("fuse_transpose")
+@register_pass("rewrite")
+@register_pass("quantize")
 @register_transformer("argmax")
 class Argmax(Transformer):
     def compile(self, op, **kwargs):

@@ -19,6 +19,10 @@ from tfm_pass import infer_shape
 import sym_utils as sutils
 import sym_pass as spass
 
+def _argmax(inputs, attrs, params):
+    cname = inputs[1].attr('name')
+    axis = params[cname].asnumpy()
+    return mx.sym.argmax(inputs[0], axis=axis, keepdims=False)
 
 def _bias_add(inputs, attrs, params):
     input_eids = attrs["_input_eids"]
@@ -84,6 +88,10 @@ def _softmax(inputs, attrs, params):
     return mx.sym.softmax(*inputs, axis=axis)
 
 def _get_pad_pair(input1d, kernel1d, stride1d):
+    # pl + pr + i = n*s + kd
+    # when `padding` in tensorflow is SAME
+    # mxnet's intepretation: o = n+1 = ceil(i/s)
+    # or o=n+1=floor(i/s) ?
     if input1d % stride1d == 0:
         pad = max(kernel1d - stride1d, 0)
     else:
@@ -150,9 +158,17 @@ def _conv2d(opname):
                 #  padding = (pad_v[0], pad_v[1], pad_h[0], pad_h[1])
             # TODO(wlt): mxnet not supported four-dimension padding
             # padding = (max(pad_v), max(pad_h))
-            assert pad_v[0] == pad_v[1], pad_v
-            assert pad_h[0] == pad_h[1], pad_h
-            padding = (pad_v[0], pad_h[0])
+            # assert pad_v[0] == pad_v[1], pad_v
+            # assert pad_h[0] == pad_h[1], pad_h
+            # padding = (pad_v[0], pad_h[0])
+            if pad_v[0] != pad_v[1] or pad_h[0] != pad_h[1]:
+                node = mx.sym.pad(
+                    inputs[0], mode="constant", constant_value=0,
+                    pad_width=(0, 0, 0, 0, pad_v[0], pad_v[1], pad_h[0], pad_h[1]))
+                inputs[0] = node
+                padding = (0,0)
+            else:
+                padding = (pad_v[0], pad_h[0])
 
         assert data_shp[1] % weight_shp[1] == 0
         groups = data_shp[1] // weight_shp[1]
@@ -218,9 +234,17 @@ def _pool2d(pool_type):
 
             pad_v = _get_pad_pair(in_h, kernel_h, stride_h)
             pad_h = _get_pad_pair(in_w, kernel_w, stride_w)
-            assert pad_v[0] == pad_v[1]
-            assert pad_h[0] == pad_h[1]
-            padding = (pad_v[0], pad_h[0])
+            # assert pad_v[0] == pad_v[1]
+            # assert pad_h[0] == pad_h[1]
+            # padding = (pad_v[0], pad_h[0])
+            if pad_v[0] != pad_v[1] or pad_h[0] != pad_h[1]:
+                node = mx.sym.pad(
+                    inputs[0], mode="constant", constant_value=0,
+                    pad_width=(0, 0, 0, 0, pad_v[0], pad_v[1], pad_h[0], pad_h[1]))
+                inputs[0] = node
+                padding = (0, 0)
+            else:
+                padding = (pad_v[0], pad_h[0])
 
         pool_attr = {
             'pool_type': pool_type,
@@ -231,7 +255,8 @@ def _pool2d(pool_type):
 
         if pool_type == "avg":
             # TODO: this actually should be count_include_pad False
-            pool_attr['count_include_pad'] = True
+            # pool_attr['count_include_pad'] = True
+            pool_attr['count_include_pad'] = False
 
         sym = mx.sym.Pooling(*inputs, **pool_attr)
         if data_format == "NHWC":
@@ -443,6 +468,7 @@ def _squeeze(inputs, attrs, params):
 
 
 _convert_map = {
+    'ArgMax'                            : _argmax,
     'Add'                               : _elemwise('elemwise_add'),
     'AvgPool'                           : _pool2d("avg"),
     'BiasAdd'                           : _bias_add,
@@ -553,6 +579,7 @@ def convert_operator(op_name, inputs, attrs, params, logger=logging):
     return sym
 
 currSupportedOps = {
+                       'ArgMax',
                        'Const',
                        'Pad',
                        'Identity',
@@ -792,8 +819,27 @@ def tf_dump_model(modelname):
     dump(modelname, sym, params)
 
 modelfile = {
-                "resnet50_v1": "/data/tfmodels/resnet50_v1_new/model.pb",
-                "inception_v3": "/data/tfmodels/inception_v3/model.pb",
-                "mobilenet": "/data/tfmodels/mobilenet/model.pb",
+                # "resnet50_v1": "/data/tfmodels/resnet50_v1_new/model.pb",
+                # "inception_v3": "/data/tfmodels/inception_v3/model.pb",
+                # "mobilenet": "/data/tfmodels/mobilenet/model.pb",
+                # "densenet_lite": "/data/tfmodels/lite/DenseNet/densenet.pb",
+                "inception_v3_lite": "/data/tfmodels/lite/Inception_V3/inception_v3.pb",
+                # "mobilenet_v1_0.25_128_lite": "/data/tfmodels/lite/Mobilenet_V1_0.25_128/mobilenet_v1_0.25_128_frozen.pb",
+                # "mobilenet_v1_0.25_224_lite": "/data/tfmodels/lite/Mobilenet_V1_0.25_224/mobilenet_v1_0.25_224_frozen.pb",
+                # "mobilenet_v1_0.50_128_lite": "/data/tfmodels/lite/Mobilenet_V1_0.50_128/mobilenet_v1_0.5_128_frozen.pb",
+                # "mobilenet_v1_0.50_192_lite": "/data/tfmodels/lite/Mobilenet_V1_0.50_192/mobilenet_v1_0.5_192_frozen.pb",
+                # "mobilenet_v1_1.0_224_lite": "/data/tfmodels/lite/Mobilenet_V1_1.0_224/mobilenet_v1_1.0_224_frozen.pb",
+                # "mobilenet_v2_1.0_224_lite": "/data/tfmodels/lite/Mobilenet_V2_1.0_224/mobilenet_v2_1.0_224_frozen.pb",
+                # "resnet_v2_lite": "/data/tfmodels/lite/ResNet_V2_101/resnet_v2_101_299_frozen.pb",
             }
+
+if __name__ == '__main__':
+    utils.log_init()
+    modelname = 'densenet_lite'
+    outputs = ['ArgMax', 'softmax_tensor']
+    modelname = "inception_v3_lite"
+    outputs = None
+    model_path = modelfile[modelname]
+    sym, params = convert_model(model_path, outputs=outputs)
+    dump(modelname, sym, params)
 
