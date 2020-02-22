@@ -831,7 +831,7 @@ def _revise_output(modelname, symbol, params):
         return symbol, params
     # single outputs is assumed
     symbol = mx.sym.slice_axis(symbol, axis=1, begin=1, end=None)
-    symbol = mx.sym.argmax(symbol, axis=1)
+    # symbol = mx.sym.argmax(symbol, axis=1)
     # name = "revise_outs"
     # symbol = mx.sym.broadcast_sub(symbol, mx.sym.var(name))
     # params[name] = mx.nd.array([1])
@@ -896,9 +896,12 @@ outputs_list = {
     "resnet_v2_lite": None,
 }
 
+import sys
+
 if __name__ == '__main__':
     utils.log_init()
-    assert len(sys.argv) == 2, "Please enter 2 python arguments."
+    assert len(sys.argv) >= 2, "Please enter at least 2 python arguments."
     modelname = sys.argv[1]
-    tf_dump_model(modelname)
+    revise_outs = False if len(sys.argv) > 2 and sys.argv[2] == 'False' else True
+    tf_dump_model(modelname, revise_outs=revise_outs)
 

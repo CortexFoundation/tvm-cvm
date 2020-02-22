@@ -1242,17 +1242,9 @@ class Min(Transformer):
 
 @register_pass("fuse_transpose")
 @register_pass("rewrite")
+@register_pass("quantize")
 @register_transformer("argmax")
 class Argmax(Transformer):
-    def quantize(self, op, **kwargs):
-        name = op.attr('name')
-        childs = sym_iter(op.get_children())
-        cns = [c.attr('name') for c in childs]
-        ishp = kwargs['infer_shapes'][cns[0]][get_entry_id(childs[0])]
-        kwargs['scales'][name] = 1
-        kwargs['precs'][name][OUT_KEY] = get_bit(max(list(ishp)))
-        return op
-
     def compile(self, op, **kwargs):
         childs = kwargs['childs']
         attrs = kwargs['attr']
