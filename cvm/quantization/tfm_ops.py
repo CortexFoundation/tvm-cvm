@@ -301,6 +301,7 @@ class Convolution(Transformer):
         return get_nnvm_op(op_name)(*childs, name=N.n('convolution'),
                                     **new_attrs)
 
+
 @register_pass("validate")
 @register_pass("calculate_ops")
 @register_pass("fuse_transpose")
@@ -1189,10 +1190,10 @@ class Clip(Transformer):
         # scales[out.attr('name')] = scales[X_name]
         # return out
 
-        precs[name][OUT_KEY] = precs[X.attr('name')][OUT_KEY]
         scales[name] = iscale = scales[X.attr('name')]
         a_min = sutils.get_attr(attrs, "a_min") * iscale
         a_max = sutils.get_attr(attrs, "a_max") * iscale
+        precs[name][OUT_KEY] = min(get_bit(th_dict[name]*iscale), get_bit(int(a_max)))
         return mx.sym.clip(X, a_min=int(a_min), a_max=int(a_max), name=name)
 
     def compile(self, op, **kwargs):
@@ -1511,8 +1512,8 @@ def _quantize_xwb(op, **kwargs):
     if not get_attr(attr, 'no_bias', False):
         bs = ws * xs
         bias_prec = get_bit(th_dict[cns[2]] * bs)
-        B, bprec, _ = requant_parameter(cns[2], bias_prec, bs,
-                                        oname=name, **kwargs)
+        B, bprec, _ = requant_parameter(
+            cns[2], bias_prec, bs, oname=name, **kwargs)
     scales[name] = ws * xs
     op = get_mxnet_op(op_name)(X, W, B, **attr, name=name)
 
@@ -1535,17 +1536,14 @@ def _restore(op, **kwargs):
     childs, attr = sym_iter(op.get_children()), op.list_attr()
 
     childs = [] if childs is None else childs
+
     new_childs = [c / scales[c.attr('name')] \
         if scales.get(c.attr('name'), 1) != 1 else c \
                  for c in childs]
 
     out = get_mxnet_op(op_name)(*new_childs, **attr, name=name)
-
-    oprec = precs[name].get(OUT_KEY, 16)
-    oscale = scales[name] = 1
-    oscale = scales[name] = scale(th_dict[name], oprec)
-    out = (out * oscale)
-    precs[name][OUT_KEY] = oprec
+    precs[name][OUT_KEY] = get_bit(th_dict[name])
+    scales[name] = 1
 
     return out
 
