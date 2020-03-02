@@ -609,11 +609,11 @@ currSupportedOps = {
 import tensor_util
 
 from tensorflow.core.framework import types_pb2
-default_input_shape = [1, 224, 224, 3]
 default_tf_dtype = types_pb2.DT_FLOAT
 default_tf_start_types = {'Placeholder', 'PlaceholderWithDefault', 'FIFOQueueV2'}
 
-def convert_tfnode(tfnode, graph, params, infer_shapes, logger=logging):
+def convert_tfnode(tfnode, graph, params, infer_shapes,
+                   logger=loggingi, default_input_shape=(1,224,224,3)):
     name, op_name = tfnode.name, tfnode.op
     attr, org_inputs = tfnode.attr, tfnode.input
 
@@ -637,7 +637,7 @@ def convert_tfnode(tfnode, graph, params, infer_shapes, logger=logging):
         input_shape = \
             tensor_util.tensor_shape_proto_to_list(attr['shape'].shape)
         if not input_shape:
-            input_shape = default_input_shape
+            input_shape = list(default_input_shape)
         try:
             dtype = tensor_util.tensor_type_to_numpy(attr['dtype'].type)
         except TypeError:
@@ -703,7 +703,7 @@ def topo_sort(tfgraph, logger=logging):
         exit()
     return topos
 
-def convert_model(pbfile, layout="NHWC", outputs=None):
+def convert_model(pbfile, layout="NHWC", outputs=None, default_input_shape=(1,224,224,3)):
     # load the original model
     logger = logging.getLogger("Loading Original Model")
     tfparser = TFParser(pbfile)
@@ -716,7 +716,7 @@ def convert_model(pbfile, layout="NHWC", outputs=None):
     graph, params, infer_shapes = {}, {}, {}
     for tfnode in topo_sort(tfgraph):
         # print("name: {}, op: {}, inputs: {}".format(tfnode.name, tfnode.op, tfnode.input))
-        convert_tfnode(tfnode, graph, params, infer_shapes)
+        convert_tfnode(tfnode, graph, params, infer_shapes, default_tf_dtype=default_input_shape)
 
     logger.info("Operators successfully converted.")
 
@@ -855,11 +855,12 @@ def dump(model, symbol, params):
     nd.save(params_file, params)
     logger.info("Model successfully dumped to '%s'", sym_file)
 
-def tf_dump_model(modelname, revise_outs=True):
+def tf_dump_model(modelname, revise_outs=True, default_input_shape=(1,224,224,3)):
     utils.log_init()
     model_path = modelfile[modelname]
     outputs = outputs_list[modelname]
-    sym, params = convert_model(model_path, outputs=outputs)
+    sym, params = convert_model(
+        model_path, outputs=outputs, default_input_shape=default_input_shape)
     sym, params = _fuse_pad(sym, params)
     if revise_outs:
         sym, params = _revise_output(modelname, sym, params)
