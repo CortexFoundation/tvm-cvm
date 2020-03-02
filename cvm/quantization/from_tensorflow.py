@@ -823,7 +823,7 @@ model_outs_revise = {
     "mobilenet_v1_0.50_192_lite",
     "mobilenet_v1_1.0_224_lite",
     "mobilenet_v2_1.0_224_lite",
-    "resnet_v2_lite",
+    "resnet_v2_101_lite",
 }
 
 def _revise_output(modelname, symbol, params):
@@ -877,7 +877,7 @@ modelfile = {
                 "mobilenet_v1_0.50_192_lite": "/data/tfmodels/lite/Mobilenet_V1_0.50_192/mobilenet_v1_0.5_192_frozen.pb",
                 "mobilenet_v1_1.0_224_lite": "/data/tfmodels/lite/Mobilenet_V1_1.0_224/mobilenet_v1_1.0_224_frozen.pb",
                 "mobilenet_v2_1.0_224_lite": "/data/tfmodels/lite/Mobilenet_V2_1.0_224/mobilenet_v2_1.0_224_frozen.pb",
-                "resnet_v2_lite": "/data/tfmodels/lite/ResNet_V2_101/resnet_v2_101_299_frozen.pb",
+                "resnet_v2_101_lite": "/data/tfmodels/lite/ResNet_V2_101/resnet_v2_101_299_frozen.pb",
             }
 
 outputs_list = {
@@ -893,7 +893,7 @@ outputs_list = {
     "mobilenet_v1_0.50_192_lite": None,
     "mobilenet_v1_1.0_224_lite": None,
     "mobilenet_v2_1.0_224_lite": ["MobilenetV2/Predictions/Reshape_1"],
-    "resnet_v2_lite": None,
+    "resnet_v2_101_lite": None,
 }
 
 import sys
