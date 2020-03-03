@@ -613,7 +613,7 @@ default_tf_dtype = types_pb2.DT_FLOAT
 default_tf_start_types = {'Placeholder', 'PlaceholderWithDefault', 'FIFOQueueV2'}
 
 def convert_tfnode(tfnode, graph, params, infer_shapes,
-                   logger=loggingi, default_input_shape=(1,224,224,3)):
+                   logger=logging, default_input_shape=(1,224,224,3)):
     name, op_name = tfnode.name, tfnode.op
     attr, org_inputs = tfnode.attr, tfnode.input
 
@@ -879,6 +879,7 @@ modelfile = {
                 "mobilenet_v1_1.0_224_lite": "/data/tfmodels/lite/Mobilenet_V1_1.0_224/mobilenet_v1_1.0_224_frozen.pb",
                 "mobilenet_v2_1.0_224_lite": "/data/tfmodels/lite/Mobilenet_V2_1.0_224/mobilenet_v2_1.0_224_frozen.pb",
                 "resnet_v2_101_lite": "/data/tfmodels/lite/ResNet_V2_101/resnet_v2_101_299_frozen.pb",
+                "ssd_mobilenet_v2_coco": "/data/tfmodels/ssd_mobilenet/ssd_mobilenet_v2_coco_2018_03_29/frozen_inference_graph.pb",
             }
 
 outputs_list = {
@@ -895,6 +896,7 @@ outputs_list = {
     "mobilenet_v1_1.0_224_lite": None,
     "mobilenet_v2_1.0_224_lite": ["MobilenetV2/Predictions/Reshape_1"],
     "resnet_v2_101_lite": None,
+    "ssd_mobilenet_v2_coco": ["resnet_v2_101/SpatialSqueeze"],
 }
 
 import sys
