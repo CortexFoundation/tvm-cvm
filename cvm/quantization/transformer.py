@@ -329,10 +329,10 @@ def compile_to_cvm(model, model_name, datadir="/data/std_out",
 
     # transform from mxnet symbol to cvm
     logger.info("Transform Mxnet symbol into CVM")
-    nnvm_sym, _ = to_nnvm(symbol, params)
+    nnvm_sym, params = to_nnvm(symbol, params)
     dtype, nnvm_params = "int32", {}
     tvm_ctx = tvm.context(target, 0)
-    for sym in topo_sort(symbol):
+    for sym in topo_sort(nnvm_sym):
         if sutils.is_params(sym, params):
             key, value = sym.attr('name'), params[sym.attr('name')]
             flat = value.asnumpy()
@@ -341,6 +341,8 @@ def compile_to_cvm(model, model_name, datadir="/data/std_out",
             assert (flat.astype(dtype).astype("float64") == flat).all(), \
                 "key: {}\nvalue: {}".format(key, value)
             nnvm_params[key] = tvm.nd.array(flat.astype(dtype), tvm_ctx)
+        elif sutils.is_inputs(sym, params):
+            assert sym.attr('name') == 'data'
 
     # compile to JSON&Bytes format
     # graph = nnvm.graph.create(nnvm_sym)

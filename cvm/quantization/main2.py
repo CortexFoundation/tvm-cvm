@@ -221,6 +221,11 @@ if __name__ == "__main__":
         th_dict = sim.load_ext(ext_file)
         logger.info("`%s` stage checkd" % sec)
 
+    # debug
+    # import tfm_pass as tpass
+    # op_names = tpass.collect_op_names(mrt.current_model.symbol, mrt.current_model.params)
+    # print(op_names)
+    # exit()
     # quantization
     sec = 'QUANTIZATION'
     if start_point <= 4:

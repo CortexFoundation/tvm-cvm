@@ -111,7 +111,8 @@ def to_nnvm(symbol, params):
         childs = [] if childs is None else childs
         childs = [get_node(c, graph) for c in childs]
         op = apply_pass("compile", infer_shapes=infer_shapes)(
-            op, childs=childs, attr=attr)
+            op, childs=childs, attr=attr,
+            params=params, graph=graph)
         graph[name] = op
 
     nodes = []
