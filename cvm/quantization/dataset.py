@@ -5,6 +5,8 @@ from gluoncv import data as gdata
 from gluoncv.data.batchify import Tuple, Stack, Pad
 from gluoncv.data.transforms.presets.yolo import YOLO3DefaultValTransform
 from gluoncv.utils.metrics.voc_detection import VOC07MApMetric
+from gluoncv.utils.metrics.coco_detection import COCODetectionMetric
+from gluoncv.data.transforms.presets.ssd import SSDDefaultValTransform
 import numpy as np
 import requests
 import tarfile
@@ -15,7 +17,7 @@ import math
 import pickle
 import logging
 
-dataset_dir = path.expanduser("~/.cvm")
+dataset_dir = path.expanduser("~/.mxnet/datasets")
 src = "http://0.0.0.0:8827"
 
 def extract_file(tar_path, target_path):
@@ -85,6 +87,54 @@ class Dataset:
         def _wrapper():
             return next(data_iter)
         return _wrapper
+
+class COCODataset(Dataset):
+    name = "coco"
+    download_deps = ['val2017.zip']
+
+    def _load_data(self):
+        assert len(self.ishape) == 4
+        N, C, H, W = self.ishape
+        assert C == 3
+        self.val_dataset = gdata.COCODetection(
+            root=self.root_dir, splits='instances_val2017', skip_empty=False)
+        val_batchify_fn = Tuple(Stack(), Pad(pad_val=-1))
+        self.data = gluon.data.DataLoader(
+            self.val_dataset.transform(SSDDefaultValTransform(W, H)),
+            batch_size=N, shuffle=False, batchify_fn=val_batchify_fn,
+            last_batch='rollover', num_workers=30)
+
+    def metrics(self):
+        _, _, H, W = self.ishape
+        metric = COCODetectionMetric(
+            self.val_dataset, '_eval', cleanup=True, data_shape=(H, W))
+        metric.reset()
+        return metric
+
+    def validate(self, metrics, predict, label):
+        det_ids, det_scores, det_bboxes = [], [], []
+        gt_ids, gt_bboxes, gt_difficults = [], [], []
+
+        _, _, H, W = self.ishape
+        assert H == W
+        ids, scores, bboxes = predict
+        det_ids.append(ids)
+        det_scores.append(scores)
+        # clip to image size
+        det_bboxes.append(bboxes.clip(0, H))
+        gt_ids.append(label.slice_axis(axis=-1, begin=4, end=5))
+        gt_difficults.append(
+            label.slice_axis(axis=-1, begin=5, end=6) \
+            if label.shape[-1] > 5 else None)
+        gt_bboxes.append(label.slice_axis(axis=-1, begin=0, end=4))
+
+        metrics.update(det_bboxes, det_ids, det_scores,
+                            gt_bboxes, gt_ids, gt_difficults)
+        map_name, mean_ap = metrics.get()
+        acc = {k:v for k,v in zip(map_name, mean_ap)}
+        acc = float(acc['~~~~ MeanAP @ IoU=[0.50,0.95] ~~~~\n'])/100
+        return "{:6.2%}".format(acc)
+
 
 class VOCDataset(Dataset):
     name = "voc"
@@ -202,6 +252,7 @@ class Cifar10Dataset(VisionDataset):
                 train=False).transform_first(transform_test),
             batch_size=N, shuffle=False, num_workers=4)
 
+
 class QuickDrawDataset(VisionDataset):
     name = "quickdraw"
 
@@ -293,6 +344,7 @@ DS_REG = {
     "quickdraw": QuickDrawDataset,
     "mnist": MnistDataset,
     "trec": TrecDataset,
+    "coco": COCODataset,
 }
 
 # max value: 2.64

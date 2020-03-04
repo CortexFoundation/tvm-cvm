@@ -234,11 +234,11 @@ if __name__ == "__main__":
             mrt.set_output_prec(output_precision)
         ctx = _get_ctx(cfg, sec, dctx=model_ctx)
         softmax_lambd = _get_val(
-            cfg, sec, 'softmax_lambd', dtype='float', dval=None)
+            cfg, sec, 'Softmax_lambd', dtype='float', dval=None)
         if softmax_lambd is not None:
             mrt.set_softmax_lambd(softmax_lambd)
         shift_bits = _get_val(
-            cfg, sec, 'shift_bits', dtype='int', dval=None)
+            cfg, sec, 'Shift_bits', dtype='int', dval=None)
         if shift_bits is not None:
             mrt.set_shift_bits(shift_bits)
         thresholds = _get_val(
