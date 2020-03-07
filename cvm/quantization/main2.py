@@ -221,6 +221,11 @@ if __name__ == "__main__":
         th_dict = sim.load_ext(ext_file)
         logger.info("`%s` stage checkd" % sec)
 
+    # debug
+    # import tfm_pass as tpass
+    # op_names = tpass.collect_op_names(mrt.current_model.symbol, mrt.current_model.params)
+    # print(op_names)
+    # exit()
     # quantization
     sec = 'QUANTIZATION'
     if start_point <= 4:
@@ -294,7 +299,9 @@ if __name__ == "__main__":
         dump = _get_val(cfg, sec, 'Dump', dtype='bool', dval=False)
         if dump:
             qmodel.save(sym_file, prm_file)
-        sim.save_ext(ext_file, oscales)
+        input_ext = mrt.get_inputs_ext()
+        infos = ['oscales: ', oscales, 'input_ext: ', input_ext, "input shapes: ", input_shape]
+        sim.save_ext(ext_file, *infos)
         logger.info("`%s` stage finished" % sec)
     else:
         qmodel = Model.load(sym_file, prm_file)
