@@ -101,6 +101,13 @@ def quantize(symbol, params, th_dict, precs, scales, op_input_precs,
             shift_bits=shift_bits,
             softmax_lambd=softmax_lambd)
 
+@N.register_nm("prepare_for_compile")
+def prepare_for_compile(symbol, params):
+    infer_shapes = infer_shape(symbol, params)
+    return topo_visit_transformer(symbol, params,
+            apply_pass("prepare_for_compile", infer_shapes=infer_shapes))
+
+
 @N.register_nm("cvm")
 def to_nnvm(symbol, params):
     infer_shapes = infer_shape(symbol, params)
