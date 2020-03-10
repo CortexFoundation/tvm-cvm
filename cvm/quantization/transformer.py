@@ -23,6 +23,8 @@ import cvm_op   # pylint: disable=unused-import
 import tfm_pass as tpass
 from tfm_pass import OUT_KEY, convert_params_dtype
 from tfm_pass import sym_calibrate, quantize, to_nnvm
+from tfm_pass import prepare_for_compile, fuse_constant
+from tfm_pass import calculate_ops, collect_op_names
 
 import sym_utils as sutils
 from sym_utils import topo_sort, sym_iter, get_mxnet_op
@@ -329,6 +331,11 @@ def compile_to_cvm(model, model_name, datadir="/data/std_out",
 
     # transform from mxnet symbol to cvm
     logger.info("Transform Mxnet symbol into CVM")
+    print("Before fixxing shape: ", calculate_ops(symbol, params, normalize=False))
+    symbol, params = prepare_for_compile(symbol, params)
+    symbol, params = fuse_constant(symbol, params)
+    print("After fixxing shape: ", calculate_ops(symbol, params, normalize=False))
+
     nnvm_sym, params = to_nnvm(symbol, params)
     dtype, nnvm_params = "int32", {}
     tvm_ctx = tvm.context(target, 0)
