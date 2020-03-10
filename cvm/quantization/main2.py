@@ -224,6 +224,25 @@ if __name__ == "__main__":
     # quantization
     sec = 'QUANTIZATION'
     if start_point <= 4:
+        restore_names = _get_val(
+            cfg, sec, 'Restore_name', dtype='[str]', dval=[])
+        restore_names = set(restore_names)
+        if '_ALL_EXCEPT_' in restore_names:
+            from tfm_base import _pass_manager
+            from sym_utils import topo_sort
+            from tfm_ops import disabled_restore_ops
+
+            quantize_ops = [op_name for op_name in _pass_manager["quantize"] \
+                            if op_name not in disabled_restore_ops]
+            restore_names_new = []
+            for sym in topo_sort(mrt.current_model.symbol):
+                name, op_name = sym.attr('name'), sym.attr('op_name')
+                if op_name in quantize_ops and \
+                    name not in restore_names:
+                    restore_names_new.append(name)
+            restore_names = set(restore_names_new)
+        for name in restore_names:
+            mrt.set_restore(name)
         input_precision = _get_val(
             cfg, sec, 'Input_precision', dtype='int', dval=None)
         if input_precision is not None:
@@ -256,7 +275,6 @@ if __name__ == "__main__":
                        datadir=model_dir)
         logger.info("`%s` stage checkd" % sec)
     qmodel = mrt.current_model
-
 
     # merge_model
     sec = 'MERGE_MODEL'

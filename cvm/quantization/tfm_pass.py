@@ -42,14 +42,32 @@ def rewrite(symbol, params):
 
 @N.register_nm("quantize")
 def quantize(symbol, params, th_dict, precs, scales, op_input_precs,
-             shift_bits, softmax_lambd):
+             restore_names, shift_bits, softmax_lambd):
     infer_shapes = infer_shape(symbol, params)
+
+    def restore(op, **kwargs):
+        th_dict, precs, scales = kwargs['th_dict'], kwargs['precs'], kwargs['scales']
+        name, op_name = op.attr('name'), op.attr('op_name')
+        childs, attr = sym_iter(op.get_children()), op.list_attr()
+
+        childs = [] if childs is None else childs
+
+        new_childs = [c / scales[c.attr('name')] \
+            if scales.get(c.attr('name'), 1) != 1 else c \
+                     for c in childs]
+
+        out = get_mxnet_op(op_name)(*new_childs, **attr, name=name)
+        precs[name][OUT_KEY] = get_bit(th_dict[name])
+        scales[name] = 1
+
+        return out
 
     def _quant(op, **kwargs):
         op = apply_pass("quantize",
             infer_shapes=kwargs['infer_shapes'],
             th_dict=kwargs['th_dict'],
-        )(op, **kwargs)
+        )(op, **kwargs) if op.attr('name') not in restore_names \
+            else restore(op, **kwargs)
 
         if is_var(op, kwargs['params']):
             return op

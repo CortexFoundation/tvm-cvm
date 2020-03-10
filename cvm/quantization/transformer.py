@@ -153,6 +153,7 @@ class MRT:
         self._data = None
         self.th_dict = {}
 
+        self.restore_names = set()
         self._op_default_input_precs()
         self.precs = {s.attr('name'):{} \
             for s in topo_sort(self.current_model)}
@@ -171,6 +172,9 @@ class MRT:
             self.current_model.symbol, self.current_model.params,
             self._data, ctx=ctx, lambd=lambd, old_ths=old_ths)
         return self.th_dict
+
+    def set_restore(self, name):
+        self.restore_names.add(name)
 
     def set_threshold(self, name, threshold):
         self.th_dict[name] = threshold
@@ -210,7 +214,7 @@ class MRT:
         _sym, _prm = quantize(
             self.current_model.symbol, self.current_model.params,
             self.th_dict, self.precs, self.scales, self.op_input_precs,
-            self.shift_bits, self.softmax_lambd)
+            self.restore_names, self.shift_bits, self.softmax_lambd)
         self.current_model = Model(_sym, _prm)
         return self.current_model
 
