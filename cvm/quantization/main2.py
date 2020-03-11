@@ -61,6 +61,22 @@ def _get_ctx(config, section, dctx=mx.cpu()):
     return contex
 
 def _get_val(config, section, option, dtype='str', dval=NoneType):
+    """ TODO(ryt): You'd better seperate the dtype format from the
+                   embeded source code for flexiblity.
+
+        Some Example Suggested:
+            1. declare some basic data types:
+                int_t, bool_t, str_t, etc.
+
+            2. abstract the high-level structures in construction.
+                using the ARRAY(int_t) function to indicate the
+                custom defined structure of int array.
+                others like PAIR, ARRAY, etc.
+
+        We can then make a clear exposition into user for different
+            key=value pairs, since the main2 documentation will be
+            improving soon.
+    """
     val_ = config[section][option]
     if val_ == '':
         _check(dval != NoneType, section, option,
