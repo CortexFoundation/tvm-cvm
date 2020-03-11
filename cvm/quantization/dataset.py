@@ -16,7 +16,7 @@ import pickle
 import logging
 
 dataset_dir = path.expanduser("~/.cvm")
-src = "http://192.168.50.210:8827"
+src = "http://0.0.0.0:8827"
 
 def extract_file(tar_path, target_path):
     tar = tarfile.open(tar_path, "r")
@@ -32,7 +32,7 @@ def download_files(category, files, base_url=src, root=dataset_dir):
     os.makedirs(root_dir, exist_ok=True)
 
     for df in files:
-        url = path.join(base_url, category, df)
+        url = path.join(base_url, 'datasets', category, df)
         fpath = path.join(root_dir, df)
         if path.exists(fpath):
             continue
@@ -236,7 +236,7 @@ class MnistDataset(VisionDataset):
             root=self.root_dir, train=False).transform_first(data_xform)
 
         N, C, H, W = self.ishape
-        assert C == 3 and H == 28 and W == 28
+        assert C == 1 and H == 28 and W == 28
         self.data = mx.gluon.data.DataLoader(
             val_data, shuffle=False, batch_size=N)
 

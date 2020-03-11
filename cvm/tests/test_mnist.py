@@ -182,7 +182,8 @@ def test_nnvm_pass(iter_num=10):
     _mrt.std_dump(sym, params, inputs_ext, data, "cvm_mnist")
 
 print ("Test mnist", version)
-# train_mnist()
+train_mnist()
+exit()
 
 utils.log_init()
 test_sym_pass(1000)

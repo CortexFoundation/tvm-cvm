@@ -127,8 +127,30 @@ def test_trec():
     # validate_model(sym_path, prm_path, ctx, ds_name="trec",
     #                input_shape=(38, 16), iter_num=999999)
 
+def test_tf_densenet_lite():
+    sym_path = "./data/tf_densenet_lite.json"
+    prm_path = "./data/tf_densenet_lite.params"
+    ctx = [mx.gpu(int(i)) for i in "1,2,3,4,5".split(',') if i.strip()]
+    # validate_model(sym_path, prm_path, ctx, batch_size=16, dump_model=True)
+    validate_model(sym_path, prm_path, ctx, batch_size=16, iter_num=10)
+
+def test_tf_inceptionv3_lite():
+    sym_path = "./data/tf_inception_v3_lite.json"
+    prm_path = "./data/tf_inception_v3_lite.params"
+    if not path.exists(sym_path) or not path.exists(prm_path):
+        tf_dump_model("inception_v3")
+    ctx = [mx.gpu(int(i)) for i in "4".split(',') if i.strip()]
+    # validate_model(sym_path, prm_path, ctx, input_size=299, dump_model=True)
+    validate_model(sym_path, prm_path, ctx, input_size=299, iter_num=10)
+
 if __name__ == '__main__':
     utils.log_init()
+
+    # TODO: test tfmodels
+    # test_tf_mobilenet()           # 68% --> 8%, maybe due to pad
+    # test_tf_resnet50_v1()         # 0% --> 0%
+    # test_tf_densenet_lite()
+    test_tf_inceptionv3_lite()
 
     # test_mobilenet1_0()
     '''
@@ -150,7 +172,7 @@ if __name__ == '__main__':
     Total Sample: 49984
     '''
 
-    test_alexnet()
+    # test_alexnet()
     '''
     2020-01-10 16:23:24
     top1: 55.92% --> 55.15%
@@ -269,9 +291,6 @@ if __name__ == '__main__':
     Total Sample: 
     '''
 
-    # TODO: test
-    # test_tf_mobilenet()           # 0% --> 0%, maybe due to pad
-    # test_tf_resnet50_v1()         # 0% --> 0%
 
 
 
