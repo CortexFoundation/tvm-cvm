@@ -272,8 +272,11 @@ def split_model(model, keys):
 
 def merge_model(base_model, top_model, base_name_maps=None, callback=None):
     base_name_maps = {} if base_name_maps is None else base_name_maps
-    graph = {base_name_maps.get(c.attr('name'), c.attr('name')):c \
-        for c in base_model.symbol}
+    # topo sort base model for duplicated name symbol
+    # graph = {base_name_maps.get(c.attr('name'), c.attr('name')): c \
+        # for c in base_model.symbol}
+    graph = {base_name_maps.get(c.attr('name'), c.attr('name')): c \
+        for c in topo_sort(base_model.symbol)}
     for sym in topo_sort(top_model.symbol):
         name, op_name = sym.attr('name'), sym.attr('op_name')
         childs, attr = sym_iter(sym.get_children()), sym.list_attr()
@@ -332,6 +335,7 @@ def compile_to_cvm(model, model_name, datadir="/data/std_out",
     # transform from mxnet symbol to cvm
     logger.info("Transform Mxnet symbol into CVM")
     print("Before fixxing shape: ", calculate_ops(symbol, params, normalize=False))
+    symbol, params = tpass.attach_input_shape(symbol, params, input_shape)
     symbol, params = prepare_for_compile(symbol, params)
     symbol, params = fuse_constant(symbol, params)
     print("After fixxing shape: ", calculate_ops(symbol, params, normalize=False))
