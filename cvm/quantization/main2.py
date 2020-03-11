@@ -7,7 +7,7 @@ import numpy as np
 import mxnet as mx
 from mxnet import gluon, ndarray as nd
 
-from transformer import Model
+from transformer import Model, reduce_graph
 from gluon_zoo import save_model
 import dataset as ds
 import sim_quant_helper as sim
@@ -370,7 +370,8 @@ if __name__ == "__main__":
             acc = dataset.validate(metric, outs, label)
             return acc
 
-        qgraph = qmodel.to_graph(ctx=ctx)
+        qgraph = reduce_graph(qmodel, {
+            'data': set_batch(input_shape, batch)}).to_graph(ctx=ctx)
         qmetric = dataset.metrics()
 
         def quantize(data, label):

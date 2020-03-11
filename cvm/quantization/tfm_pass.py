@@ -238,6 +238,7 @@ def fuse_constant(symbol, params):
 
 @N.register_nm("ais")
 def attach_input_shape(symbol, params, input_shapes):
+    assert isinstance(input_shapes, dict)
     def _impl(op, params, graph):
         name, attr = op.attr('name'), op.list_attr()
         if is_inputs(op, params) and name in input_shapes:
@@ -253,15 +254,13 @@ def infer_shape(symbol, params, input_shape=None):
     infer_shapes = {}
     def _impl(op, params, graph):
         name, op_name = op.attr('name'), op.attr('op_name')
-        _, oshp, _ = op.infer_shape()
         if is_params(op, params):
-            if oshp is None:
-                oshp = [params[name].shape]
-                op = mx.sym.var(name, shape=oshp[0])
-            assert params[name].shape == oshp[0], \
-                    "Parameter %s's shape %s is inconsistent with \
-                    params dict %s" % (name, oshp[0], params[name].shape)
-        elif is_inputs(op, params):
+            oshp = [params[name].shape]
+            op = mx.sym.var(name, shape=oshp[0])
+        else:
+            _, oshp, _ = op.infer_shape()
+
+        if is_inputs(op, params):
             if input_shape is None:
                 assert oshp is not None, "It seems that graph doesn't set \
                         input_shape, please invoke attach_input_shape first."

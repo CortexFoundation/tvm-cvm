@@ -326,23 +326,39 @@ class ModelMerger:
         return [1 if v is None else base_oscales[name_idx[v]] \
             for k, v in maps.items()]
 
+def reduce_graph(model, input_shapes):
+    _sym, _prm = model.symbol, model.params
+    _sym, _prm = tpass.attach_input_shape(
+        _sym, _prm, input_shapes)
+
+    print("Before fixxing shape: ",
+          calculate_ops(_sym, _prm, normalize=False))
+    _sym, _prm = prepare_for_compile(_sym, _prm)
+    _sym, _prm = fuse_constant(_sym, _prm)
+    print("After fixxing shape: ",
+          calculate_ops(_sym, _prm, normalize=False))
+    return Model(_sym, _prm)
+
 def compile_to_cvm(model, model_name, datadir="/data/std_out",
                    input_shape=None, target="cuda"):
     """ Compile Mxnet model into CVM Accept-JSON&BIN-Format
     """
     logger = logging.getLogger("mrt.compile")
-    symbol, params = model.symbol, model.params
-
     datadir = path.join(datadir, model_name)
     os.makedirs(datadir, exist_ok=True)
 
+    if input_shape is None:
+        for sym in topo_sort(symbol):
+            if sutils.is_inputs(sym, params):
+                _, oshp, _ = sym.infer_shape()
+                input_shape = oshp[0]
+                break
+    input_shapes = {'data': input_shape}
+
     # transform from mxnet symbol to cvm
     logger.info("Transform Mxnet symbol into CVM")
-    print("Before fixxing shape: ", calculate_ops(symbol, params, normalize=False))
-    symbol, params = tpass.attach_input_shape(symbol, params, input_shape)
-    symbol, params = prepare_for_compile(symbol, params)
-    symbol, params = fuse_constant(symbol, params)
-    print("After fixxing shape: ", calculate_ops(symbol, params, normalize=False))
+    model = reduce_graph(model, input_shapes)
+    symbol, params = model.symbol, model.params
 
     nnvm_sym, params = to_nnvm(symbol, params)
     dtype, nnvm_params = "int32", {}
@@ -363,13 +379,6 @@ def compile_to_cvm(model, model_name, datadir="/data/std_out",
     # graph = nnvm.graph.create(nnvm_sym)
     # open("/tmp/tmp.nnvm.json", "w").write(graph.json())
     logger.info("Compile into CVM graph")
-    if input_shape is None:
-        for sym in topo_sort(symbol):
-            if sutils.is_inputs(sym, params):
-                _, oshp, _ = sym.infer_shape()
-                assert len(oshp) == 1
-                input_shape = oshp[0]
-    input_shapes = {'data': input_shape}
     with nnvm.compiler.build_config(opt_level=0):
         deploy_graph, _, nnvm_params = nnvm.compiler.build(
             nnvm_sym, target=target, shape=input_shapes,
