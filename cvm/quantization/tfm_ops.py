@@ -336,8 +336,6 @@ class Convolution(Transformer):
         return op
 
     def quantize(self, op, **kwargs):
-        # if op.attr('name') in conv_restore_names:
-            # return _restore(op, **kwargs)
         return _quantize_xwb(op, **kwargs)
 
     def calculate_ops(self, op, **kwargs):
@@ -1672,6 +1670,8 @@ def _quantize_xwb(op, **kwargs):
     logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
                  op_name, name, scales[name], cns)
     return op
+
+disabled_restore_ops = {"null"}
 
 def _restore(op, **kwargs):
     th_dict, precs, scales = kwargs['th_dict'], kwargs['precs'], kwargs['scales']
