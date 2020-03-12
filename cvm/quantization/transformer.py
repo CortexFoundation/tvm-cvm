@@ -23,6 +23,8 @@ import cvm_op   # pylint: disable=unused-import
 import tfm_pass as tpass
 from tfm_pass import OUT_KEY, convert_params_dtype
 from tfm_pass import sym_calibrate, quantize, to_nnvm
+from tfm_pass import prepare_for_compile, fuse_constant
+from tfm_pass import calculate_ops, collect_op_names
 
 import sym_utils as sutils
 from sym_utils import topo_sort, sym_iter, get_mxnet_op
@@ -151,6 +153,7 @@ class MRT:
         self._data = None
         self.th_dict = {}
 
+        self.restore_names = set()
         self._op_default_input_precs()
         self.precs = {s.attr('name'):{} \
             for s in topo_sort(self.current_model)}
@@ -169,6 +172,9 @@ class MRT:
             self.current_model.symbol, self.current_model.params,
             self._data, ctx=ctx, lambd=lambd, old_ths=old_ths)
         return self.th_dict
+
+    def set_restore(self, name):
+        self.restore_names.add(name)
 
     def set_threshold(self, name, threshold):
         self.th_dict[name] = threshold
@@ -208,7 +214,7 @@ class MRT:
         _sym, _prm = quantize(
             self.current_model.symbol, self.current_model.params,
             self.th_dict, self.precs, self.scales, self.op_input_precs,
-            self.shift_bits, self.softmax_lambd)
+            self.restore_names, self.shift_bits, self.softmax_lambd)
         self.current_model = Model(_sym, _prm)
         return self.current_model
 
@@ -270,8 +276,11 @@ def split_model(model, keys):
 
 def merge_model(base_model, top_model, base_name_maps=None, callback=None):
     base_name_maps = {} if base_name_maps is None else base_name_maps
-    graph = {base_name_maps.get(c.attr('name'), c.attr('name')):c \
-        for c in base_model.symbol}
+    # topo sort base model for duplicated name symbol
+    # graph = {base_name_maps.get(c.attr('name'), c.attr('name')): c \
+        # for c in base_model.symbol}
+    graph = {base_name_maps.get(c.attr('name'), c.attr('name')): c \
+        for c in topo_sort(base_model.symbol)}
     for sym in topo_sort(top_model.symbol):
         name, op_name = sym.attr('name'), sym.attr('op_name')
         childs, attr = sym_iter(sym.get_children()), sym.list_attr()
@@ -317,22 +326,44 @@ class ModelMerger:
         return [1 if v is None else base_oscales[name_idx[v]] \
             for k, v in maps.items()]
 
+def reduce_graph(model, input_shapes):
+    _sym, _prm = model.symbol, model.params
+    _sym, _prm = tpass.attach_input_shape(
+        _sym, _prm, input_shapes)
+
+    print("Before fixxing shape: ",
+          calculate_ops(_sym, _prm, normalize=False))
+    _sym, _prm = prepare_for_compile(_sym, _prm)
+    _sym, _prm = fuse_constant(_sym, _prm)
+    print("After fixxing shape: ",
+          calculate_ops(_sym, _prm, normalize=False))
+    return Model(_sym, _prm)
+
 def compile_to_cvm(model, model_name, datadir="/data/std_out",
                    input_shape=None, target="cuda"):
     """ Compile Mxnet model into CVM Accept-JSON&BIN-Format
     """
     logger = logging.getLogger("mrt.compile")
-    symbol, params = model.symbol, model.params
-
     datadir = path.join(datadir, model_name)
     os.makedirs(datadir, exist_ok=True)
 
+    if input_shape is None:
+        for sym in topo_sort(symbol):
+            if sutils.is_inputs(sym, params):
+                _, oshp, _ = sym.infer_shape()
+                input_shape = oshp[0]
+                break
+    input_shapes = {'data': input_shape}
+
     # transform from mxnet symbol to cvm
     logger.info("Transform Mxnet symbol into CVM")
-    nnvm_sym, _ = to_nnvm(symbol, params)
+    model = reduce_graph(model, input_shapes)
+    symbol, params = model.symbol, model.params
+
+    nnvm_sym, params = to_nnvm(symbol, params)
     dtype, nnvm_params = "int32", {}
     tvm_ctx = tvm.context(target, 0)
-    for sym in topo_sort(symbol):
+    for sym in topo_sort(nnvm_sym):
         if sutils.is_params(sym, params):
             key, value = sym.attr('name'), params[sym.attr('name')]
             flat = value.asnumpy()
@@ -341,18 +372,13 @@ def compile_to_cvm(model, model_name, datadir="/data/std_out",
             assert (flat.astype(dtype).astype("float64") == flat).all(), \
                 "key: {}\nvalue: {}".format(key, value)
             nnvm_params[key] = tvm.nd.array(flat.astype(dtype), tvm_ctx)
+        elif sutils.is_inputs(sym, params):
+            assert sym.attr('name') == 'data'
 
     # compile to JSON&Bytes format
     # graph = nnvm.graph.create(nnvm_sym)
     # open("/tmp/tmp.nnvm.json", "w").write(graph.json())
     logger.info("Compile into CVM graph")
-    if input_shape is None:
-        for sym in topo_sort(symbol):
-            if sutils.is_inputs(sym, params):
-                _, oshp, _ = sym.infer_shape()
-                assert len(oshp) == 1
-                input_shape = oshp[0]
-    input_shapes = {'data': input_shape}
     with nnvm.compiler.build_config(opt_level=0):
         deploy_graph, _, nnvm_params = nnvm.compiler.build(
             nnvm_sym, target=target, shape=input_shapes,

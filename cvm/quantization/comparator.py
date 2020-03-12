@@ -296,6 +296,7 @@ tf_start_points = {
                 }
 
 
+'''
 if __name__ == "__main__":
     assert len(sys.argv) >= 2, "Please enter at least 2 python arguments."
     modelname = sys.argv[1]
@@ -313,4 +314,3 @@ if __name__ == "__main__":
     modelname = sys.argv[1]
     evaluate = True if len(sys.argv) > 2 and sys.argv[2] == 'True' else False
     cmp_quantize(modelname, evaluate=evaluate)
-'''

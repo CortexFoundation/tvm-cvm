@@ -42,14 +42,32 @@ def rewrite(symbol, params):
 
 @N.register_nm("quantize")
 def quantize(symbol, params, th_dict, precs, scales, op_input_precs,
-             shift_bits, softmax_lambd):
+             restore_names, shift_bits, softmax_lambd):
     infer_shapes = infer_shape(symbol, params)
+
+    def restore(op, **kwargs):
+        th_dict, precs, scales = kwargs['th_dict'], kwargs['precs'], kwargs['scales']
+        name, op_name = op.attr('name'), op.attr('op_name')
+        childs, attr = sym_iter(op.get_children()), op.list_attr()
+
+        childs = [] if childs is None else childs
+
+        new_childs = [c / scales[c.attr('name')] \
+            if scales.get(c.attr('name'), 1) != 1 else c \
+                     for c in childs]
+
+        out = get_mxnet_op(op_name)(*new_childs, **attr, name=name)
+        precs[name][OUT_KEY] = get_bit(th_dict[name])
+        scales[name] = 1
+
+        return out
 
     def _quant(op, **kwargs):
         op = apply_pass("quantize",
             infer_shapes=kwargs['infer_shapes'],
             th_dict=kwargs['th_dict'],
-        )(op, **kwargs)
+        )(op, **kwargs) if op.attr('name') not in restore_names \
+            else restore(op, **kwargs)
 
         if is_var(op, kwargs['params']):
             return op
@@ -101,6 +119,13 @@ def quantize(symbol, params, th_dict, precs, scales, op_input_precs,
             shift_bits=shift_bits,
             softmax_lambd=softmax_lambd)
 
+@N.register_nm("prepare_for_compile")
+def prepare_for_compile(symbol, params):
+    infer_shapes = infer_shape(symbol, params)
+    return topo_visit_transformer(symbol, params,
+            apply_pass("prepare_for_compile", infer_shapes=infer_shapes))
+
+
 @N.register_nm("cvm")
 def to_nnvm(symbol, params):
     infer_shapes = infer_shape(symbol, params)
@@ -111,7 +136,8 @@ def to_nnvm(symbol, params):
         childs = [] if childs is None else childs
         childs = [get_node(c, graph) for c in childs]
         op = apply_pass("compile", infer_shapes=infer_shapes)(
-            op, childs=childs, attr=attr)
+            op, childs=childs, attr=attr,
+            params=params, graph=graph)
         graph[name] = op
 
     nodes = []
@@ -212,6 +238,7 @@ def fuse_constant(symbol, params):
 
 @N.register_nm("ais")
 def attach_input_shape(symbol, params, input_shapes):
+    assert isinstance(input_shapes, dict)
     def _impl(op, params, graph):
         name, attr = op.attr('name'), op.list_attr()
         if is_inputs(op, params) and name in input_shapes:
@@ -227,15 +254,13 @@ def infer_shape(symbol, params, input_shape=None):
     infer_shapes = {}
     def _impl(op, params, graph):
         name, op_name = op.attr('name'), op.attr('op_name')
-        _, oshp, _ = op.infer_shape()
         if is_params(op, params):
-            if oshp is None:
-                oshp = [params[name].shape]
-                op = mx.sym.var(name, shape=oshp[0])
-            assert params[name].shape == oshp[0], \
-                    "Parameter %s's shape %s is inconsistent with \
-                    params dict %s" % (name, oshp[0], params[name].shape)
-        elif is_inputs(op, params):
+            oshp = [params[name].shape]
+            op = mx.sym.var(name, shape=oshp[0])
+        else:
+            _, oshp, _ = op.infer_shape()
+
+        if is_inputs(op, params):
             if input_shape is None:
                 assert oshp is not None, "It seems that graph doesn't set \
                         input_shape, please invoke attach_input_shape first."

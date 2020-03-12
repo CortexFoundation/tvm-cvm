@@ -170,7 +170,7 @@ def examine_parameters(symbol, params, inputs_ext, allows=[], callback=None):
 def nd_const(number, graph, params):
     name = 'const_var_' + str(number)
     prec = math.ceil(math.log2(math.fabs(number)+1)) + 1
-    if name not in graph:
+    if name not in params and name not in graph:
         attr = { 'precision': str(prec) }
         graph[name] = mx.sym.var(name, shape=(1,), attr=attr)
         params[name] = nd_array([number])

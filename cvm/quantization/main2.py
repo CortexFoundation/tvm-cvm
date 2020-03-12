@@ -7,7 +7,7 @@ import numpy as np
 import mxnet as mx
 from mxnet import gluon, ndarray as nd
 
-from transformer import Model
+from transformer import Model, reduce_graph
 from gluon_zoo import save_model
 import dataset as ds
 import sim_quant_helper as sim
@@ -61,6 +61,22 @@ def _get_ctx(config, section, dctx=mx.cpu()):
     return contex
 
 def _get_val(config, section, option, dtype='str', dval=NoneType):
+    """ TODO(ryt): You'd better seperate the dtype format from the
+                   embeded source code for flexiblity.
+
+        Some Example Suggested:
+            1. declare some basic data types:
+                int_t, bool_t, str_t, etc.
+
+            2. abstract the high-level structures in construction.
+                using the ARRAY(int_t) function to indicate the
+                custom defined structure of int array.
+                others like PAIR, ARRAY, etc.
+
+        We can then make a clear exposition into user for different
+            key=value pairs, since the main2 documentation will be
+            improving soon.
+    """
     val_ = config[section][option]
     if val_ == '':
         _check(dval != NoneType, section, option,
@@ -224,6 +240,25 @@ if __name__ == "__main__":
     # quantization
     sec = 'QUANTIZATION'
     if start_point <= 4:
+        restore_names = _get_val(
+            cfg, sec, 'Restore_name', dtype='[str]', dval=[])
+        restore_names = set(restore_names)
+        if '_ALL_EXCEPT_' in restore_names:
+            from tfm_base import _pass_manager
+            from sym_utils import topo_sort
+            from tfm_ops import disabled_restore_ops
+
+            quantize_ops = [op_name for op_name in _pass_manager["quantize"] \
+                            if op_name not in disabled_restore_ops]
+            restore_names_new = []
+            for sym in topo_sort(mrt.current_model.symbol):
+                name, op_name = sym.attr('name'), sym.attr('op_name')
+                if op_name in quantize_ops and \
+                    name not in restore_names:
+                    restore_names_new.append(name)
+            restore_names = set(restore_names_new)
+        for name in restore_names:
+            mrt.set_restore(name)
         input_precision = _get_val(
             cfg, sec, 'Input_precision', dtype='int', dval=None)
         if input_precision is not None:
@@ -256,8 +291,6 @@ if __name__ == "__main__":
                        datadir=model_dir)
         logger.info("`%s` stage checkd" % sec)
     qmodel = mrt.current_model
-    mks = ['mrt_quantize_clip_101',
-           'ssd0_multiperclassdecoder0_zeros_like0']
 
     # merge_model
     sec = 'MERGE_MODEL'
@@ -294,7 +327,9 @@ if __name__ == "__main__":
         dump = _get_val(cfg, sec, 'Dump', dtype='bool', dval=False)
         if dump:
             qmodel.save(sym_file, prm_file)
-        sim.save_ext(ext_file, oscales)
+        input_ext = mrt.get_inputs_ext()
+        infos = ['oscales: ', oscales, 'input_ext: ', input_ext, "input shapes: ", input_shape]
+        sim.save_ext(ext_file, *infos)
         logger.info("`%s` stage finished" % sec)
     else:
         qmodel = Model.load(sym_file, prm_file)
@@ -335,7 +370,8 @@ if __name__ == "__main__":
             acc = dataset.validate(metric, outs, label)
             return acc
 
-        qgraph = qmodel.to_graph(ctx=ctx)
+        qgraph = reduce_graph(qmodel, {
+            'data': set_batch(input_shape, batch)}).to_graph(ctx=ctx)
         qmetric = dataset.metrics()
 
         def quantize(data, label):
