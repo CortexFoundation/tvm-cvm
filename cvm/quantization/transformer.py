@@ -323,7 +323,7 @@ class ModelMerger:
         name_idx = {self.base_name_maps.get(
             s.attr("name"), s.attr("name")): i \
             for i, s in enumerate(self.base)}
-        return [1 if v is None else base_oscales[name_idx[v]] \
+        return [1 if v=="None" else base_oscales[name_idx[v]] \
             for k, v in maps.items()]
 
 def reduce_graph(model, input_shapes):
