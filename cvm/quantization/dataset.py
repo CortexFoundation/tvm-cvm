@@ -130,9 +130,9 @@ class COCODataset(Dataset):
 
         metrics.update(det_bboxes, det_ids, det_scores,
                             gt_bboxes, gt_ids, gt_difficults)
-        map_name, mean_ap = metrics.get()
-        acc = {k:v for k,v in zip(map_name, mean_ap)}
-        acc = float(acc['~~~~ MeanAP @ IoU=[0.50,0.95] ~~~~\n'])/100
+        names, values = metrics.get()
+        acc = {k:v for k,v in zip(names, values)}
+        acc = float(acc['~~~~ MeanAP @ IoU=[0.50,0.95] ~~~~\n']) / 100
         return "{:6.2%}".format(acc)
 
 

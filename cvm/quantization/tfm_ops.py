@@ -82,9 +82,11 @@ class Relu(Transformer):
         return reverse_transpose(op)
 
     def prepare_for_compile(self, op, **kwargs):
-        X = sym_iter(op.get_children())[0]
-        if is_fusable_cvm_precision(X):
-            op = reverse_sequence(op)
+        # The reverse process is comment, refer to 
+        #   `reverse_sequence` for more details.
+        # X = sym_iter(op.get_children())[0]
+        # if is_fusable_cvm_precision(X):
+        #     op = reverse_sequence(op)
         return op
 
 
@@ -884,13 +886,13 @@ class BroadcastMul(Transformer):
         cns = [c.attr('name') for c in childs]
 
         fuse = any([is_params(c, params) and \
-                    params[c.attr('name')].abs().max().asscalar() == 0 \
-                    for c in childs])
+                   params[c.attr('name')].abs().max().asscalar() == 0 \
+                   for c in childs])
         if fuse:
-            ishp = kwargs['infer_shapes'][name][get_entry_id(op)]
-            attr = {'precision': str(1)}
-            op = graph[name] = mx.sym.var(name, shape=ishp, attr=attr)
-            params[name] = nd_array(nd.zeros(list(ishp)))
+           ishp = kwargs['infer_shapes'][name][get_entry_id(op)]
+           attr = {'precision': str(1)}
+           op = graph[name] = mx.sym.var(name, shape=ishp, attr=attr)
+           params[name] = nd.zeros(list(ishp))
 
         return op
 
@@ -1253,14 +1255,14 @@ class Custom(Transformer):
         return op
 
     def prepare_for_compile(self, op, **kwargs):
-        name = op.attr('name')
-        X = sym_iter(op.get_children())[0]
-        if is_fusable_cvm_precision(op) and is_fusable_cvm_precision(X):
-            p1, s1 = fusable_cvm_precision_attr(op)
-            p2, s2 = fusable_cvm_precision_attr(X)
-            X = sym_iter(X.get_children())[0]
-            op = realize(X, (s1 + s2), min(p1, p2),
-                    name=name)
+        # name = op.attr('name')
+        # X = sym_iter(op.get_children())[0]
+        # if is_fusable_cvm_precision(op) and is_fusable_cvm_precision(X):
+        #     p1, s1 = fusable_cvm_precision_attr(op)
+        #     p2, s2 = fusable_cvm_precision_attr(X)
+        #     X = sym_iter(X.get_children())[0]
+        #     op = realize(X, (s1 + s2), min(p1, p2),
+        #             name=name)
         return op
 
 
@@ -1735,6 +1737,24 @@ def reverse_transpose(op):
     return op
 
 def reverse_sequence(op):
+    """ Reverse the symbol sequenze may leads to
+            error of the different result, due to the graph
+            unequaivent transformer.
+
+        Example:
+            A ->  B -> C
+              |-> D -> E
+
+            after reverse sequence is
+
+            B -> A ->  C
+                   |-> D -> E
+
+            which is invalid.
+
+        Notice:
+            The fuse_transpose pass have the same hidden problems.
+    """
     name, op_name = op.attr('name'), op.attr('op_name')
     childs, attrs = sutils.sym_iter(op.get_children()), op.list_attr()
     assert len(childs) == 1

@@ -150,10 +150,10 @@ if __name__ == "__main__":
     model_prefix = path.join(model_dir, model_name)
     model_ctx = _get_ctx(cfg, sec)
     input_shape = _get_val(cfg, sec, 'Input_shape', dtype='tuple')
-    start_pos = {'PREPARE': 1, 'SPLIT_MODEL': 2, \
+    start_pos = {'DEFAULT': 0, 'PREPARE': 1, 'SPLIT_MODEL': 2, \
                  'CALIBRATION': 3, 'QUANTIZATION': 4, \
                  'MERGE_MODEL': 5}
-    start = _get_val(cfg, sec, 'Start', dtype='str', dval='PREPARE')
+    start = _get_val(cfg, sec, 'Start', dtype='str', dval='DEFAULT')
     _check(start in start_pos.keys(), sec, 'Start',
            message="Please choose a value from `%s`" % start_pos.keys())
     start_point = start_pos[start]
@@ -161,17 +161,18 @@ if __name__ == "__main__":
     # prepare
     sec = 'PREPARE'
     sym_file, prm_file = _load_fname(model_prefix, suffix='prepare')
-    if start_point <= 1:
-        sym_path, prm_path = _load_fname(model_prefix)
-        if not path.exists(sym_path) or not path.exists(prm_path):
-            save_model(model_name, sym_path=sym_path, prm_path=prm_path)
+    sym_path, prm_path = _load_fname(model_prefix)
+    if not path.exists(sym_path) or not path.exists(prm_path):
+        save_model(model_name, sym_path=sym_path, prm_path=prm_path)
+
+    if start_point < 1:
         model = Model.load(sym_path, prm_path)
         model.prepare(set_batch(input_shape, 1))
         dump = _get_val(cfg, sec, 'Dump', dtype='bool', dval=False)
         if dump:
             model.save(sym_file, prm_file)
         logger.info("`%s` stage finihed" % sec)
-    else:
+    elif start_point == 1:
         _check(path.exists(sym_file) and path.exists(prm_file), 'DEFAULT',
                'Start', message="Check point of `%s` not found, " % sec + \
                "please move the start point earlier")
@@ -186,7 +187,7 @@ if __name__ == "__main__":
     if keys == '':
         mrt = model.get_mrt()
         logger.info("`%s` stage skipped" % sec)
-    elif start_point <= 2:
+    elif start_point < 2:
         base, top = model.split(keys)
         mrt = base.get_mrt()
         dump = _get_val(cfg, sec, 'Dump', dtype='bool', dval=False)
@@ -194,7 +195,7 @@ if __name__ == "__main__":
             top.save(sym_top_file, prm_top_file)
             base.save(sym_base_file, prm_base_file)
         logger.info("`%s` stage finished" % sec)
-    else:
+    elif start_point == 2:
         _check(path.exists(sym_top_file) and \
                path.exists(prm_top_file), 'DEFAULT',
                'Start', message="Check point of `%s` not found, " % sec + \
@@ -212,12 +213,12 @@ if __name__ == "__main__":
     sec = 'CALIBRATION'
     _, _, ext_file = utils.extend_fname(
         model_prefix+'.mrt.calibrate', with_ext=True)
-    if start_point <= 3:
+    batch = _get_val(cfg, sec, 'Batch', dtype='int', dval=16)
+    ds_name = _get_val(cfg, sec, 'dataset')
+    if start_point < 3:
         calibrate_num = _get_val(
             cfg, sec, 'Calibrate_num', dtype='int', dval=1)
         lambd = _get_val(cfg, sec, 'Lambda', dtype='float', dval=None)
-        ds_name = _get_val(cfg, sec, 'dataset')
-        batch = _get_val(cfg, sec, 'Batch', dtype='int', dval=16)
         shp = set_batch(input_shape, batch)
         dataset = ds.DS_REG[ds_name](shp)
         data_iter_func = dataset.iter_func()
@@ -230,7 +231,7 @@ if __name__ == "__main__":
         if dump:
             sim.save_ext(ext_file, th_dict)
         logger.info("`%s` stage finished" % sec)
-    else:
+    elif start_point == 3:
         _check(path.exists(ext_file), 'DEFAULT', 'Start',
                message="Check point of `%s` not found, " % sec + \
                "please move the start point earlier")
@@ -239,7 +240,7 @@ if __name__ == "__main__":
 
     # quantization
     sec = 'QUANTIZATION'
-    if start_point <= 4:
+    if start_point < 4:
         restore_names = _get_val(
             cfg, sec, 'Restore_name', dtype='[str]', dval=[])
         restore_names = set(restore_names)
@@ -286,11 +287,10 @@ if __name__ == "__main__":
         if dump:
             mrt.save(model_name+'.base.quantize', datadir=model_dir)
         logger.info("`%s` stage finished" % sec)
-    else:
+    elif start_point == 4:
         mrt = MRT.load(model_name+'.base.quantize',
                        datadir=model_dir)
         logger.info("`%s` stage checkd" % sec)
-    qmodel = mrt.current_model
 
     # merge_model
     sec = 'MERGE_MODEL'
@@ -299,7 +299,8 @@ if __name__ == "__main__":
     if keys == '':
         oscales = mrt.get_output_scales()
         logger.info("`%s` stage skipped" % sec)
-    elif start_point <= 5:
+    elif start_point < 5:
+        qmodel = mrt.current_model
         mrt_oscales = mrt.get_output_scales()
         model_merger = Model.merger(qmodel, top, mrt.get_maps())
         attribute_deps = _get_val(
@@ -332,6 +333,7 @@ if __name__ == "__main__":
         sim.save_ext(ext_file, *infos)
         logger.info("`%s` stage finished" % sec)
     else:
+        assert start_point == 5
         qmodel = Model.load(sym_file, prm_file)
         oscales = sim.load_ext(ext_file)
         logger.info("`%s` stage checked" % sec)
@@ -370,8 +372,9 @@ if __name__ == "__main__":
             acc = dataset.validate(metric, outs, label)
             return acc
 
-        qgraph = reduce_graph(qmodel, {
-            'data': set_batch(input_shape, batch)}).to_graph(ctx=ctx)
+        qmodel = reduce_graph(qmodel, {
+            'data': set_batch(input_shape, batch)})
+        qgraph = qmodel.to_graph(ctx=ctx)
         qmetric = dataset.metrics()
 
         def quantize(data, label):
