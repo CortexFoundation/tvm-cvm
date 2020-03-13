@@ -260,9 +260,10 @@ def _pool2d(pool_type):
         }
 
         if pool_type == "avg":
-            # TODO: this actually should be count_include_pad False
-            # pool_attr['count_include_pad'] = True
-            pool_attr['count_include_pad'] = False
+            # TODO(wlt): this actually should be count_include_pad False
+            # refer to: https://github.com/CortexFoundation/tvm-cvm/pull/57
+            pool_attr['count_include_pad'] = True
+            # pool_attr['count_include_pad'] = False
 
         sym = mx.sym.Pooling(*inputs, **pool_attr)
         if data_format == "NHWC":
@@ -641,6 +642,7 @@ def convert_tfnode(tfnode, graph, params, infer_shapes,
         try:
             dtype = tensor_util.tensor_type_to_numpy(attr['dtype'].type)
         except TypeError:
+            # TODO(wlt): FIFOQueueV2, QueueDequeueManyV2 that brings into DT_INVALID problem
             dtype = tensor_util.tensor_type_to_numpy(default_tf_dtype)
         graph[name] = [mx.sym.var("data", shape=input_shape, dtype=dtype)]
         assert "data" not in infer_shapes
