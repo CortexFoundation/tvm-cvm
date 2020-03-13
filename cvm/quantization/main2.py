@@ -344,6 +344,8 @@ if __name__ == "__main__":
         iter_num = _get_val(cfg, sec, 'Iter_num', dtype='int', dval=0)
         batch = _get_val(cfg, sec, 'Batch', dtype='int', dval=batch)
         ctx = _get_ctx(cfg, sec, dctx=model_ctx)
+        if isinstance(ctx, mx.Context):
+            ctx = [ctx]
         org_model = Model.load(sym_path, prm_path)
         graph = org_model.to_graph(ctx=ctx)
         dataset = ds.DS_REG[ds_name](set_batch(input_shape, batch))
@@ -355,8 +357,6 @@ if __name__ == "__main__":
         def forward(net, data, ctx):
             """ Multiple xpu run support.
             """
-            if isinstance(ctx, mx.Context):
-                ctx = [ctx]
             data = gluon.utils.split_and_load(
                 data, ctx_list=ctx, batch_axis=baxis, even_split=False)
             outs = [net(d) for d in data]
@@ -372,15 +372,11 @@ if __name__ == "__main__":
             acc = dataset.validate(metric, outs, label)
             return acc
 
-
-        if type(ctx).__name__ == 'list':
-            ngpus = len(ctx)
-            _check(
-                not batch % ngpus, sec, 'Device_ids',
-                'Batch must be divisible by the number of gpus')
-            split_batch = batch//ngpus
-        else:
-            split_batch = batch
+        ngpus = len(ctx)
+        _check(
+            not batch % ngpus, sec, 'Device_ids',
+            'Batch must be divisible by the number of gpus')
+        split_batch = batch//ngpus
         qmodel = reduce_graph(qmodel, {
             'data': set_batch(input_shape, split_batch)})
         qgraph = qmodel.to_graph(ctx=ctx)
