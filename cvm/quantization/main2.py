@@ -372,8 +372,17 @@ if __name__ == "__main__":
             acc = dataset.validate(metric, outs, label)
             return acc
 
+
+        if type(ctx).__name__ == 'list':
+            ngpus = len(ctx)
+            _check(
+                not batch % ngpus, sec, 'Device_ids',
+                'Batch must be divisible by the number of gpus')
+            split_batch = batch//ngpus
+        else:
+            split_batch = batch
         qmodel = reduce_graph(qmodel, {
-            'data': set_batch(input_shape, batch)})
+            'data': set_batch(input_shape, split_batch)})
         qgraph = qmodel.to_graph(ctx=ctx)
         qmetric = dataset.metrics()
 
