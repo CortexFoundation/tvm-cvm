@@ -707,8 +707,10 @@ class Softmax(Transformer):
         params[W_name] = weight = table.round().reshape(alpha+1, 1)
         wattr = {'precision': str(tprec)}
         W = graph[W_name] = mx.sym.var(W_name, shape=weight.shape, attr=wattr)
+        # lut = mx.sym.Custom(norm, W, in_dim=alpha+1,
+        #                     name=name, op_type='cvm_lut')
         lut = mx.sym.Custom(norm, W, in_dim=alpha+1,
-                            name=name, op_type='cvm_lut')
+                            name=N.n('softmax_lut'), op_type='cvm_lut')
         sum_lut = mx.sym.sum(lut, axis=axis, keepdims=True,
                              name=N.n("softmax_sum"))
 
@@ -724,11 +726,13 @@ class Softmax(Transformer):
         op = mx.sym.broadcast_div(prob, sum_lut, name=N.n("softmax_prob"))
         op = op.astype('int32').astype('float32')
         # op = mx.sym.floor(op) # simulate integer division
-        op = realize(op, 0, oprec)
-        oname = op.attr('name')
+        # op = realize(op, 0, oprec)
+        op = realize(op, 0, oprec, name=name)
+        # oname = op.attr('name')
         precs[name][OUT_KEY] = oprec
-        precs[oname] = {OUT_KEY: oprec}
-        scales[oname] = scales[name] = oscale
+        # precs[oname] = {OUT_KEY: oprec}
+        # scales[oname] = scales[name] = oscale
+        scales[name] = oscale
 
         logger = logging.getLogger('log.mrt.realize')
         logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",

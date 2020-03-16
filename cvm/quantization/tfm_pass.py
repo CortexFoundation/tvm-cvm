@@ -113,6 +113,7 @@ def quantize(symbol, params, th_dict, precs, scales, op_input_precs,
             precs[oname] = oprec
             scales[oname] = os
         return op
+
     return topo_visit_transformer(sym, params,
             quantize_output, th_dict=th_dict,
             precs=precs, scales=scales,
