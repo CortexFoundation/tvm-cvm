@@ -376,11 +376,25 @@ if __name__ == "__main__":
         _check(
             not batch % ngpus, sec, 'Device_ids',
             'Batch must be divisible by the number of gpus')
-        split_batch = batch//ngpus
-        qmodel = reduce_graph(qmodel, {
-            'data': set_batch(input_shape, split_batch)})
-        qgraph = qmodel.to_graph(ctx=ctx)
+        split_batch = batch // ngpus
+        rmodel = reduce_graph(qmodel, {'data': set_batch(
+            input_shape, split_batch)})
+        qgraph = rmodel.to_graph(ctx=ctx)
         qmetric = dataset.metrics()
+
+        # with open("/tmp/main2.tmp.json", "w") as f:
+        #     f.write(rmodel.symbol.tojson())
+        # with open("/tmp/main2.tmp.name_deps", "w") as f:
+        #     for s in sutils.topo_sort(rmodel.symbol):
+        #         childs = sutils.sym_iter(s.get_children())
+        #         childs = [] if childs is None else childs
+        #         cnames = [c.attr('name') for c in childs]
+        #         f.write("%40s:%s\n" % (s.attr('name'), cnames))
+        # import tfm_pass as tpass
+        # infer_shapes = tpass.infer_shape(rmodel.symbol, rmodel.params)
+        # with open("/tmp/main2.tmp.shapes", "w") as f:
+        #     for k, v in infer_shapes.items():
+        #         f.write("%40s: %s\n" % (k, v))
 
         def quantize(data, label):
             data = sim.load_real_data(data, 'data', mrt.get_inputs_ext())

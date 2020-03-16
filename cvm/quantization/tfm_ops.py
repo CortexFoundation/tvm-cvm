@@ -727,8 +727,9 @@ class Softmax(Transformer):
         op = realize(op, 0, oprec)
         oname = op.attr('name')
         precs[name][OUT_KEY] = oprec
-        precs[oname] = {OUT_KEY: oprec}
+        precs[oname] = precs[name]
         scales[oname] = scales[name] = oscale
+        print ("DDDDDDD softmax", precs[name])
 
         logger = logging.getLogger('log.mrt.realize')
         logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
@@ -889,10 +890,10 @@ class BroadcastMul(Transformer):
                    params[c.attr('name')].abs().max().asscalar() == 0 \
                    for c in childs])
         if fuse:
-           ishp = kwargs['infer_shapes'][name][get_entry_id(op)]
-           attr = {'precision': str(1)}
-           op = graph[name] = mx.sym.var(name, shape=ishp, attr=attr)
-           params[name] = nd.zeros(list(ishp))
+            ishp = kwargs['infer_shapes'][name][get_entry_id(op)]
+            attr = {'precision': str(1)}
+            op = graph[name] = mx.sym.var(name, shape=ishp, attr=attr)
+            params[name] = nd.zeros(list(ishp))
 
         return op
 
