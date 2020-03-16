@@ -7,12 +7,13 @@ import numpy as np
 import mxnet as mx
 from mxnet import gluon, ndarray as nd
 
-from transformer import Model, reduce_graph
+from transformer import Model, reduce_graph, MRT
 from gluon_zoo import save_model
 import dataset as ds
 import sim_quant_helper as sim
 import utils
 import sym_utils as sutils
+import cvm_op
 
 def set_batch(input_shape, batch):
     return [batch if s == -1 else s for s in input_shape]
@@ -126,6 +127,12 @@ def _load_fname(prefix, suffix=None, with_ext=False):
     suffix = "."+suffix if suffix is not None else ""
     return utils.extend_fname(prefix+suffix, with_ext)
 
+def _checkpoint_exist(sec, *flist):
+    for fname in flist:
+        _check(path.exists(fname), 'DEFAULT', 'Start',
+               message="Check point of `%s` not found, " % sec + \
+               "please move the start point earlier")
+
 if __name__ == "__main__":
     assert len(sys.argv) == 2, "Please enter 2 python arguments."
     cfgPath = sys.argv[1]
@@ -185,37 +192,31 @@ if __name__ == "__main__":
     sym_top_file, prm_top_file = _load_fname(model_prefix, suffix='top')
     sym_base_file, prm_base_file = _load_fname(model_prefix, suffix='base')
     if keys == '':
-        mrt = model.get_mrt()
-        logger.info("`%s` stage skipped" % sec)
+        _check(start_point != 2, 'DEFAULT', 'Start',
+               message="Invalid start point")
+        if start_point <= 1:
+            logger.info("`%s` stage skipped" % sec)
     elif start_point < 2:
         base, top = model.split(keys)
-        mrt = base.get_mrt()
         dump = _get_val(cfg, sec, 'Dump', dtype='bool', dval=False)
         if dump:
             top.save(sym_top_file, prm_top_file)
             base.save(sym_base_file, prm_base_file)
         logger.info("`%s` stage finished" % sec)
     elif start_point == 2:
-        _check(path.exists(sym_top_file) and \
-               path.exists(prm_top_file), 'DEFAULT',
-               'Start', message="Check point of `%s` not found, " % sec + \
-               "please move the start point earlier")
+        _checkpoint_exist(
+            sec, *[sym_top_file, prm_top_file, sym_base_file, prm_base_file])
         top = Model.load(sym_top_file, prm_top_file)
-        _check(path.exists(sym_base_file) and \
-               path.exists(prm_base_file), 'DEFAULT',
-               'Start', message="Check point of `%s` not found, " % sec + \
-               "please move the start point earlier")
         base = Model.load(sym_base_file, prm_base_file)
-        mrt = base.get_mrt()
         logger.info("`%s` stage checked" % sec)
 
     # calibration
     sec = 'CALIBRATION'
-    _, _, ext_file = utils.extend_fname(
-        model_prefix+'.mrt.calibrate', with_ext=True)
+    model_name_calib = model_name + '.mrt.calibrate'
     batch = _get_val(cfg, sec, 'Batch', dtype='int', dval=16)
     ds_name = _get_val(cfg, sec, 'dataset')
     if start_point < 3:
+        mrt = model.get_mrt() if keys == '' else base.get_mrt()
         calibrate_num = _get_val(
             cfg, sec, 'Calibrate_num', dtype='int', dval=1)
         lambd = _get_val(cfg, sec, 'Lambda', dtype='float', dval=None)
@@ -226,20 +227,24 @@ if __name__ == "__main__":
         for i in range(calibrate_num):
             data, _ = data_iter_func()
             mrt.set_data(data)
-            th_dict = mrt.calibrate(lambd=lambd, ctx=ctx)
+            mrt.calibrate(lambd=lambd, ctx=ctx)
         dump = _get_val(cfg, sec, 'Dump', dtype='bool', dval=False)
         if dump:
-            sim.save_ext(ext_file, th_dict)
+            mrt.save(model_name_calib, datadir=model_dir)
         logger.info("`%s` stage finished" % sec)
     elif start_point == 3:
-        _check(path.exists(ext_file), 'DEFAULT', 'Start',
-               message="Check point of `%s` not found, " % sec + \
-               "please move the start point earlier")
-        th_dict = sim.load_ext(ext_file)
+        _checkpoint_exist(
+            sec, *list(utils.extend_fname(
+            model_prefix+".mrt.calibrate", with_ext=True)))
+        mrt = MRT.load(model_name_calib, datadir=model_dir)
+        if keys != "":
+            _checkpoint_exist(sec, sym_top_file, prm_top_file)
+            top = Model.load(sym_top_file, prm_top_file)
         logger.info("`%s` stage checkd" % sec)
 
     # quantization
     sec = 'QUANTIZATION'
+    model_name_quant = model_name + '.mrt.quantize'
     if start_point < 4:
         restore_names = _get_val(
             cfg, sec, 'Restore_name', dtype='[str]', dval=[])
@@ -283,20 +288,31 @@ if __name__ == "__main__":
             for name, threshold in thresholds.items():
                 mrt.set_threshold(name, threshold)
         mrt.quantize()
+        inputs_ext = mrt.get_inputs_ext()
         dump = _get_val(cfg, sec, 'Dump', dtype='bool', dval=False)
         if dump:
-            mrt.save(model_name+'.base.quantize', datadir=model_dir)
+            mrt.save(model_name_quant, datadir=model_dir)
         logger.info("`%s` stage finished" % sec)
     elif start_point == 4:
-        mrt = MRT.load(model_name+'.base.quantize',
-                       datadir=model_dir)
+        _checkpoint_exist(
+            sec, *list(utils.extend_fname(
+            model_prefix+'.mrt.quantize', with_ext=True)))
+        mrt = MRT.load(model_name_quant, datadir=model_dir)
+        inputs_ext = mrt.get_inputs_ext()
+        dump = _get_val(cfg, sec, 'Dump', dtype='bool', dval=False)
+        if keys != "":
+            _checkpoint_exist(sec, sym_top_file, prm_top_file)
+            top = Model.load(sym_top_file, prm_top_file)
         logger.info("`%s` stage checkd" % sec)
 
     # merge_model
     sec = 'MERGE_MODEL'
-    sym_file, prm_file, ext_file = \
-        _load_fname(model_prefix, suffix='all.quantize', with_ext=True)
+    sym_all_file, prm_all_file, ext_all_file = _load_fname(
+        model_prefix, suffix='all.quantize', with_ext=True)
     if keys == '':
+        _check(start_point != 5, 'DEFAULT', 'Start',
+               message="Invalid start point")
+        qmodel = mrt.current_model
         oscales = mrt.get_output_scales()
         logger.info("`%s` stage skipped" % sec)
     elif start_point < 5:
@@ -323,19 +339,24 @@ if __name__ == "__main__":
             return node
 
         qmodel = model_merger.merge(callback=mergefunc)
-        oscale_maps = _get_val(cfg, sec, 'Oscale_maps', dtype='{str:str}')
-        oscales = model_merger.get_output_scales(mrt_oscales, oscale_maps)
+        oscale_maps = _get_val(
+            cfg, sec, 'Oscale_maps', dtype='{str:str}')
+        oscales = model_merger.get_output_scales(
+            mrt_oscales, oscale_maps)
+        inputs_ext = mrt.get_inputs_ext()
         dump = _get_val(cfg, sec, 'Dump', dtype='bool', dval=False)
         if dump:
-            qmodel.save(sym_file, prm_file)
-        input_ext = mrt.get_inputs_ext()
-        infos = ['oscales: ', oscales, 'input_ext: ', input_ext, "input shapes: ", input_shape]
-        sim.save_ext(ext_file, *infos)
+            qmodel.save(sym_all_file, prm_all_file)
+            infos = ['oscales: ', oscales,
+                     'input_ext: ', inputs_ext,
+                     'input shapes: ', input_shape]
+            sim.save_ext(ext_all_file, *infos)
         logger.info("`%s` stage finished" % sec)
     else:
-        assert start_point == 5
-        qmodel = Model.load(sym_file, prm_file)
-        oscales = sim.load_ext(ext_file)
+        _check(start_point == 5, 'DEFAULT', 'Start',
+               message='Start_point invalid')
+        qmodel = Model.load(sym_all_file, prm_all_file)
+        _, oscales, _, inputs_ext, _, _ = sim.load_ext(ext_all_file)
         logger.info("`%s` stage checked" % sec)
 
     # evaluation
@@ -383,7 +404,7 @@ if __name__ == "__main__":
         qmetric = dataset.metrics()
 
         def quantize(data, label):
-            data = sim.load_real_data(data, 'data', mrt.get_inputs_ext())
+            data = sim.load_real_data(data, 'data', inputs_ext)
             outs = forward(qgraph, data, ctx)
             outs = outs / oscales[0] if olen == 1 \
                 else [(t / oscales[i]) for i, t in enumerate(outs)]
@@ -392,11 +413,10 @@ if __name__ == "__main__":
 
         if iter_num > 0:
             logger.info("Validating...")
-            # TODO: calculate the total sample,
-            #   currently sum the shape[0] as the number just for simplify
             utils.multi_validate(evalfunc, data_iter_func, quantize,
                                  iter_num=iter_num,
-                                 logger=logging.getLogger('mrt.validate'))
+                                 logger=logging.getLogger('mrt.validate'),
+                                 batch_size=batch)
             logger.info("`%s` stage finished" % sec)
 
     # compilation
