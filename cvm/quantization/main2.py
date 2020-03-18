@@ -7,12 +7,13 @@ import numpy as np
 import mxnet as mx
 from mxnet import gluon, ndarray as nd
 
-from transformer import Model
+from transformer import Model, reduce_graph, MRT
 from gluon_zoo import save_model
 import dataset as ds
 import sim_quant_helper as sim
 import utils
 import sym_utils as sutils
+import cvm_op
 
 def set_batch(input_shape, batch):
     return [batch if s == -1 else s for s in input_shape]
@@ -61,6 +62,22 @@ def _get_ctx(config, section, dctx=mx.cpu()):
     return contex
 
 def _get_val(config, section, option, dtype='str', dval=NoneType):
+    """ TODO(ryt): You'd better seperate the dtype format from the
+                   embeded source code for flexiblity.
+
+        Some Example Suggested:
+            1. declare some basic data types:
+                int_t, bool_t, str_t, etc.
+
+            2. abstract the high-level structures in construction.
+                using the ARRAY(int_t) function to indicate the
+                custom defined structure of int array.
+                others like PAIR, ARRAY, etc.
+
+        We can then make a clear exposition into user for different
+            key=value pairs, since the main2 documentation will be
+            improving soon.
+    """
     val_ = config[section][option]
     if val_ == '':
         _check(dval != NoneType, section, option,
@@ -110,6 +127,12 @@ def _load_fname(prefix, suffix=None, with_ext=False):
     suffix = "."+suffix if suffix is not None else ""
     return utils.extend_fname(prefix+suffix, with_ext)
 
+def _checkpoint_exist(sec, *flist):
+    for fname in flist:
+        _check(path.exists(fname), 'DEFAULT', 'Start',
+               message="Check point of `%s` not found, " % sec + \
+               "please move the start point earlier")
+
 if __name__ == "__main__":
     assert len(sys.argv) == 2, "Please enter 2 python arguments."
     cfgPath = sys.argv[1]
@@ -134,10 +157,10 @@ if __name__ == "__main__":
     model_prefix = path.join(model_dir, model_name)
     model_ctx = _get_ctx(cfg, sec)
     input_shape = _get_val(cfg, sec, 'Input_shape', dtype='tuple')
-    start_pos = {'PREPARE': 1, 'SPLIT_MODEL': 2, \
+    start_pos = {'DEFAULT': 0, 'PREPARE': 1, 'SPLIT_MODEL': 2, \
                  'CALIBRATION': 3, 'QUANTIZATION': 4, \
                  'MERGE_MODEL': 5}
-    start = _get_val(cfg, sec, 'Start', dtype='str', dval='PREPARE')
+    start = _get_val(cfg, sec, 'Start', dtype='str', dval='DEFAULT')
     _check(start in start_pos.keys(), sec, 'Start',
            message="Please choose a value from `%s`" % start_pos.keys())
     start_point = start_pos[start]
@@ -145,17 +168,18 @@ if __name__ == "__main__":
     # prepare
     sec = 'PREPARE'
     sym_file, prm_file = _load_fname(model_prefix, suffix='prepare')
-    if start_point <= 1:
-        sym_path, prm_path = _load_fname(model_prefix)
-        if not path.exists(sym_path) or not path.exists(prm_path):
-            save_model(model_name, sym_path=sym_path, prm_path=prm_path)
+    sym_path, prm_path = _load_fname(model_prefix)
+    if not path.exists(sym_path) or not path.exists(prm_path):
+        save_model(model_name, sym_path=sym_path, prm_path=prm_path)
+
+    if start_point < 1:
         model = Model.load(sym_path, prm_path)
         model.prepare(set_batch(input_shape, 1))
         dump = _get_val(cfg, sec, 'Dump', dtype='bool', dval=False)
         if dump:
             model.save(sym_file, prm_file)
         logger.info("`%s` stage finihed" % sec)
-    else:
+    elif start_point == 1:
         _check(path.exists(sym_file) and path.exists(prm_file), 'DEFAULT',
                'Start', message="Check point of `%s` not found, " % sec + \
                "please move the start point earlier")
@@ -168,40 +192,34 @@ if __name__ == "__main__":
     sym_top_file, prm_top_file = _load_fname(model_prefix, suffix='top')
     sym_base_file, prm_base_file = _load_fname(model_prefix, suffix='base')
     if keys == '':
-        mrt = model.get_mrt()
-        logger.info("`%s` stage skipped" % sec)
-    elif start_point <= 2:
+        _check(start_point != 2, 'DEFAULT', 'Start',
+               message="Invalid start point")
+        if start_point <= 1:
+            logger.info("`%s` stage skipped" % sec)
+    elif start_point < 2:
         base, top = model.split(keys)
-        mrt = base.get_mrt()
         dump = _get_val(cfg, sec, 'Dump', dtype='bool', dval=False)
         if dump:
             top.save(sym_top_file, prm_top_file)
             base.save(sym_base_file, prm_base_file)
         logger.info("`%s` stage finished" % sec)
-    else:
-        _check(path.exists(sym_top_file) and \
-               path.exists(prm_top_file), 'DEFAULT',
-               'Start', message="Check point of `%s` not found, " % sec + \
-               "please move the start point earlier")
+    elif start_point == 2:
+        _checkpoint_exist(
+            sec, *[sym_top_file, prm_top_file, sym_base_file, prm_base_file])
         top = Model.load(sym_top_file, prm_top_file)
-        _check(path.exists(sym_base_file) and \
-               path.exists(prm_base_file), 'DEFAULT',
-               'Start', message="Check point of `%s` not found, " % sec + \
-               "please move the start point earlier")
         base = Model.load(sym_base_file, prm_base_file)
-        mrt = base.get_mrt()
         logger.info("`%s` stage checked" % sec)
 
     # calibration
     sec = 'CALIBRATION'
-    _, _, ext_file = utils.extend_fname(
-        model_prefix+'.mrt.calibrate', with_ext=True)
-    if start_point <= 3:
+    model_name_calib = model_name + '.mrt.calibrate'
+    batch = _get_val(cfg, sec, 'Batch', dtype='int', dval=16)
+    ds_name = _get_val(cfg, sec, 'dataset')
+    if start_point < 3:
+        mrt = model.get_mrt() if keys == '' else base.get_mrt()
         calibrate_num = _get_val(
             cfg, sec, 'Calibrate_num', dtype='int', dval=1)
         lambd = _get_val(cfg, sec, 'Lambda', dtype='float', dval=None)
-        ds_name = _get_val(cfg, sec, 'dataset')
-        batch = _get_val(cfg, sec, 'Batch', dtype='int', dval=16)
         shp = set_batch(input_shape, batch)
         dataset = ds.DS_REG[ds_name](shp)
         data_iter_func = dataset.iter_func()
@@ -209,21 +227,44 @@ if __name__ == "__main__":
         for i in range(calibrate_num):
             data, _ = data_iter_func()
             mrt.set_data(data)
-            th_dict = mrt.calibrate(lambd=lambd, ctx=ctx)
+            mrt.calibrate(lambd=lambd, ctx=ctx)
         dump = _get_val(cfg, sec, 'Dump', dtype='bool', dval=False)
         if dump:
-            sim.save_ext(ext_file, th_dict)
+            mrt.save(model_name_calib, datadir=model_dir)
         logger.info("`%s` stage finished" % sec)
-    else:
-        _check(path.exists(ext_file), 'DEFAULT', 'Start',
-               message="Check point of `%s` not found, " % sec + \
-               "please move the start point earlier")
-        th_dict = sim.load_ext(ext_file)
+    elif start_point == 3:
+        _checkpoint_exist(
+            sec, *list(utils.extend_fname(
+            model_prefix+".mrt.calibrate", with_ext=True)))
+        mrt = MRT.load(model_name_calib, datadir=model_dir)
+        if keys != "":
+            _checkpoint_exist(sec, sym_top_file, prm_top_file)
+            top = Model.load(sym_top_file, prm_top_file)
         logger.info("`%s` stage checkd" % sec)
 
     # quantization
     sec = 'QUANTIZATION'
-    if start_point <= 4:
+    model_name_quant = model_name + '.mrt.quantize'
+    if start_point < 4:
+        restore_names = _get_val(
+            cfg, sec, 'Restore_name', dtype='[str]', dval=[])
+        restore_names = set(restore_names)
+        if '_ALL_EXCEPT_' in restore_names:
+            from tfm_base import _pass_manager
+            from sym_utils import topo_sort
+            from tfm_ops import disabled_restore_ops
+
+            quantize_ops = [op_name for op_name in _pass_manager["quantize"] \
+                            if op_name not in disabled_restore_ops]
+            restore_names_new = []
+            for sym in topo_sort(mrt.current_model.symbol):
+                name, op_name = sym.attr('name'), sym.attr('op_name')
+                if op_name in quantize_ops and \
+                    name not in restore_names:
+                    restore_names_new.append(name)
+            restore_names = set(restore_names_new)
+        for name in restore_names:
+            mrt.set_restore(name)
         input_precision = _get_val(
             cfg, sec, 'Input_precision', dtype='int', dval=None)
         if input_precision is not None:
@@ -247,26 +288,35 @@ if __name__ == "__main__":
             for name, threshold in thresholds.items():
                 mrt.set_threshold(name, threshold)
         mrt.quantize()
+        inputs_ext = mrt.get_inputs_ext()
         dump = _get_val(cfg, sec, 'Dump', dtype='bool', dval=False)
         if dump:
-            mrt.save(model_name+'.base.quantize', datadir=model_dir)
+            mrt.save(model_name_quant, datadir=model_dir)
         logger.info("`%s` stage finished" % sec)
-    else:
-        mrt = MRT.load(model_name+'.base.quantize',
-                       datadir=model_dir)
+    elif start_point == 4:
+        _checkpoint_exist(
+            sec, *list(utils.extend_fname(
+            model_prefix+'.mrt.quantize', with_ext=True)))
+        mrt = MRT.load(model_name_quant, datadir=model_dir)
+        inputs_ext = mrt.get_inputs_ext()
+        dump = _get_val(cfg, sec, 'Dump', dtype='bool', dval=False)
+        if keys != "":
+            _checkpoint_exist(sec, sym_top_file, prm_top_file)
+            top = Model.load(sym_top_file, prm_top_file)
         logger.info("`%s` stage checkd" % sec)
-    qmodel = mrt.current_model
-    mks = ['mrt_quantize_clip_101',
-           'ssd0_multiperclassdecoder0_zeros_like0']
 
     # merge_model
     sec = 'MERGE_MODEL'
-    sym_file, prm_file, ext_file = \
-        _load_fname(model_prefix, suffix='all.quantize', with_ext=True)
+    sym_all_file, prm_all_file, ext_all_file = _load_fname(
+        model_prefix, suffix='all.quantize', with_ext=True)
     if keys == '':
+        _check(start_point != 5, 'DEFAULT', 'Start',
+               message="Invalid start point")
+        qmodel = mrt.current_model
         oscales = mrt.get_output_scales()
         logger.info("`%s` stage skipped" % sec)
-    elif start_point <= 5:
+    elif start_point < 5:
+        qmodel = mrt.current_model
         mrt_oscales = mrt.get_output_scales()
         model_merger = Model.merger(qmodel, top, mrt.get_maps())
         attribute_deps = _get_val(
@@ -289,16 +339,24 @@ if __name__ == "__main__":
             return node
 
         qmodel = model_merger.merge(callback=mergefunc)
-        oscale_maps = _get_val(cfg, sec, 'Oscale_maps', dtype='{str:str}')
-        oscales = model_merger.get_output_scales(mrt_oscales, oscale_maps)
+        oscale_maps = _get_val(
+            cfg, sec, 'Oscale_maps', dtype='{str:str}')
+        oscales = model_merger.get_output_scales(
+            mrt_oscales, oscale_maps)
+        inputs_ext = mrt.get_inputs_ext()
         dump = _get_val(cfg, sec, 'Dump', dtype='bool', dval=False)
         if dump:
-            qmodel.save(sym_file, prm_file)
-        sim.save_ext(ext_file, oscales)
+            qmodel.save(sym_all_file, prm_all_file)
+            infos = ['oscales: ', oscales,
+                     'input_ext: ', inputs_ext,
+                     'input shapes: ', input_shape]
+            sim.save_ext(ext_all_file, *infos)
         logger.info("`%s` stage finished" % sec)
     else:
-        qmodel = Model.load(sym_file, prm_file)
-        oscales = sim.load_ext(ext_file)
+        _check(start_point == 5, 'DEFAULT', 'Start',
+               message='Start_point invalid')
+        qmodel = Model.load(sym_all_file, prm_all_file)
+        _, oscales, _, inputs_ext, _, _ = sim.load_ext(ext_all_file)
         logger.info("`%s` stage checked" % sec)
 
     # evaluation
@@ -307,6 +365,8 @@ if __name__ == "__main__":
         iter_num = _get_val(cfg, sec, 'Iter_num', dtype='int', dval=0)
         batch = _get_val(cfg, sec, 'Batch', dtype='int', dval=batch)
         ctx = _get_ctx(cfg, sec, dctx=model_ctx)
+        if isinstance(ctx, mx.Context):
+            ctx = [ctx]
         org_model = Model.load(sym_path, prm_path)
         graph = org_model.to_graph(ctx=ctx)
         dataset = ds.DS_REG[ds_name](set_batch(input_shape, batch))
@@ -318,8 +378,6 @@ if __name__ == "__main__":
         def forward(net, data, ctx):
             """ Multiple xpu run support.
             """
-            if isinstance(ctx, mx.Context):
-                ctx = [ctx]
             data = gluon.utils.split_and_load(
                 data, ctx_list=ctx, batch_axis=baxis, even_split=False)
             outs = [net(d) for d in data]
@@ -335,11 +393,18 @@ if __name__ == "__main__":
             acc = dataset.validate(metric, outs, label)
             return acc
 
+        ngpus = len(ctx)
+        _check(
+            not batch % ngpus, sec, 'Device_ids',
+            'Batch must be divisible by the number of gpus')
+        split_batch = batch//ngpus
+        qmodel = reduce_graph(qmodel, {
+            'data': set_batch(input_shape, split_batch)})
         qgraph = qmodel.to_graph(ctx=ctx)
         qmetric = dataset.metrics()
 
         def quantize(data, label):
-            data = sim.load_real_data(data, 'data', mrt.get_inputs_ext())
+            data = sim.load_real_data(data, 'data', inputs_ext)
             outs = forward(qgraph, data, ctx)
             outs = outs / oscales[0] if olen == 1 \
                 else [(t / oscales[i]) for i, t in enumerate(outs)]
@@ -348,11 +413,10 @@ if __name__ == "__main__":
 
         if iter_num > 0:
             logger.info("Validating...")
-            # TODO: calculate the total sample,
-            #   currently sum the shape[0] as the number just for simplify
             utils.multi_validate(evalfunc, data_iter_func, quantize,
                                  iter_num=iter_num,
-                                 logger=logging.getLogger('mrt.validate'))
+                                 logger=logging.getLogger('mrt.validate'),
+                                 batch_size=batch)
             logger.info("`%s` stage finished" % sec)
 
     # compilation

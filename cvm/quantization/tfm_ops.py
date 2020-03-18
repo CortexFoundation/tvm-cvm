@@ -21,6 +21,7 @@ import sim_quant_helper as sim
 @register_pass("validate")
 @register_pass("rewrite")
 @register_pass("fuse_transpose")
+@register_pass("prepare_for_compile")
 @register_transformer("null")
 class Null(Transformer):
     def quantize(self, op, **kwargs):
@@ -42,6 +43,7 @@ class Null(Transformer):
 @register_pass("rewrite")
 @register_pass("quantize")
 @register_pass("calculate_ops")
+@register_pass("prepare_for_compile")
 @register_pass('compile')
 @register_transformer("transpose")
 class Transpose(Transformer):
@@ -72,11 +74,20 @@ class Transpose(Transformer):
 @register_pass("rewrite")
 @register_pass("calculate_ops")
 @register_pass("quantize")
+# @register_pass("prepare_for_compile")
 @register_pass("compile")
 @register_transformer("relu")
 class Relu(Transformer):
     def fuse_transpose(self, op, **kwargs):
         return reverse_transpose(op)
+
+    def prepare_for_compile(self, op, **kwargs):
+        # The reverse process is comment, refer to 
+        #   `reverse_sequence` for more details.
+        # X = sym_iter(op.get_children())[0]
+        # if is_fusable_cvm_precision(X):
+        #     op = reverse_sequence(op)
+        return op
 
 
 @register_pass("calculate_ops")
@@ -130,7 +141,6 @@ class MulScalar(Transformer):
 @register_transformer("_div_scalar")
 class DivScalar(Transformer):
     def rewrite(self, op, **kwargs):
-        # TODO: dynamic shape
         graph = kwargs['graph']
         name = op.attr('name')
         attr, childs = op.list_attr(), sym_iter(op.get_children())
@@ -169,6 +179,12 @@ class Activation(Transformer):
             op = Relu().calculate_ops(op, **kwargs)
         return op
 
+    def prepare_for_compile(self, op, **kwargs):
+        attr = op.list_attr()
+        if attr['act_type'] == Relu.op_name:
+            op = Relu().prepare_for_compile(op, **kwargs)
+        return op
+
     def compile(self, op, **kwargs):
         attrs = kwargs['attr']
         act_type = attrs['act_type']
@@ -181,6 +197,7 @@ class Activation(Transformer):
 
 
 @register_pass("fuse_transpose")
+@register_pass("prepare_for_compile")
 @register_transformer("Convolution")
 class Convolution(Transformer):
     def validate(self, op, **kwargs):
@@ -307,6 +324,7 @@ class Convolution(Transformer):
 @register_pass("fuse_transpose")
 @register_pass("rewrite")
 @register_pass("quantize")
+@register_pass("prepare_for_compile")
 @register_transformer('Pad')
 class Pad(Transformer):
     pass
@@ -317,6 +335,7 @@ class Pad(Transformer):
 @register_pass("fuse_transpose")
 @register_pass("rewrite")
 @register_pass("quantize")
+@register_pass("prepare_for_compile")
 @register_transformer('expand_dims')
 class ExpandDims(Transformer):
     def compile(self, op, **kwargs):
@@ -331,6 +350,7 @@ class ExpandDims(Transformer):
 @register_pass("calculate_ops")
 @register_pass("fuse_transpose")
 @register_pass("rewrite")
+@register_pass("prepare_for_compile")
 @register_transformer('Embedding')
 class Embedding(Transformer):
     def quantize(self, op, **kwargs):
@@ -363,6 +383,7 @@ class Embedding(Transformer):
 @register_pass("calculate_ops")
 @register_pass("fuse_transpose")
 @register_pass("quantize")
+@register_pass("prepare_for_compile")
 @register_transformer("repeat")
 class Repeat(Transformer):
     def compile(self, op, **kwargs):
@@ -384,6 +405,7 @@ class Repeat(Transformer):
 @register_pass("validate")
 @register_pass("fuse_transpose")
 @register_pass("rewrite")
+@register_pass("prepare_for_compile")
 @register_transformer('_contrib_box_nms')
 class BoxNms(Transformer):
     def compile(self, op, **kwargs):
@@ -421,10 +443,10 @@ class BoxNms(Transformer):
 @register_pass("rewrite")
 @register_pass("calculate_ops")
 @register_pass("fuse_transpose")
+@register_pass("prepare_for_compile")
 @register_transformer("slice_like")
 class SliceLike(Transformer):
     def quantize(self, op, **kwargs):
-        # TODO: restore
         return _quantize_scale(op, **kwargs)
 
     def compile(self, op, **kwargs):
@@ -475,6 +497,7 @@ class SliceChannel(Transformer):
     pass
 
 
+@register_pass("prepare_for_compile")
 @register_transformer('UpSampling')
 class UpSampling(Transformer):
     def compile(self, op, **kwargs):
@@ -487,6 +510,7 @@ class UpSampling(Transformer):
 
 @register_pass("validate")
 @register_pass("fuse_transpose")
+@register_pass("prepare_for_compile")
 @register_transformer("FullyConnected")
 class FullyConnected(Transformer):
     def rewrite(self, op, **kwargs):
@@ -633,8 +657,10 @@ class Softmax(Transformer):
         params[W_name] = weight = table.round().reshape(alpha+1, 1)
         wattr = {'precision': str(tprec)}
         W = graph[W_name] = mx.sym.var(W_name, shape=weight.shape, attr=wattr)
+        # lut = mx.sym.Custom(norm, W, in_dim=alpha+1,
+        #                     name=name, op_type='cvm_lut')
         lut = mx.sym.Custom(norm, W, in_dim=alpha+1,
-                            name=name, op_type='cvm_lut')
+                            name=N.n('softmax_lut'), op_type='cvm_lut')
         sum_lut = mx.sym.sum(lut, axis=axis, keepdims=True,
                              name=N.n("softmax_sum"))
 
@@ -650,11 +676,13 @@ class Softmax(Transformer):
         op = mx.sym.broadcast_div(prob, sum_lut, name=N.n("softmax_prob"))
         op = op.astype('int32').astype('float32')
         # op = mx.sym.floor(op) # simulate integer division
-        op = realize(op, 0, oprec)
-        oname = op.attr('name')
+        # op = realize(op, 0, oprec)
+        op = realize(op, 0, oprec, name=name)
+        # oname = op.attr('name')
         precs[name][OUT_KEY] = oprec
-        precs[oname] = {OUT_KEY: oprec}
-        scales[oname] = scales[name] = oscale
+        # precs[oname] = {OUT_KEY: oprec}
+        # scales[oname] = scales[name] = oscale
+        scales[name] = oscale
 
         logger = logging.getLogger('log.mrt.realize')
         logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
@@ -664,6 +692,7 @@ class Softmax(Transformer):
 
 @register_pass("fuse_transpose")
 @register_pass("quantize")
+@register_pass("prepare_for_compile")
 @register_transformer("Pooling")
 class Pooling(Transformer):
     def validate(self, op, **kwargs):
@@ -802,11 +831,31 @@ class BroadcastMul(Transformer):
                      op_name, name, scales[name], cns)
         return op
 
+    def prepare_for_compile(self, op, **kwargs):
+        params = kwargs['params']
+        graph = kwargs['graph']
+
+        name = op.attr('name')
+        childs = sym_iter(op.get_children())
+        cns = [c.attr('name') for c in childs]
+
+        fuse = any([is_params(c, params) and \
+                   params[c.attr('name')].abs().max().asscalar() == 0 \
+                   for c in childs])
+        if fuse:
+           ishp = kwargs['infer_shapes'][name][get_entry_id(op)]
+           attr = {'precision': str(1)}
+           op = graph[name] = mx.sym.var(name, shape=ishp, attr=attr)
+           params[name] = nd.zeros(list(ishp))
+
+        return op
+
 
 @register_pass("validate")
 @register_pass("calculate_ops")
 @register_pass("fuse_transpose")
 @register_pass("rewrite")
+@register_pass("prepare_for_compile")
 @register_pass("compile")
 @register_transformer("broadcast_add")
 class BroadcastAdd(Transformer):
@@ -835,12 +884,16 @@ class BroadcastAdd(Transformer):
         return _quantize_scale(op, **kwargs)
 
 
+@register_pass("calculate_ops")
+@register_pass("prepare_for_compile")
 @register_pass("compile")
 @register_transformer("broadcast_div")
 class BroadcastDiv(Transformer):
     pass
 
 
+@register_pass("calculate_ops")
+@register_pass("prepare_for_compile")
 @register_pass("compile")
 @register_transformer("broadcast_sub")
 class BroadcastSub(Transformer):
@@ -869,12 +922,14 @@ class BroadcastSub(Transformer):
         return _quantize_scale(op, **kwargs)
 
 
+@register_pass("prepare_for_compile")
 @register_pass("compile")
 @register_transformer("broadcast_to")
 class BroadcastTo(Transformer):
     pass
 
 
+@register_pass("prepare_for_compile")
 @register_pass("compile")
 @register_transformer("broadcast_greater")
 class BroadcastGreater(Transformer):
@@ -884,6 +939,7 @@ class BroadcastGreater(Transformer):
 @register_pass("rewrite")
 @register_pass("validate")
 @register_pass("calculate_ops")
+@register_pass("prepare_for_compile")
 @register_transformer("Concat")
 class Concat(Transformer):
     def fuse_transpose(self, op, **kwargs):
@@ -911,6 +967,7 @@ class Concat(Transformer):
         return get_nnvm_op(op_name)(*childs, name=N.n('concat'), **new_attrs)
 
 
+@register_pass("prepare_for_compile")
 @register_pass('compile')
 @register_pass("rewrite")
 @register_transformer("sum")
@@ -976,6 +1033,7 @@ class Sum(Transformer):
 
 @register_pass("validate")
 @register_pass("fuse_transpose")
+@register_pass("prepare_for_compile")
 @register_transformer("BatchNorm")
 class BatchNorm(Transformer):
     def rewrite(self, op, **kwargs):
@@ -1041,6 +1099,7 @@ class BatchNorm(Transformer):
 @register_pass("rewrite")
 @register_pass("quantize")
 @register_pass("calculate_ops")
+@register_pass("prepare_for_compile")
 @register_transformer("Flatten")
 class Flatten(Transformer):
     def compile(self, op, **kwargs):
@@ -1050,30 +1109,36 @@ class Flatten(Transformer):
         return sym
 
 
+@register_pass("prepare_for_compile")
 @register_transformer("floor")
 class Floor(Transformer):
     def compile(self, op, **kwargs):
         return kwargs['childs'][0]
 
 
+@register_pass("prepare_for_compile")
 @register_transformer("ceil")
 class Ceil(Transformer):
     def compile(self, op, **kwargs):
         return kwargs['childs'][0]
 
 
+@register_pass("prepare_for_compile")
 @register_transformer("round")
 class Round(Transformer):
     def compile(self, op, **kwargs):
         return kwargs['childs'][0]
 
 
+@register_pass("prepare_for_compile")
 @register_transformer("fix")
 class Fix(Transformer):
     def compile(self, op, **kwargs):
         return kwargs['childs'][0]
 
 
+@register_pass("calculate_ops")
+@register_pass("prepare_for_compile")
 @register_transformer("Cast")
 class Cast(Transformer):
     def compile(self, op, **kwargs):
@@ -1085,6 +1150,7 @@ class Cast(Transformer):
 @register_pass("validate")
 @register_pass("rewrite")
 @register_pass("quantize")
+@register_pass("prepare_for_compile")
 @register_transformer("slice")
 class Slice(Transformer):
     def _fix_attr(self, **kwargs):
@@ -1118,6 +1184,7 @@ class Slice(Transformer):
 @register_pass("fuse_transpose")
 @register_pass("rewrite")
 @register_pass("quantize")
+@register_pass("prepare_for_compile")
 @register_transformer("Reshape")
 class Reshape(Transformer):
     def compile(self, op, **kwargs):
@@ -1130,6 +1197,7 @@ class Reshape(Transformer):
                                     name=N.n('reshape'), **new_attrs)
 
 
+@register_pass("calculate_ops")
 @register_transformer("Custom")
 class Custom(Transformer):
     def validate(self, op, **kwargs):
@@ -1139,6 +1207,18 @@ class Custom(Transformer):
                            'cvm_right_shift', 'cvm_lut'], \
             "Invalid op_type:%s in Custom operator" % op_type
         return op
+
+    def prepare_for_compile(self, op, **kwargs):
+        # name = op.attr('name')
+        # X = sym_iter(op.get_children())[0]
+        # if is_fusable_cvm_precision(op) and is_fusable_cvm_precision(X):
+        #     p1, s1 = fusable_cvm_precision_attr(op)
+        #     p2, s2 = fusable_cvm_precision_attr(X)
+        #     X = sym_iter(X.get_children())[0]
+        #     op = realize(X, (s1 + s2), min(p1, p2),
+        #             name=name)
+        return op
+
 
     def compile(self, op, **kwargs):
         childs = kwargs['childs']
@@ -1163,6 +1243,7 @@ class Custom(Transformer):
 
 @register_pass("rewrite")
 @register_pass("calculate_ops")
+@register_pass("prepare_for_compile")
 @register_transformer("clip")
 class Clip(Transformer):
     def validate(self, op, **kwargs):
@@ -1205,6 +1286,7 @@ class Clip(Transformer):
         return get_nnvm_op(op_name)(*childs, **new_attrs)
 
 
+@register_pass("prepare_for_compile")
 @register_transformer("_minimum")
 class Minimum(Transformer):
     def compile(self, op, **kwargs):
@@ -1215,6 +1297,7 @@ class Minimum(Transformer):
                                     name=N.n('_minimum'), **attrs)
 
 
+@register_pass("prepare_for_compile")
 @register_transformer("_maximum")
 class Maximum(Transformer):
     def compile(self, op, **kwargs):
@@ -1230,12 +1313,14 @@ class Maximum(Transformer):
 @register_pass("rewrite")
 @register_pass("quantize")
 @register_pass("calculate_ops")
+@register_pass("prepare_for_compile")
 @register_pass("compile")
 @register_transformer("max")
 class Max(Transformer):
     pass
 
 
+@register_pass("prepare_for_compile")
 @register_pass("compile")
 @register_transformer("min")
 class Min(Transformer):
@@ -1244,6 +1329,7 @@ class Min(Transformer):
 @register_pass("fuse_transpose")
 @register_pass("rewrite")
 @register_pass("quantize")
+@register_pass("prepare_for_compile")
 @register_transformer("argmax")
 class Argmax(Transformer):
     def compile(self, op, **kwargs):
@@ -1257,6 +1343,7 @@ class Argmax(Transformer):
                                     name=N.n('_argmax'), **new_attrs)
 
 
+@register_pass("prepare_for_compile")
 @register_transformer("argmin")
 class Argmin(Transformer):
     def compile(self, op, **kwargs):
@@ -1270,6 +1357,7 @@ class Argmin(Transformer):
                                     name=N.n('_argmin'), **new_attrs)
 
 
+@register_pass("prepare_for_compile")
 @register_pass("compile")
 @register_transformer("abs")
 class Abs(Transformer):
@@ -1280,6 +1368,7 @@ class Abs(Transformer):
 @register_pass("validate")
 @register_pass("calculate_ops")
 @register_pass("rewrite")
+@register_pass("prepare_for_compile")
 @register_transformer("elemwise_add")
 class ElemwiseAdd(Transformer):
     def fuse_transpose(self, op, **kwargs):
@@ -1293,6 +1382,7 @@ class ElemwiseAdd(Transformer):
 @register_pass("validate")
 @register_pass("calculate_ops")
 @register_pass("rewrite")
+@register_pass("prepare_for_compile")
 @register_transformer("elemwise_sub")
 class ElemwiseSub(Transformer):
     def fuse_transpose(self, op, **kwargs):
@@ -1306,6 +1396,7 @@ class ElemwiseSub(Transformer):
 @register_pass("calculate_ops")
 @register_pass("rewrite")
 @register_pass("quantize")
+@register_pass("prepare_for_compile")
 @register_transformer("Dropout")
 class Dropout(Transformer):
     def compile(self, op, **kwargs):
@@ -1330,6 +1421,7 @@ class Arange(Transformer):
 @register_pass("fuse_transpose")
 @register_pass("rewrite")
 @register_pass("quantize")
+@register_pass("prepare_for_compile")
 @register_pass("compile")
 @register_transformer("tile")
 class Tile(Transformer):
@@ -1340,6 +1432,7 @@ class Tile(Transformer):
 @register_pass("fuse_transpose")
 @register_pass("rewrite")
 @register_pass("quantize")
+@register_pass("prepare_for_compile")
 @register_pass("compile")
 @register_transformer("negative")
 class Negative(Transformer):
@@ -1417,6 +1510,7 @@ class OnesLike(Transformer):
 @register_pass("calculate_ops")
 @register_pass("fuse_transpose")
 @register_pass("rewrite")
+@register_pass("prepare_for_compile")
 @register_transformer("_greater_scalar")
 class GreaterScalar(Transformer):
     def validate(self, op, **kwargs):
@@ -1431,9 +1525,10 @@ class GreaterScalar(Transformer):
 
         scalar = int(attr['scalar'])
         prec = get_bit(scalar)
-        var = nnvm.sym.Variable(N.n('const_var'), shape=(1,),
-                                vattr={'precision': str(prec)})
-        op = nnvm.sym.broadcast_greater(childs[0], var, name=N.n(), **attr)
+        var = nnvm.sym.Variable(N.n('greater_scalar'), shape=(1,),
+                                precision=str(prec))
+        kwargs['params'][var.attr('name')] = nd_array([scalar])
+        op = nnvm.sym.broadcast_greater(childs[0], var, name=N.n())
         return op
 
 
@@ -1441,6 +1536,7 @@ class GreaterScalar(Transformer):
 @register_pass("validate")
 @register_pass("rewrite")
 @register_pass("fuse_transpose")
+@register_pass("prepare_for_compile")
 @register_pass("compile")
 @register_transformer("where")
 class Where(Transformer):
@@ -1452,6 +1548,7 @@ class Where(Transformer):
 @register_pass("fuse_transpose")
 @register_pass("rewrite")
 @register_pass("quantize")
+@register_pass("prepare_for_compile")
 @register_pass("compile")
 @register_transformer("squeeze")
 class Squeeze(Transformer):
@@ -1530,6 +1627,8 @@ def _quantize_xwb(op, **kwargs):
                  op_name, name, scales[name], cns)
     return op
 
+disabled_restore_ops = {"null"}
+
 def _restore(op, **kwargs):
     th_dict, precs, scales = kwargs['th_dict'], kwargs['precs'], kwargs['scales']
     name, op_name = op.attr('name'), op.attr('op_name')
@@ -1590,3 +1689,44 @@ def reverse_transpose(op):
         op = get_mxnet_op(op_name)(X, **attrs, name=name)
         op = mx.sym.transpose(op, name=t_name, **t_attr)
     return op
+
+def reverse_sequence(op):
+    """ Reverse the symbol sequenze may leads to
+            error of the different result, due to the graph
+            unequaivent transformer.
+
+        Example:
+            A ->  B -> C
+              |-> D -> E
+
+            after reverse sequence is
+
+            B -> A ->  C
+                   |-> D -> E
+
+            which is invalid.
+
+        Notice:
+            The fuse_transpose pass have the same hidden problems.
+    """
+    name, op_name = op.attr('name'), op.attr('op_name')
+    childs, attrs = sutils.sym_iter(op.get_children()), op.list_attr()
+    assert len(childs) == 1
+    X = childs[0]
+    t_name, t_attr = X.attr('name'), X.list_attr()
+    t_opname = X.attr('op_name')
+    assert len(X.get_children()) == 1
+    X = X.get_children()[0]
+    op = get_mxnet_op(op_name)(X, **attrs, name=name)
+    op = get_mxnet_op(t_opname)(op, name=t_name, **t_attr)
+    return op
+
+def is_fusable_cvm_precision(op):
+    return op.attr('op_name') == 'Custom' and \
+        op.list_attr()['op_type'] in [
+            'cvm_clip', 'cvm_right_shift']
+
+def fusable_cvm_precision_attr(op):
+    assert is_fusable_cvm_precision(op)
+    attr = op.list_attr()
+    return get_attr(attr, 'precision'), get_attr(attr, 'shift_bit', 0)

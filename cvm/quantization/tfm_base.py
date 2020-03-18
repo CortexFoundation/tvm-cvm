@@ -68,6 +68,14 @@ class Transformer(object):
                op_name, name, scales[name], scales[cname])
         return op
 
+    def prepare_for_compile(self, op, **kwargs):
+        """ Equivalent graph transition may be needed before `compile`
+                dynamic shape fixxation for `MulScalar`, `DivScalar`, `Zeroslike`
+                and 'OnesLike' that is only needed in quantization:
+            Do nothing by default.
+        """
+        return op
+
     def compile(self, op, **kwargs):
         """ Compile mxnet symbol into nnvm symbol.
 

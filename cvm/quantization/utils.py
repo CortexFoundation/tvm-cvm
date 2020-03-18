@@ -133,34 +133,8 @@ def load_parameters(graph, params, prefix="", ctx=None, dtype=None):
 
     return ret_params
 
-def load_dataset(batch_size=10, input_size=224):
-    rgb_mean = [123.68, 116.779, 103.939]
-    rgb_std = [58.393, 57.12, 57.375]
-    mean_args = {'mean_r': rgb_mean[0], 'mean_g': rgb_mean[1], 'mean_b': rgb_mean[2]}
-    std_args = {'std_r': rgb_std[0], 'std_g': rgb_std[1], 'std_b': rgb_std[2]}
-
-    crop_ratio = 0.875
-    resize = int(math.ceil(input_size / crop_ratio))
-    return mx.io.ImageRecordIter(
-        path_imgrec="./data/val_256_q90.rec",
-        preprocess_threads=30,
-        shuffle=True,
-        batch_size=batch_size,
-
-        resize=resize,
-        data_shape=(3, input_size, input_size),
-        # label_name="softmax_label",
-        # rand_crop=False,
-        # rand_mirror=False,
-        # shuffle_chunk_seed=3982304,
-        # seed=48564309,
-
-        **mean_args,
-        **std_args,
-    )
-
 def multi_validate(base_func, data_iter, *comp_funcs,
-        iter_num=10, logger=logging):
+        iter_num=10, logger=logging, batch_size=16):
     log_str = "Iteration: {:3d} | " + base_func.__name__ + ": {} | "
     for func in comp_funcs:
         log_str += func.__name__ + ": {} | "
@@ -171,7 +145,7 @@ def multi_validate(base_func, data_iter, *comp_funcs,
         data, label = data_iter()
         base_acc = base_func(data, label)
         comp_acc = [func(data, label) for func in comp_funcs]
-        total += data.shape[0]
+        total += batch_size
 
         msg = log_str.format(i, base_acc, *comp_acc, total)
         logger.info(msg)
