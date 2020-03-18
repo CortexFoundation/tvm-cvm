@@ -331,12 +331,8 @@ def reduce_graph(model, input_shapes):
     _sym, _prm = tpass.attach_input_shape(
         _sym, _prm, input_shapes)
 
-    print("Before fixxing shape: ",
-          calculate_ops(_sym, _prm, normalize=False))
     _sym, _prm = prepare_for_compile(_sym, _prm)
     _sym, _prm = fuse_constant(_sym, _prm)
-    print("After fixxing shape: ",
-          calculate_ops(_sym, _prm, normalize=False))
     return Model(_sym, _prm)
 
 def compile_to_cvm(model, model_name, datadir="/data/std_out",

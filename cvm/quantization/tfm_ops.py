@@ -195,56 +195,6 @@ class Activation(Transformer):
             sym = Relu().compile(op, **nkwargs)
         return sym
 
-conv_restore_names = {
-    # "mrt_rewrite_ssd0_mobilenet0_batchnorm0_fwd_0",
-    # "mrt_rewrite_ssd0_mobilenet0_batchnorm1_fwd_0",
-    # "mrt_rewrite_ssd0_mobilenet0_batchnorm2_fwd_0",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm3_fwd_0",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm4_fwd_0",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm5_fwd_0",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm6_fwd_0",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm7_fwd_0",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm8_fwd_0",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm9_fwd_0",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm10_fwd_0",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm11_fwd_0",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm12_fwd_0",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm13_fwd_0",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm14_fwd_0",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm15_fwd_0",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm16_fwd_0",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm17_fwd_0",
-    # "mrt_rewrite_ssd0_mobilenet0_batchnorm18_fwd_0", # don't release
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm19_fwd_0",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm20_fwd_0",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm21_fwd_0",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm22_fwd_0",
-    "ssd0_convpredictor1_conv0_fwd",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm23_fwd_0",
-    "ssd0_convpredictor0_conv0_fwd",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm24_fwd_0",
-    # "mrt_rewrite_ssd0_mobilenet0_batchnorm25_fwd_0", # don't release
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm26_fwd_0",
-    "ssd0_convpredictor3_conv0_fwd",
-    "mrt_rewrite_ssd0_expand_trans_bn0_0",
-    "ssd0_convpredictor2_conv0_fwd",
-    "mrt_rewrite_ssd0_expand_bn0_0",
-    "ssd0_convpredictor5_conv0_fwd",
-    "mrt_rewrite_ssd0_expand_trans_bn1_0",
-    "ssd0_convpredictor4_conv0_fwd",
-    "mrt_rewrite_ssd0_expand_bn1_0",
-    "ssd0_convpredictor7_conv0_fwd",
-    "mrt_rewrite_ssd0_expand_trans_bn2_0",
-    "ssd0_convpredictor6_conv0_fwd",
-    "mrt_rewrite_ssd0_expand_bn2_0",
-    "ssd0_convpredictor9_conv0_fwd",
-    "mrt_rewrite_ssd0_expand_trans_bn3_0",
-    "ssd0_convpredictor8_conv0_fwd",
-    "mrt_rewrite_ssd0_expand_bn3_0",
-    "ssd0_convpredictor11_conv0_fwd",
-    "ssd0_convpredictor10_conv0_fwd",
-}
-
 
 @register_pass("fuse_transpose")
 @register_pass("prepare_for_compile")
