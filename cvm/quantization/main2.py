@@ -248,10 +248,23 @@ if __name__ == "__main__":
     if start_point < 4:
         restore_names = _get_val(
             cfg, sec, 'Restore_name', dtype='[str]', dval=[])
-        restore_names = set(restore_names)
+        name_to_op = {}
+        from sym_utils import topo_sort
+        for sym in topo_sort(mrt.current_model.symbol):
+            name, op_name = sym.attr('name'), sym.attr('op_name')
+            if op_name not in name_to_op:
+                name_to_op[op_name] = []
+            name_to_op[op_name].append(name)
+        new_names = []
+        for name in restore_names:
+            if name.startswith("_OP_") and name[4:] in name_to_op:
+                for new_name in name_to_op[name[4:]]:
+                    new_names.append(new_name)
+            else:
+                new_names.append(name)
+        restore_names = set(new_names)
         if '_ALL_EXCEPT_' in restore_names:
             from tfm_base import _pass_manager
-            from sym_utils import topo_sort
             from tfm_ops import disabled_restore_ops
 
             quantize_ops = [op_name for op_name in _pass_manager["quantize"] \
@@ -398,9 +411,9 @@ if __name__ == "__main__":
             not batch % ngpus, sec, 'Device_ids',
             'Batch must be divisible by the number of gpus')
         split_batch = batch//ngpus
-        qmodel = reduce_graph(qmodel, {
+        rqmodel = reduce_graph(qmodel, {
             'data': set_batch(input_shape, split_batch)})
-        qgraph = qmodel.to_graph(ctx=ctx)
+        qgraph = rqmodel.to_graph(ctx=ctx)
         qmetric = dataset.metrics()
 
         def quantize(data, label):

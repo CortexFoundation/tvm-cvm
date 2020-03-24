@@ -138,6 +138,7 @@ class MulScalar(Transformer):
 @register_pass("validate")
 @register_pass("calculate_ops")
 @register_pass("fuse_transpose")
+# @register_pass("prepare_for_compile") # only for restore
 @register_transformer("_div_scalar")
 class DivScalar(Transformer):
     def rewrite(self, op, **kwargs):
@@ -607,6 +608,7 @@ class Sigmoid(Transformer):
 @register_pass("validate")
 @register_pass("rewrite")
 @register_pass("fuse_transpose")
+# @register_pass("prepare_for_compile") # only for restore
 @register_transformer("exp")
 class Exp(Transformer):
     def quantize(self, op, **kwargs):
@@ -616,6 +618,7 @@ class Exp(Transformer):
 @register_pass("validate")
 @register_pass("rewrite")
 @register_pass("fuse_transpose")
+# @register_pass("prepare_for_compile") # only for restore
 @register_transformer("softmax")
 class Softmax(Transformer):
     def calculate_ops(self, op, **kwargs):
