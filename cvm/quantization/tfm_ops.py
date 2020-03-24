@@ -598,6 +598,7 @@ class FullyConnected(Transformer):
 @register_pass("validate")
 @register_pass("rewrite")
 @register_pass("fuse_transpose")
+# @register_pass("prepare_for_compile") # only for restore
 @register_transformer("sigmoid")
 class Sigmoid(Transformer):
     def quantize(self, op, **kwargs):
