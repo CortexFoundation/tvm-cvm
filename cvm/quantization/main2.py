@@ -49,7 +49,7 @@ def _get_ctx(config, section, dctx=mx.cpu()):
            message='Only support `gpu`, `cpu` and null value')
     if device_type == 'gpu':
         device_ids = _get_val(
-            config, section, 'Device_ids', dtype='[int]')
+            config, section, 'Device_ids', dtype=ARRAY(int_t))
         contex = mx.gpu(device_ids[0]) if len(device_ids) == 1 \
               else [mx.gpu(i) for i in device_ids]
         if section == 'CALIBRATION':
@@ -61,29 +61,25 @@ def _get_ctx(config, section, dctx=mx.cpu()):
                message='`Device_ids` should be null given `cpu` device type')
     return contex
 
-def _get_val(config, section, option, dtype='str', dval=NoneType):
-    """ TODO(ryt): You'd better seperate the dtype format from the
-                   embeded source code for flexiblity.
+str_t = '_str_'
+int_t = '_int_'
+bool_t = '_bool_'
+tuple_t = '_tuple_'
+float_t = '_float_'
 
-        Some Example Suggested:
-            1. declare some basic data types:
-                int_t, bool_t, str_t, etc.
+def ARRAY(dtype):
+    return '[' + dtype + ']'
 
-            2. abstract the high-level structures in construction.
-                using the ARRAY(int_t) function to indicate the
-                custom defined structure of int array.
-                others like PAIR, ARRAY, etc.
+def PAIR(*dtypes):
+    return '{' + ':'.join(list(dtypes)) + '}'
 
-        We can then make a clear exposition into user for different
-            key=value pairs, since the main2 documentation will be
-            improving soon.
-    """
+def _get_val(config, section, option, dtype=str_t, dval=NoneType):
     val_ = config[section][option]
     if val_ == '':
         _check(dval != NoneType, section, option,
                message="Please specify the value")
         val = dval
-    elif dtype in ['str', 'int', 'tuple', 'float', 'bool']:
+    elif dtype in [str_t, int_t, tuple_t, float_t, bool_t]:
         val = _cast_val(section, option, val_, dtype=dtype)
     elif dtype.startswith('['):
         etype=dtype.replace('[', '').replace(']', '')
@@ -108,18 +104,18 @@ def _get_val(config, section, option, dtype='str', dval=NoneType):
             cur[entries[-2]] = entries[-1]
     return val
 
-def _cast_val(section, option, val_, dtype='str'):
-    if dtype == 'str':
+def _cast_val(section, option, val_, dtype=str_t):
+    if dtype == str_t:
         val = val_
-    elif dtype in ['int', 'tuple', 'float', 'bool']:
+    elif dtype in [int_t, tuple_t, float_t, bool_t]:
         try:
-            val = float(eval(val_)) if dtype == 'float' else eval(val_)
+            val = float(eval(val_)) if dtype == float_t else eval(val_)
         except SyntaxError:
             print("Not a valid value, " + \
                   "option `%s` in section `%s`" % (option, section))
             sys.exit(0)
-        if dtype == 'int':
-            _check(type(val).__name__ == dtype, section, option,
+        if dtype == int_t:
+            _check(type(val).__name__ == 'int', section, option,
                    message="Only support integer value")
     return val
 
@@ -146,7 +142,7 @@ if __name__ == "__main__":
     # default
     sec = 'DEFAULT'
     verbosity = _get_val(cfg, sec, 'Verbosity',
-                         dtype='int', dval=logging.NOTSET)
+                         dtype=int_t, dval=logging.NOTSET)
     utils.log_init(level=verbosity)
     logger = logging.getLogger("log.main")
     default_dir = path.expanduser("~/tvm-cvm/data")
@@ -156,11 +152,11 @@ if __name__ == "__main__":
     model_name = _get_val(cfg, sec, 'Model_name')
     model_prefix = path.join(model_dir, model_name)
     model_ctx = _get_ctx(cfg, sec)
-    input_shape = _get_val(cfg, sec, 'Input_shape', dtype='tuple')
+    input_shape = _get_val(cfg, sec, 'Input_shape', dtype=tuple_t)
     start_pos = {'DEFAULT': 0, 'PREPARE': 1, 'SPLIT_MODEL': 2, \
                  'CALIBRATION': 3, 'QUANTIZATION': 4, \
                  'MERGE_MODEL': 5}
-    start = _get_val(cfg, sec, 'Start', dtype='str', dval='DEFAULT')
+    start = _get_val(cfg, sec, 'Start', dtype=str_t, dval='DEFAULT')
     _check(start in start_pos.keys(), sec, 'Start',
            message="Please choose a value from `%s`" % start_pos.keys())
     start_point = start_pos[start]
@@ -175,7 +171,7 @@ if __name__ == "__main__":
     if start_point < 1:
         model = Model.load(sym_path, prm_path)
         model.prepare(set_batch(input_shape, 1))
-        dump = _get_val(cfg, sec, 'Dump', dtype='bool', dval=False)
+        dump = _get_val(cfg, sec, 'Dump', dtype=bool_t, dval=False)
         if dump:
             model.save(sym_file, prm_file)
         logger.info("`%s` stage finihed" % sec)
@@ -188,7 +184,7 @@ if __name__ == "__main__":
 
     # split model
     sec = 'SPLIT_MODEL'
-    keys = _get_val(cfg, sec, 'Keys', dtype='[str]', dval='')
+    keys = _get_val(cfg, sec, 'Keys', dtype=ARRAY(str_t), dval='')
     sym_top_file, prm_top_file = _load_fname(model_prefix, suffix='top')
     sym_base_file, prm_base_file = _load_fname(model_prefix, suffix='base')
     if keys == '':
@@ -198,7 +194,7 @@ if __name__ == "__main__":
             logger.info("`%s` stage skipped" % sec)
     elif start_point < 2:
         base, top = model.split(keys)
-        dump = _get_val(cfg, sec, 'Dump', dtype='bool', dval=False)
+        dump = _get_val(cfg, sec, 'Dump', dtype=bool_t, dval=False)
         if dump:
             top.save(sym_top_file, prm_top_file)
             base.save(sym_base_file, prm_base_file)
@@ -213,13 +209,13 @@ if __name__ == "__main__":
     # calibration
     sec = 'CALIBRATION'
     model_name_calib = model_name + '.mrt.calibrate'
-    batch = _get_val(cfg, sec, 'Batch', dtype='int', dval=16)
+    batch = _get_val(cfg, sec, 'Batch', dtype=int_t, dval=16)
     ds_name = _get_val(cfg, sec, 'dataset')
     if start_point < 3:
         mrt = model.get_mrt() if keys == '' else base.get_mrt()
         calibrate_num = _get_val(
-            cfg, sec, 'Calibrate_num', dtype='int', dval=1)
-        lambd = _get_val(cfg, sec, 'Lambda', dtype='float', dval=None)
+            cfg, sec, 'Calibrate_num', dtype=int_t, dval=1)
+        lambd = _get_val(cfg, sec, 'Lambda', dtype=float_t, dval=None)
         shp = set_batch(input_shape, batch)
         dataset = ds.DS_REG[ds_name](shp)
         data_iter_func = dataset.iter_func()
@@ -228,7 +224,7 @@ if __name__ == "__main__":
             data, _ = data_iter_func()
             mrt.set_data(data)
             mrt.calibrate(lambd=lambd, ctx=ctx)
-        dump = _get_val(cfg, sec, 'Dump', dtype='bool', dval=False)
+        dump = _get_val(cfg, sec, 'Dump', dtype=bool_t, dval=False)
         if dump:
             mrt.save(model_name_calib, datadir=model_dir)
         logger.info("`%s` stage finished" % sec)
@@ -247,7 +243,7 @@ if __name__ == "__main__":
     model_name_quant = model_name + '.mrt.quantize'
     if start_point < 4:
         restore_names = _get_val(
-            cfg, sec, 'Restore_name', dtype='[str]', dval=[])
+            cfg, sec, 'Restore_name', dtype=ARRAY(str_t), dval=[])
         name_to_op = {}
         from sym_utils import topo_sort
         for sym in topo_sort(mrt.current_model.symbol):
@@ -279,30 +275,30 @@ if __name__ == "__main__":
         for name in restore_names:
             mrt.set_restore(name)
         input_precision = _get_val(
-            cfg, sec, 'Input_precision', dtype='int', dval=None)
+            cfg, sec, 'Input_precision', dtype=int_t, dval=None)
         if input_precision is not None:
             mrt.set_input_prec(input_precision)
         output_precision = _get_val(
-            cfg, sec, 'Output_precision', dtype='int', dval=None)
+            cfg, sec, 'Output_precision', dtype=int_t, dval=None)
         if output_precision is not None:
             mrt.set_output_prec(output_precision)
         ctx = _get_ctx(cfg, sec, dctx=model_ctx)
         softmax_lambd = _get_val(
-            cfg, sec, 'Softmax_lambd', dtype='float', dval=None)
+            cfg, sec, 'Softmax_lambd', dtype=float_t, dval=None)
         if softmax_lambd is not None:
             mrt.set_softmax_lambd(softmax_lambd)
         shift_bits = _get_val(
-            cfg, sec, 'Shift_bits', dtype='int', dval=None)
+            cfg, sec, 'Shift_bits', dtype=int_t, dval=None)
         if shift_bits is not None:
             mrt.set_shift_bits(shift_bits)
         thresholds = _get_val(
-            cfg, sec, 'Thresholds', dtype='{str:float}', dval=None)
+            cfg, sec, 'Thresholds', dtype=PAIR(str_t, float_t), dval=None)
         if thresholds is not None:
             for name, threshold in thresholds.items():
                 mrt.set_threshold(name, threshold)
         mrt.quantize()
         inputs_ext = mrt.get_inputs_ext()
-        dump = _get_val(cfg, sec, 'Dump', dtype='bool', dval=False)
+        dump = _get_val(cfg, sec, 'Dump', dtype=bool_t, dval=False)
         if dump:
             mrt.save(model_name_quant, datadir=model_dir)
         logger.info("`%s` stage finished" % sec)
@@ -312,7 +308,7 @@ if __name__ == "__main__":
             model_prefix+'.mrt.quantize', with_ext=True)))
         mrt = MRT.load(model_name_quant, datadir=model_dir)
         inputs_ext = mrt.get_inputs_ext()
-        dump = _get_val(cfg, sec, 'Dump', dtype='bool', dval=False)
+        dump = _get_val(cfg, sec, 'Dump', dtype=bool_t, dval=False)
         if keys != "":
             _checkpoint_exist(sec, sym_top_file, prm_top_file)
             top = Model.load(sym_top_file, prm_top_file)
@@ -333,7 +329,7 @@ if __name__ == "__main__":
         mrt_oscales = mrt.get_output_scales()
         model_merger = Model.merger(qmodel, top, mrt.get_maps())
         attribute_deps = _get_val(
-            cfg, sec, 'Attribute_deps', dtype='{str:str:str}')
+            cfg, sec, 'Attribute_deps', dtype=PAIR(str_t, str_t, str_t))
 
         name_idx = {mrt.get_maps().get(
             s.attr("name"), s.attr("name")): i \
@@ -353,11 +349,11 @@ if __name__ == "__main__":
 
         qmodel = model_merger.merge(callback=mergefunc)
         oscale_maps = _get_val(
-            cfg, sec, 'Oscale_maps', dtype='{str:str}')
+            cfg, sec, 'Oscale_maps', dtype=PAIR(str_t, str_t))
         oscales = model_merger.get_output_scales(
             mrt_oscales, oscale_maps)
         inputs_ext = mrt.get_inputs_ext()
-        dump = _get_val(cfg, sec, 'Dump', dtype='bool', dval=False)
+        dump = _get_val(cfg, sec, 'Dump', dtype=bool_t, dval=False)
         if dump:
             qmodel.save(sym_all_file, prm_all_file)
             infos = ['oscales: ', oscales,
@@ -375,8 +371,8 @@ if __name__ == "__main__":
     # evaluation
     sec = 'EVALUATION'
     if sec in cfg.sections():
-        iter_num = _get_val(cfg, sec, 'Iter_num', dtype='int', dval=0)
-        batch = _get_val(cfg, sec, 'Batch', dtype='int', dval=batch)
+        iter_num = _get_val(cfg, sec, 'Iter_num', dtype=int_t, dval=0)
+        batch = _get_val(cfg, sec, 'Batch', dtype=int_t, dval=batch)
         ctx = _get_ctx(cfg, sec, dctx=model_ctx)
         if isinstance(ctx, mx.Context):
             ctx = [ctx]
@@ -437,7 +433,7 @@ if __name__ == "__main__":
     if sec in cfg.sections():
         dump_dir = _get_path(
             cfg, sec, 'Dump_dir', is_dir=True, dpath=model_dir)
-        batch = _get_val(cfg, sec, 'Batch', dtype='int', dval=batch)
+        batch = _get_val(cfg, sec, 'Batch', dtype=int_t, dval=batch)
         model_name_tfm = model_name + "_tfm"
         qmodel.to_cvm(model_name_tfm, datadir=dump_dir,
                       input_shape=set_batch(input_shape, batch))
