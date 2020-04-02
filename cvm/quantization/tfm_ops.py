@@ -343,11 +343,11 @@ class Pad(Transformer):
         if 'constant_value' in attrs:
             del attrs['constant_value']
 
-        pad_width = eval(attrs['pad_width'])
-        assert type(pad_width).__name__ == 'tuple' and \
-            all([type(val).__name__ == 'int' for val in list(pad_width)]), \
+        pad_width = list(eval(attrs['pad_width']))
+        assert all([type(val).__name__ == 'int' for val in pad_width]), \
             "not a valid value: attrs['pad_width']"
-        attrs['pad_width'] = pad_width
+        attrs['pad_width'] = tuple([tuple((pad_width[i:i+2])) \
+            for i in range(0, len(pad_width), 2)])
 
         return get_nnvm_op('pad')(*childs, name=N.n('pad'), **attrs)
 
