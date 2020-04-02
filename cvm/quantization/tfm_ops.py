@@ -328,7 +328,28 @@ class Convolution(Transformer):
 @register_pass("prepare_for_compile")
 @register_transformer('Pad')
 class Pad(Transformer):
-    pass
+    def compile(self, op, **kwargs):
+        childs = kwargs['childs']
+        attrs = kwargs['attr']
+
+        assert attrs['mode'] == 'constant', \
+            "nnvm pad symbol only support `constant` pad"
+        del attrs['mode']
+
+        pad_value = eval(attrs.get('constant_value', 0))
+        assert type(pad_value).__name__ in ['int', 'float'], \
+            "not a valid value: attrs['constant_value']"
+        attrs['pad_value'] = pad_value
+        if 'constant_value' in attrs:
+            del attrs['constant_value']
+
+        pad_width = eval(attrs['pad_width'])
+        assert type(pad_width).__name__ == 'tuple' and \
+            all([type(val).__name__ == 'int' for val in list(pad_width)]), \
+            "not a valid value: attrs['pad_width']"
+        attrs['pad_width'] = pad_width
+
+        return get_nnvm_op('pad')(*childs, name=N.n('pad'), **attrs)
 
 
 @register_pass("validate")
