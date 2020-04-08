@@ -138,6 +138,7 @@ class MulScalar(Transformer):
 @register_pass("validate")
 @register_pass("calculate_ops")
 @register_pass("fuse_transpose")
+# @register_pass("prepare_for_compile") # only for restore
 @register_transformer("_div_scalar")
 class DivScalar(Transformer):
     def rewrite(self, op, **kwargs):
@@ -327,7 +328,28 @@ class Convolution(Transformer):
 @register_pass("prepare_for_compile")
 @register_transformer('Pad')
 class Pad(Transformer):
-    pass
+    def compile(self, op, **kwargs):
+        childs = kwargs['childs']
+        attrs = kwargs['attr']
+
+        assert attrs['mode'] == 'constant', \
+            "nnvm pad symbol only support `constant` pad"
+        del attrs['mode']
+
+        pad_value = eval(attrs.get('constant_value', 0))
+        assert type(pad_value).__name__ in ['int', 'float'], \
+            "not a valid value: attrs['constant_value']"
+        attrs['pad_value'] = pad_value
+        if 'constant_value' in attrs:
+            del attrs['constant_value']
+
+        pad_width = list(eval(attrs['pad_width']))
+        assert all([type(val).__name__ == 'int' for val in pad_width]), \
+            "not a valid value: attrs['pad_width']"
+        attrs['pad_width'] = tuple([tuple((pad_width[i:i+2])) \
+            for i in range(0, len(pad_width), 2)])
+
+        return get_nnvm_op('pad')(*childs, name=N.n('pad'), **attrs)
 
 
 @register_pass("validate")
@@ -597,6 +619,7 @@ class FullyConnected(Transformer):
 @register_pass("validate")
 @register_pass("rewrite")
 @register_pass("fuse_transpose")
+# @register_pass("prepare_for_compile") # only for restore
 @register_transformer("sigmoid")
 class Sigmoid(Transformer):
     def quantize(self, op, **kwargs):
@@ -607,6 +630,7 @@ class Sigmoid(Transformer):
 @register_pass("validate")
 @register_pass("rewrite")
 @register_pass("fuse_transpose")
+# @register_pass("prepare_for_compile") # only for restore
 @register_transformer("exp")
 class Exp(Transformer):
     def quantize(self, op, **kwargs):
@@ -616,6 +640,7 @@ class Exp(Transformer):
 @register_pass("validate")
 @register_pass("rewrite")
 @register_pass("fuse_transpose")
+# @register_pass("prepare_for_compile") # only for restore
 @register_transformer("softmax")
 class Softmax(Transformer):
     def calculate_ops(self, op, **kwargs):
@@ -1553,6 +1578,23 @@ class Where(Transformer):
 @register_transformer("squeeze")
 class Squeeze(Transformer):
     pass
+
+
+@register_pass("fuse_transpose")
+@register_transformer("L2Normalization")
+class L2Normalization(Transformer):
+    def validate(self, op, **kwargs):
+        name = op.attr('name')
+        ishp = kwargs['infer_shapes'][name][get_entry_id(op)]
+        assert ishp[0] == 1 and ishp[1] in [1, 3]
+
+    def rewrite(self, op, **kwargs):
+        name, op_name = op.attr('name'), op.attr('op_name')
+        attrs = op.list_attr()
+        infer_shapes = kwargs['infer_shapes']
+        ishp = infer_shapes[name][get_entry_id(op)]
+        print(ishp)
+        exit()
 
 def _ft_multi_input(op):
     name, childs = op.attr('name'), sym_iter(op.get_children())
