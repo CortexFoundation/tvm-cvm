@@ -138,6 +138,7 @@ class MulScalar(Transformer):
 @register_pass("validate")
 @register_pass("calculate_ops")
 @register_pass("fuse_transpose")
+# @register_pass("prepare_for_compile") # only for restore
 @register_transformer("_div_scalar")
 class DivScalar(Transformer):
     def rewrite(self, op, **kwargs):
@@ -194,56 +195,6 @@ class Activation(Transformer):
             nkwargs['attr'] = nattrs
             sym = Relu().compile(op, **nkwargs)
         return sym
-
-conv_restore_names = {
-    # "mrt_rewrite_ssd0_mobilenet0_batchnorm0_fwd_0",
-    # "mrt_rewrite_ssd0_mobilenet0_batchnorm1_fwd_0",
-    # "mrt_rewrite_ssd0_mobilenet0_batchnorm2_fwd_0",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm3_fwd_0",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm4_fwd_0",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm5_fwd_0",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm6_fwd_0",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm7_fwd_0",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm8_fwd_0",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm9_fwd_0",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm10_fwd_0",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm11_fwd_0",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm12_fwd_0",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm13_fwd_0",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm14_fwd_0",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm15_fwd_0",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm16_fwd_0",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm17_fwd_0",
-    # "mrt_rewrite_ssd0_mobilenet0_batchnorm18_fwd_0", # don't release
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm19_fwd_0",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm20_fwd_0",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm21_fwd_0",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm22_fwd_0",
-    "ssd0_convpredictor1_conv0_fwd",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm23_fwd_0",
-    "ssd0_convpredictor0_conv0_fwd",
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm24_fwd_0",
-    # "mrt_rewrite_ssd0_mobilenet0_batchnorm25_fwd_0", # don't release
-    "mrt_rewrite_ssd0_mobilenet0_batchnorm26_fwd_0",
-    "ssd0_convpredictor3_conv0_fwd",
-    "mrt_rewrite_ssd0_expand_trans_bn0_0",
-    "ssd0_convpredictor2_conv0_fwd",
-    "mrt_rewrite_ssd0_expand_bn0_0",
-    "ssd0_convpredictor5_conv0_fwd",
-    "mrt_rewrite_ssd0_expand_trans_bn1_0",
-    "ssd0_convpredictor4_conv0_fwd",
-    "mrt_rewrite_ssd0_expand_bn1_0",
-    "ssd0_convpredictor7_conv0_fwd",
-    "mrt_rewrite_ssd0_expand_trans_bn2_0",
-    "ssd0_convpredictor6_conv0_fwd",
-    "mrt_rewrite_ssd0_expand_bn2_0",
-    "ssd0_convpredictor9_conv0_fwd",
-    "mrt_rewrite_ssd0_expand_trans_bn3_0",
-    "ssd0_convpredictor8_conv0_fwd",
-    "mrt_rewrite_ssd0_expand_bn3_0",
-    "ssd0_convpredictor11_conv0_fwd",
-    "ssd0_convpredictor10_conv0_fwd",
-}
 
 
 @register_pass("fuse_transpose")
@@ -377,7 +328,28 @@ class Convolution(Transformer):
 @register_pass("prepare_for_compile")
 @register_transformer('Pad')
 class Pad(Transformer):
-    pass
+    def compile(self, op, **kwargs):
+        childs = kwargs['childs']
+        attrs = kwargs['attr']
+
+        assert attrs['mode'] == 'constant', \
+            "nnvm pad symbol only support `constant` pad"
+        del attrs['mode']
+
+        pad_value = eval(attrs.get('constant_value', 0))
+        assert type(pad_value).__name__ in ['int', 'float'], \
+            "not a valid value: attrs['constant_value']"
+        attrs['pad_value'] = pad_value
+        if 'constant_value' in attrs:
+            del attrs['constant_value']
+
+        pad_width = list(eval(attrs['pad_width']))
+        assert all([type(val).__name__ == 'int' for val in pad_width]), \
+            "not a valid value: attrs['pad_width']"
+        attrs['pad_width'] = tuple([tuple((pad_width[i:i+2])) \
+            for i in range(0, len(pad_width), 2)])
+
+        return get_nnvm_op('pad')(*childs, name=N.n('pad'), **attrs)
 
 
 @register_pass("validate")
@@ -647,6 +619,7 @@ class FullyConnected(Transformer):
 @register_pass("validate")
 @register_pass("rewrite")
 @register_pass("fuse_transpose")
+# @register_pass("prepare_for_compile") # only for restore
 @register_transformer("sigmoid")
 class Sigmoid(Transformer):
     def quantize(self, op, **kwargs):
@@ -657,6 +630,7 @@ class Sigmoid(Transformer):
 @register_pass("validate")
 @register_pass("rewrite")
 @register_pass("fuse_transpose")
+# @register_pass("prepare_for_compile") # only for restore
 @register_transformer("exp")
 class Exp(Transformer):
     def quantize(self, op, **kwargs):
@@ -666,6 +640,7 @@ class Exp(Transformer):
 @register_pass("validate")
 @register_pass("rewrite")
 @register_pass("fuse_transpose")
+# @register_pass("prepare_for_compile") # only for restore
 @register_transformer("softmax")
 class Softmax(Transformer):
     def calculate_ops(self, op, **kwargs):
@@ -707,8 +682,10 @@ class Softmax(Transformer):
         params[W_name] = weight = table.round().reshape(alpha+1, 1)
         wattr = {'precision': str(tprec)}
         W = graph[W_name] = mx.sym.var(W_name, shape=weight.shape, attr=wattr)
+        # lut = mx.sym.Custom(norm, W, in_dim=alpha+1,
+        #                     name=name, op_type='cvm_lut')
         lut = mx.sym.Custom(norm, W, in_dim=alpha+1,
-                            name=name, op_type='cvm_lut')
+                            name=N.n('softmax_lut'), op_type='cvm_lut')
         sum_lut = mx.sym.sum(lut, axis=axis, keepdims=True,
                              name=N.n("softmax_sum"))
 
@@ -724,12 +701,13 @@ class Softmax(Transformer):
         op = mx.sym.broadcast_div(prob, sum_lut, name=N.n("softmax_prob"))
         op = op.astype('int32').astype('float32')
         # op = mx.sym.floor(op) # simulate integer division
-        op = realize(op, 0, oprec)
-        oname = op.attr('name')
+        # op = realize(op, 0, oprec)
+        op = realize(op, 0, oprec, name=name)
+        # oname = op.attr('name')
         precs[name][OUT_KEY] = oprec
-        precs[oname] = precs[name]
-        scales[oname] = scales[name] = oscale
-        print ("DDDDDDD softmax", precs[name])
+        # precs[oname] = {OUT_KEY: oprec}
+        # scales[oname] = scales[name] = oscale
+        scales[name] = oscale
 
         logger = logging.getLogger('log.mrt.realize')
         logger.debug("operator  %-20s name=%-40s oscale=%s, iscale=%s",
@@ -1600,6 +1578,23 @@ class Where(Transformer):
 @register_transformer("squeeze")
 class Squeeze(Transformer):
     pass
+
+
+@register_pass("fuse_transpose")
+@register_transformer("L2Normalization")
+class L2Normalization(Transformer):
+    def validate(self, op, **kwargs):
+        name = op.attr('name')
+        ishp = kwargs['infer_shapes'][name][get_entry_id(op)]
+        assert ishp[0] == 1 and ishp[1] in [1, 3]
+
+    def rewrite(self, op, **kwargs):
+        name, op_name = op.attr('name'), op.attr('op_name')
+        attrs = op.list_attr()
+        infer_shapes = kwargs['infer_shapes']
+        ishp = infer_shapes[name][get_entry_id(op)]
+        print(ishp)
+        exit()
 
 def _ft_multi_input(op):
     name, childs = op.attr('name'), sym_iter(op.get_children())

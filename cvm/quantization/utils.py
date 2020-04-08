@@ -134,7 +134,7 @@ def load_parameters(graph, params, prefix="", ctx=None, dtype=None):
     return ret_params
 
 def multi_validate(base_func, data_iter, *comp_funcs,
-        iter_num=10, logger=logging):
+        iter_num=10, logger=logging, batch_size=16):
     log_str = "Iteration: {:3d} | " + base_func.__name__ + ": {} | "
     for func in comp_funcs:
         log_str += func.__name__ + ": {} | "
@@ -145,7 +145,7 @@ def multi_validate(base_func, data_iter, *comp_funcs,
         data, label = data_iter()
         base_acc = base_func(data, label)
         comp_acc = [func(data, label) for func in comp_funcs]
-        total += data.shape[0]
+        total += batch_size
 
         msg = log_str.format(i, base_acc, *comp_acc, total)
         logger.info(msg)

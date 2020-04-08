@@ -14,7 +14,6 @@ import numpy as np
 import mxnet as mx
 from mxnet import gluon, ndarray as nd
 import nnvm
-import tvm
 
 # import as registry pattern
 import tfm_ops  # pylint: disable=unused-import
@@ -331,12 +330,8 @@ def reduce_graph(model, input_shapes):
     _sym, _prm = tpass.attach_input_shape(
         _sym, _prm, input_shapes)
 
-    print("Before fixxing shape: ",
-          calculate_ops(_sym, _prm, normalize=False))
     _sym, _prm = prepare_for_compile(_sym, _prm)
     _sym, _prm = fuse_constant(_sym, _prm)
-    print("After fixxing shape: ",
-          calculate_ops(_sym, _prm, normalize=False))
     return Model(_sym, _prm)
 
 def compile_to_cvm(model, model_name, datadir="/data/std_out",
@@ -360,6 +355,7 @@ def compile_to_cvm(model, model_name, datadir="/data/std_out",
     model = reduce_graph(model, input_shapes)
     symbol, params = model.symbol, model.params
 
+    import tvm
     nnvm_sym, params = to_nnvm(symbol, params)
     dtype, nnvm_params = "int32", {}
     tvm_ctx = tvm.context(target, 0)
