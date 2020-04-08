@@ -1579,6 +1579,23 @@ class Where(Transformer):
 class Squeeze(Transformer):
     pass
 
+
+@register_pass("fuse_transpose")
+@register_transformer("L2Normalization")
+class L2Normalization(Transformer):
+    def validate(self, op, **kwargs):
+        name = op.attr('name')
+        ishp = kwargs['infer_shapes'][name][get_entry_id(op)]
+        assert ishp[0] == 1 and ishp[1] in [1, 3]
+
+    def rewrite(self, op, **kwargs):
+        name, op_name = op.attr('name'), op.attr('op_name')
+        attrs = op.list_attr()
+        infer_shapes = kwargs['infer_shapes']
+        ishp = infer_shapes[name][get_entry_id(op)]
+        print(ishp)
+        exit()
+
 def _ft_multi_input(op):
     name, childs = op.attr('name'), sym_iter(op.get_children())
     # Assert all the inputs are transpose
